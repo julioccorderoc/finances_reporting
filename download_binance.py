@@ -10,7 +10,7 @@ from binance.error import ClientError
 load_dotenv()
 
 # --- CONFIGURATION ---
-DAYS_TO_LOOKBACK = 8
+DAYS_TO_LOOKBACK = 7
 TIMEZONE = "America/Caracas"
 BINANCE_API_KEY = os.getenv("BINANCE_API_KEY")
 BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET")

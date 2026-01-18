@@ -183,7 +183,7 @@ def run_extraction():
 
     try:
         # 3. Extract
-        raw_df = pd.read_csv(latest_file)
+        raw_df = pd.read_csv(latest_file, sep=";", encoding="utf-8-sig")
 
         # 4. Transform
         clean_df = transformer.transform(raw_df)
