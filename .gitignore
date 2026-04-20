@@ -22,3 +22,8 @@ data/
 finances.db
 finances.db-*
 finances.db-journal
+
+# Claude auto-memory (local only)
+CLAUDE.md
+ERRORS.md
+MEMORY.md

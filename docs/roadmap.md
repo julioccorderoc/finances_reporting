@@ -29,7 +29,7 @@
 
 ### EPIC-001 — Project Foundation & Restructure
 
-**Status:** Pending
+**Status:** Complete
 **Wave:** 0
 **Dependencies:** —
 **ADRs:** ADR-001 (informs target layout)
@@ -56,7 +56,7 @@
 
 ### EPIC-002 — SQLite Schema + Repository Layer
 
-**Status:** Pending
+**Status:** Complete
 **Wave:** 1
 **Dependencies:** EPIC-001
 **ADRs:** ADR-001, ADR-002, ADR-003, ADR-009, ADR-010
@@ -87,7 +87,7 @@
 
 ### EPIC-003 — Documentation Deliverables (PRD + Roadmap + ADRs)
 
-**Status:** Active
+**Status:** Complete
 **Wave:** 1
 **Dependencies:** EPIC-001 (for repo structure)
 **ADRs:** ADR-001 through ADR-008
@@ -111,7 +111,7 @@
 
 ### EPIC-002b — Testing Infrastructure & TDD Foundation
 
-**Status:** Pending
+**Status:** Complete
 **Wave:** 1
 **Dependencies:** EPIC-001 (uses the package layout). Runs in parallel with EPIC-002 and EPIC-003 — disjoint files.
 **ADRs:** ADR-011
