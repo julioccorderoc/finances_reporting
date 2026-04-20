@@ -143,6 +143,10 @@ _EXPORT_FIELDS = (
     "category",
     "user_rate",
 )
+_LEGACY_EXPORT_FIELDS = (
+    "legacy_sub_category",
+    "legacy_category",
+)
 
 
 def _suggested_category_name(
@@ -163,7 +167,24 @@ def _suggested_category_name(
     return "" if cat is None else cat.name
 
 
-def export_needs_review(conn: sqlite3.Connection, csv_path: Path) -> int:
+def _build_legacy_index(
+    legacy_dir: Path,
+) -> dict[tuple[str, str], tuple[str, str]]:
+    """``(source, source_ref) → (sub_category, category)`` from the sheets."""
+    from finances.migration.backfill import iter_legacy_annotations
+
+    index: dict[tuple[str, str], tuple[str, str]] = {}
+    for source, source_ref, sub_cat, cat in iter_legacy_annotations(legacy_dir):
+        index[(source, source_ref)] = (sub_cat, cat)
+    return index
+
+
+def export_needs_review(
+    conn: sqlite3.Connection,
+    csv_path: Path,
+    *,
+    legacy_dir: Path | None = None,
+) -> int:
     """Dump every ``needs_review=1`` row to ``csv_path`` for batch review.
 
     Columns: ``id``, ``occurred_at``, ``source``, ``kind``, ``amount``,
@@ -171,19 +192,33 @@ def export_needs_review(conn: sqlite3.Connection, csv_path: Path) -> int:
     rules engine would pick; empty if no hit), ``category`` (blank —
     user fills in Sheets), ``user_rate`` (blank — user fills optionally).
 
+    When ``legacy_dir`` is provided, two extra reference columns join
+    the ledger row to its original sheet row via ``(source, source_ref)``:
+    ``legacy_sub_category`` and ``legacy_category``. These let the user
+    translate prior categorizations into the v1 taxonomy without having
+    to flip between the DB and the spreadsheet.
+
     Returns the number of rows written.
     """
+    legacy_index: dict[tuple[str, str], tuple[str, str]] = (
+        _build_legacy_index(legacy_dir) if legacy_dir is not None else {}
+    )
+
     rows = conn.execute(
         """
-        SELECT id, occurred_at, source, kind, amount, currency,
+        SELECT id, occurred_at, source, source_ref, kind, amount, currency,
                description, account_id, user_rate
         FROM transactions
         WHERE needs_review = 1
         ORDER BY occurred_at ASC, id ASC
         """
     ).fetchall()
+    fieldnames = list(_EXPORT_FIELDS)
+    if legacy_dir is not None:
+        fieldnames.extend(_LEGACY_EXPORT_FIELDS)
+
     with csv_path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(_EXPORT_FIELDS))
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
         for row in rows:
             occurred_at = row["occurred_at"]
@@ -197,7 +232,7 @@ def export_needs_review(conn: sqlite3.Connection, csv_path: Path) -> int:
                 if row["user_rate"] is not None
                 else ""
             )
-            writer.writerow({
+            out = {
                 "id": row["id"],
                 "occurred_at": iso,
                 "source": row["source"],
@@ -208,7 +243,14 @@ def export_needs_review(conn: sqlite3.Connection, csv_path: Path) -> int:
                 "suggested_category": _suggested_category_name(conn, row),
                 "category": "",
                 "user_rate": existing_rate,
-            })
+            }
+            if legacy_dir is not None:
+                legacy = legacy_index.get(
+                    (row["source"], row["source_ref"]), ("", "")
+                )
+                out["legacy_sub_category"] = legacy[0]
+                out["legacy_category"] = legacy[1]
+            writer.writerow(out)
     return len(rows)
 
 

@@ -269,6 +269,48 @@ def test_import_cleanup_csv_skips_blank_category(
     assert remaining == 1
 
 
+def test_export_includes_legacy_annotations(
+    in_memory_db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """When ``legacy_dir`` is given, each row's legacy Sub-Category and
+    Category columns from the source sheet appear alongside it so the user
+    can translate their prior classification into the v1 taxonomy."""
+    import csv as _csv
+    import shutil
+
+    from finances.migration.backfill import run_backfill
+    from finances.migration.interactive_cleanup import export_needs_review
+
+    # Copy synthetic 3-row slices into a tmp data dir the backfill can read.
+    legacy_dir = tmp_path / "data"
+    legacy_dir.mkdir()
+    fixtures = Path(__file__).parent / "fixtures" / "backfill"
+    for name in (
+        "Finanzas - Binance.csv",
+        "Finanzas - Provincial.csv",
+        "Finanzas - BCV.csv",
+    ):
+        shutil.copy(fixtures / name, legacy_dir / name)
+
+    run_backfill(in_memory_db, legacy_dir)
+
+    dest = tmp_path / "review.csv"
+    export_needs_review(in_memory_db, dest, legacy_dir=legacy_dir)
+
+    with dest.open("r", encoding="utf-8") as handle:
+        rows = list(_csv.DictReader(handle))
+    assert rows, "export produced zero rows"
+
+    assert {"legacy_sub_category", "legacy_category"} <= set(rows[0].keys())
+
+    # The fixture's USDC deposit on 01-Nov-2025 is tagged Salary/Inflow.
+    deposit = next(
+        r for r in rows if r["source"] == "binance" and r["currency"] == "USDC"
+    )
+    assert deposit["legacy_sub_category"] == "Salary"
+    assert deposit["legacy_category"] == "Inflow"
+
+
 def test_import_cleanup_csv_unknown_category_raises(
     db_with_review_rows: sqlite3.Connection, tmp_path: "Path",  # type: ignore[name-defined]
 ) -> None:

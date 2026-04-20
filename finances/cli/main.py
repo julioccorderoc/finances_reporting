@@ -339,6 +339,18 @@ def cleanup_export(
         "--to",
         help="CSV destination. Review + fill `category` column in Sheets, then cleanup-apply.",
     ),
+    legacy_from: Path = typer.Option(
+        None,
+        "--legacy-from",
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        readable=True,
+        help=(
+            "Optional legacy CSV dir (e.g. data/). Adds `legacy_sub_category` "
+            "and `legacy_category` reference columns pulled from the original sheets."
+        ),
+    ),
 ) -> None:
     """Dump every needs_review=1 row to a CSV for batch review (EPIC-012)."""
     from finances.migration.interactive_cleanup import export_needs_review
@@ -346,7 +358,7 @@ def cleanup_export(
     conn = get_connection(DB_PATH)
     apply_migrations(conn)
     try:
-        count = export_needs_review(conn, to)
+        count = export_needs_review(conn, to, legacy_dir=legacy_from)
     finally:
         conn.close()
     typer.echo(f"cleanup-export: wrote {count} rows to {to}")

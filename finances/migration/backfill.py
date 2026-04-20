@@ -712,6 +712,103 @@ def run_backfill(
     return report
 
 
+def iter_legacy_annotations(
+    data_dir: Path,
+) -> Iterator[tuple[str, str, str, str]]:
+    """Yield ``(source, source_ref, sub_category, category)`` tuples.
+
+    Re-reads the legacy CSVs and applies the *same* ``source_ref``
+    hashing the backfill uses, so callers can join on ``(source,
+    source_ref)`` against the ledger. Used by the cleanup export to
+    surface the user's prior Sub-Category / Category labels next to
+    each needs_review row.
+    """
+    binance_path = data_dir / BINANCE_CSV_NAME
+    if binance_path.exists():
+        yield from _iter_binance_annotations(binance_path)
+
+    provincial_path = data_dir / PROVINCIAL_CSV_NAME
+    if provincial_path.exists():
+        yield from _iter_provincial_annotations(provincial_path)
+
+
+def _iter_binance_annotations(
+    csv_path: Path,
+) -> Iterator[tuple[str, str, str, str]]:
+    for row in _iter_legacy_csv_rows(csv_path):
+        fecha = (row.get("Fecha") or "").strip()
+        cuenta = (row.get("Cuenta") or "").strip()
+        operation = (row.get("Operación") or row.get("Operacion") or "").strip()
+        coin = (row.get("Coin") or "").strip()
+        amount_raw = (row.get("Amount") or "").strip()
+        remark = (row.get("Remark") or "").strip()
+        sub_cat = (row.get("Sub-Category") or "").strip()
+        category = (row.get("Category") or "").strip()
+        if not fecha or not operation or not amount_raw:
+            continue
+        try:
+            occurred = parse_legacy_date(fecha)
+            amount = parse_usd_amount(amount_raw)
+        except ValueError:
+            continue
+
+        op = operation.lower()
+        occ_iso = occurred.isoformat()
+        if op == "deposit":
+            ref = f"deposit:{_hash_ref('legacy-deposit', occ_iso, coin, abs(amount), remark)}"
+            yield (BINANCE_SOURCE, ref, sub_cat, category)
+        elif op == "send":
+            ref = f"withdraw:{_hash_ref('legacy-send', occ_iso, coin, abs(amount), remark)}"
+            yield (BINANCE_SOURCE, ref, sub_cat, category)
+        elif op == "p2p-sell":
+            match = _P2P_ORDER_RE.search(remark)
+            order_number = (
+                match.group(1)
+                if match is not None
+                else _hash_ref("legacy-p2p", occ_iso, coin, abs(amount))
+            )
+            yield (BINANCE_SOURCE, f"p2p:{order_number}", sub_cat, category)
+        elif op == "internal transfer":
+            tran_id = _hash_ref(
+                "legacy-transfer", occ_iso, cuenta, coin, amount, remark
+            )
+            # Both legs share the same Sub-Category / Category in the sheet.
+            yield (BINANCE_SOURCE, f"transfer:{tran_id}:from", sub_cat, category)
+            yield (BINANCE_SOURCE, f"transfer:{tran_id}:to", sub_cat, category)
+        elif op in ("binance convert", "convert"):
+            tran_id = _hash_ref(
+                "legacy-convert", occ_iso, coin, amount, remark
+            )
+            suffix = "from" if amount < 0 else "to"
+            yield (BINANCE_SOURCE, f"convert:{tran_id}:{suffix}", sub_cat, category)
+
+
+def _iter_provincial_annotations(
+    csv_path: Path,
+) -> Iterator[tuple[str, str, str, str]]:
+    for row in _iter_legacy_csv_rows(csv_path):
+        fecha = (row.get("Fecha") or "").strip()
+        descripcion = (row.get("Referencia") or "").strip()
+        desc_note = (row.get("Descripción") or "").strip()
+        monto_raw = (row.get("Monto") or "").strip()
+        sub_cat = (row.get("Sub-Category") or "").strip()
+        category = (row.get("Category") or "").strip()
+        if not fecha or not monto_raw:
+            continue
+        try:
+            occurred = parse_legacy_date(fecha)
+            monto = parse_bs_amount(monto_raw)
+        except ValueError:
+            continue
+        if monto is None:
+            continue
+        description = descripcion or desc_note or "(no description)"
+        source_ref = provincial_source_ref(
+            occurred_at=occurred, amount=monto, description=description
+        )
+        yield (PROVINCIAL_SOURCE, source_ref, sub_cat, category)
+
+
 __all__ = [
     "BackfillReport",
     "BCV_CSV_NAME",
@@ -722,6 +819,7 @@ __all__ = [
     "backfill_provincial",
     "build_rate_index_from_provincial",
     "ensure_accounts",
+    "iter_legacy_annotations",
     "parse_bs_amount",
     "parse_legacy_date",
     "parse_usd_amount",
