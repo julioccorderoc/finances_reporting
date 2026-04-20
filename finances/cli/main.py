@@ -19,6 +19,9 @@ app.add_typer(cash_app, name="cash")
 ingest_app = typer.Typer(help="Ingest data from external sources.")
 app.add_typer(ingest_app, name="ingest")
 
+report_app = typer.Typer(help="Reports over the ledger (EPIC-013).")
+app.add_typer(report_app, name="report")
+
 
 @app.callback()
 def _root() -> None:
@@ -519,6 +522,142 @@ def categorize(
         err=True,
     )
     raise typer.Exit(code=2)
+
+
+def _resolve_report_format(json_flag: bool, csv_flag: bool) -> str:
+    if json_flag and csv_flag:
+        raise typer.BadParameter("pass --json or --csv, not both")
+    if json_flag:
+        return "json"
+    if csv_flag:
+        return "csv"
+    return "table"
+
+
+@report_app.command("balances")
+def report_balances(
+    json_flag: bool = typer.Option(False, "--json", help="Emit JSON instead of table."),
+    csv_flag: bool = typer.Option(False, "--csv", help="Emit CSV instead of table."),
+) -> None:
+    """Per-account balances in native currency (EPIC-013)."""
+    from finances.reports import balances as balances_report
+
+    fmt = _resolve_report_format(json_flag, csv_flag)
+    conn = get_connection(DB_PATH)
+    apply_migrations(conn)
+    try:
+        rows = balances_report.get_balances(conn)
+    finally:
+        conn.close()
+
+    if fmt == "json":
+        typer.echo(balances_report.render_json(rows))
+    elif fmt == "csv":
+        typer.echo(balances_report.render_csv(rows), nl=False)
+    else:
+        typer.echo(balances_report.render_table(rows), nl=False)
+
+
+@report_app.command("consolidated")
+def report_consolidated(
+    json_flag: bool = typer.Option(False, "--json", help="Emit JSON instead of table."),
+    csv_flag: bool = typer.Option(False, "--csv", help="Emit CSV instead of table."),
+    strict: bool = typer.Option(
+        False,
+        "--strict",
+        help="Exit non-zero if any headline row uses a BCV-sourced rate (ADR-005 amendment).",
+    ),
+) -> None:
+    """Consolidated USD view of every non-transfer transaction (EPIC-013)."""
+    from finances.reports import consolidated_usd as report_module
+
+    fmt = _resolve_report_format(json_flag, csv_flag)
+    conn = get_connection(DB_PATH)
+    apply_migrations(conn)
+    try:
+        report = report_module.build_report(conn, strict=strict)
+    finally:
+        conn.close()
+
+    if fmt == "json":
+        typer.echo(report_module.render_json(report))
+    elif fmt == "csv":
+        typer.echo(report_module.render_csv(report), nl=False)
+    else:
+        typer.echo(report_module.render_table(report))
+
+    if strict and report.strict_violations:
+        typer.echo(
+            f"--strict: {len(report.strict_violations)} row(s) use a BCV-sourced rate "
+            f"(ids={report.strict_violations[:10]}"
+            f"{'…' if len(report.strict_violations) > 10 else ''}).",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+
+@report_app.command("monthly")
+def report_monthly(
+    month: str | None = typer.Option(
+        None,
+        "--month",
+        help="Single YYYY-MM bucket. Mutually exclusive with --since/--until.",
+    ),
+    since: str | None = typer.Option(
+        None, "--since", help="Inclusive lower bound YYYY-MM."
+    ),
+    until: str | None = typer.Option(
+        None, "--until", help="Inclusive upper bound YYYY-MM."
+    ),
+    json_flag: bool = typer.Option(False, "--json", help="Emit JSON instead of table."),
+    csv_flag: bool = typer.Option(False, "--csv", help="Emit CSV instead of table."),
+) -> None:
+    """Monthly aggregate per (account, category, kind) (EPIC-013)."""
+    from finances.reports import monthly as monthly_report
+
+    fmt = _resolve_report_format(json_flag, csv_flag)
+    conn = get_connection(DB_PATH)
+    apply_migrations(conn)
+    try:
+        try:
+            report = monthly_report.build_report(
+                conn, month=month, since=since, until=until
+            )
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+    finally:
+        conn.close()
+
+    if fmt == "json":
+        typer.echo(monthly_report.render_json(report))
+    elif fmt == "csv":
+        typer.echo(monthly_report.render_csv(report), nl=False)
+    else:
+        typer.echo(monthly_report.render_table(report))
+
+
+@report_app.command("needs-review")
+def report_needs_review(
+    json_flag: bool = typer.Option(False, "--json", help="Emit JSON instead of table."),
+    csv_flag: bool = typer.Option(False, "--csv", help="Emit CSV instead of table."),
+) -> None:
+    """Every transaction with needs_review=1 (EPIC-013)."""
+    from finances.reports import needs_review as needs_review_report
+
+    fmt = _resolve_report_format(json_flag, csv_flag)
+    conn = get_connection(DB_PATH)
+    apply_migrations(conn)
+    try:
+        rows = needs_review_report.get_needs_review(conn)
+    finally:
+        conn.close()
+
+    if fmt == "json":
+        typer.echo(needs_review_report.render_json(rows))
+    elif fmt == "csv":
+        typer.echo(needs_review_report.render_csv(rows), nl=False)
+    else:
+        typer.echo(needs_review_report.render_table(rows), nl=False)
 
 
 if __name__ == "__main__":
