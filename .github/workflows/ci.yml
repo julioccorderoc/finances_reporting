@@ -39,10 +39,18 @@ jobs:
       - name: Run tests with coverage
         run: |
           uv run pytest \
+            -m "not integration" \
             --cov=finances \
             --cov-report=xml \
             --cov-report=term \
             --cov-fail-under=85
+
+      # EPIC-021: end-to-end integration suite. Runs without the coverage
+      # gate since it exercises the ingest adapters through MagicMock/httpx
+      # seams; coverage is already measured by the unit job above.
+      - name: Run integration tests (EPIC-021)
+        run: |
+          uv run pytest -m integration
 
       - name: Upload coverage artifact
         if: always()
