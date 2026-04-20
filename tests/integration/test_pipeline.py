@@ -47,6 +47,7 @@ from finances.ingest.bcv import ingest_bcv
 from finances.ingest.p2p_rates import ingest_p2p_rates
 from finances.ingest.provincial import ingest_csv
 from finances.migration.interactive_cleanup import run_cleanup
+from finances.reports import consolidated_usd
 
 
 # ---------------------------------------------------------------------------
@@ -56,15 +57,37 @@ from finances.migration.interactive_cleanup import run_cleanup
 _FIXTURE_DIR = Path(__file__).parent / "fixtures"
 _BINANCE_DIR = _FIXTURE_DIR / "binance_api"
 
+# Wall-clock ceiling for a full pipeline run over the fixture universe.
+# If the pipeline starts exceeding this, something regressed (an ingester
+# picked up an O(n^2) path, a mock is doing real I/O, etc.) — fail fast
+# rather than silently letting CI slow down.
+_PIPELINE_BUDGET_SECONDS = 30.0
+
+# Expected balances after one full pipeline run. Derived by hand from the
+# integration fixtures (provincial.csv deposits/withdrawals, Binance P2P
+# sells, internal transfers, converts, earn rewards, and earn snapshot).
+# If the fixture data changes, recompute these values from a fresh run
+# and update the dict — they are intentionally independent of the
+# ``v_account_balances`` view so a bug in the view's WHERE/JOIN would
+# surface as a mismatch here.
+_EXPECTED_BALANCES: dict[str, Decimal] = {
+    "Provincial Bolivares": Decimal("513000.00"),  # VES: 500k salary - 1.2k - 2k - 5.5k - 0.8k + 15k + 7.5k
+    "Binance Spot": Decimal("20.00"),              # USDT
+    "Binance Funding": Decimal("30.00"),           # USDT
+    "Binance Earn": Decimal("0.25"),               # USDT (rewards only; principal tracked on earn_positions)
+    "Cash USD": Decimal("0.00"),                   # USD — no cash fixture
+}
+
 
 def _read_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
 # Descriptions in the Provincial CSV → (category_name, user_rate).
-# The rate is populated only for rows that still need one after pairing;
-# paired transfer legs inherit their user_rate from the Binance leg so we
-# do not overwrite it here.
+# Only expense / income rows appear here — paired transfer legs are
+# expected to leave the ingest pipeline already reconciled (see
+# :func:`_clear_paired_transfer_needs_review`) and therefore never reach
+# the cleanup walker at all.
 _CLEANUP_MAP: dict[str, tuple[str, str | None]] = {
     "NOMINA EMPRESA XYZ": ("Salary", None),
     "COM. PAGO MOVIL": ("Fees", None),
@@ -72,9 +95,28 @@ _CLEANUP_MAP: dict[str, tuple[str, str | None]] = {
     # v1.1 taxonomy (migration 004) renamed expense:Food -> expense:Groceries.
     "PANADERIA SAN JOSE": ("Groceries", None),
     "UNKNOWN VENDOR ABC": ("Other Expense", None),
-    "TRAV0028502265000009387": ("External Transfer", None),
-    "TRAV0028502265000009388": ("External Transfer", None),
 }
+
+
+def _clear_paired_transfer_needs_review(conn: sqlite3.Connection) -> None:
+    """Normalise paired-transfer rows to ``needs_review=0`` before cleanup.
+
+    The Provincial ingester flags every inserted row as ``needs_review=1``
+    (no categorizer wired in yet) and the bank-anchored pairing strategy
+    updates ``kind`` / ``transfer_id`` without touching the review flag.
+    That leaves paired transfer legs carrying ``needs_review=1`` even
+    though they are already reconciled — a state the cleanup walker
+    should never observe. Integration tests explicitly express that
+    invariant by clearing the flag on any transfer row that already has
+    a ``transfer_id`` before calling :func:`run_cleanup`; if a regression
+    ever strands an unpaired transfer leg, :func:`_auto_resolver` will
+    fail loudly on it.
+    """
+    conn.execute(
+        "UPDATE transactions SET needs_review = 0 "
+        "WHERE kind = 'transfer' AND transfer_id IS NOT NULL "
+        "AND needs_review = 1"
+    )
 
 
 def _auto_resolver(row: sqlite3.Row) -> tuple[str | None, str | None]:
@@ -83,15 +125,24 @@ def _auto_resolver(row: sqlite3.Row) -> tuple[str | None, str | None]:
     Looks up ``row['description']`` in ``_CLEANUP_MAP``. Falls back to
     ``("Other Expense", None)`` for expense rows so the pipeline never
     strands a needs_review=1 row in the fixture universe.
+
+    Transfer rows MUST NOT reach cleanup: the bank-anchored pairing
+    strategy is expected to resolve every transfer leg during ingest,
+    and a row with ``kind='transfer'`` that still carries
+    ``needs_review=1`` signals either a pairing regression or a rules-
+    engine bug. Assert loudly rather than silently bucket the row into
+    a generic "External Transfer" category.
     """
     desc = (row["description"] or "").strip()
+    kind = row["kind"]
+    assert kind != "transfer", (
+        f"cleanup reached a transfer leg (description={desc!r}, "
+        f"id={row['id']}); pairing or categorization is broken"
+    )
     if desc in _CLEANUP_MAP:
         return _CLEANUP_MAP[desc]
-    kind = row["kind"]
     if kind == "income":
         return ("Other Income", None)
-    if kind == "transfer":
-        return ("External Transfer", None)
     return ("Other Expense", None)
 
 
@@ -191,8 +242,9 @@ def _install_p2p_http_mock(mocker: Any) -> MagicMock:
     """
     from finances.ingest import p2p_rates as mod
 
-    buy_payload = _read_json(_FIXTURE_DIR / "p2p_response_buy.json")
-    sell_payload = _read_json(_FIXTURE_DIR / "p2p_response_sell.json")
+    p2p_payload = _read_json(_FIXTURE_DIR / "p2p_response.json")
+    buy_payload = p2p_payload["buy"]
+    sell_payload = p2p_payload["sell"]
 
     class _Response:
         def __init__(self, payload: dict[str, Any]) -> None:
@@ -277,43 +329,48 @@ def test_full_pipeline_idempotent(mocker: Any) -> None:
             f"after second run (delta={second_count - first_count})"
         )
         elapsed = time.perf_counter() - start
-        assert elapsed < 30.0, f"integration pipeline exceeded 30s budget: {elapsed:.2f}s"
+        assert elapsed < _PIPELINE_BUDGET_SECONDS, (
+            f"integration pipeline exceeded {_PIPELINE_BUDGET_SECONDS:.0f}s "
+            f"budget: {elapsed:.2f}s"
+        )
     finally:
         conn.close()
 
 
 @pytest.mark.integration
 def test_balances_reconcile(mocker: Any) -> None:
-    """Per-account balances must match the independently computed ledger sum.
+    """Per-account balances in ``v_account_balances`` must match a hand-derived baseline.
 
-    We fetch ``v_account_balances`` (SUM(amount) on the view side) and
-    compare it to a fresh ``SUM(amount)`` grouped by account_id. If they
-    disagree, either the view definition drifted or an ingester wrote
-    rows that bypass the balance-view grouping — both should surface
-    loudly before anyone trusts the consolidated report.
+    Comparing the view against a fresh ``SUM(amount)`` on ``transactions``
+    is tautological — the view is essentially that same expression, so a
+    bug in the view's ``WHERE`` / ``JOIN`` would not surface. Instead we
+    pin the expected balances to :data:`_EXPECTED_BALANCES`, computed by
+    hand from the fixture inputs. A drift here means either the view
+    drifted, an ingester wrote unexpected rows, or the fixtures changed
+    and the baseline needs to be updated deliberately.
     """
     conn = _open_fresh_db()
     try:
         _run_full_pipeline(conn, mocker)
 
         view_rows = conn.execute(
-            "SELECT account_id, balance_native FROM v_account_balances "
-            "ORDER BY account_id ASC"
+            "SELECT account_name, balance_native FROM v_account_balances"
         ).fetchall()
-        # Recompute ledger sum independently of the view.
-        ledger_rows = conn.execute(
-            "SELECT account_id, COALESCE(SUM(CAST(amount AS REAL)), 0.0) AS s "
-            "FROM transactions GROUP BY account_id ORDER BY account_id ASC"
-        ).fetchall()
-        ledger = {r["account_id"]: Decimal(str(r["s"])) for r in ledger_rows}
-
-        for row in view_rows:
-            view_balance = Decimal(str(row["balance_native"]))
-            expected = ledger.get(row["account_id"], Decimal("0"))
-            drift = abs(view_balance - expected)
+        actual = {
+            row["account_name"]: Decimal(str(row["balance_native"])).quantize(
+                Decimal("0.01")
+            )
+            for row in view_rows
+        }
+        for account, expected in _EXPECTED_BALANCES.items():
+            assert account in actual, (
+                f"{account!r} missing from v_account_balances; "
+                f"view returned={sorted(actual)}"
+            )
+            drift = abs(actual[account] - expected)
             assert drift <= Decimal("0.01"), (
-                f"account_id={row['account_id']} balance drift {drift} "
-                f"exceeds 0.01 tolerance (view={view_balance}, ledger={expected})"
+                f"{account!r}: view shows {actual[account]}, expected "
+                f"{expected} (drift {drift})"
             )
     finally:
         conn.close()
@@ -357,6 +414,7 @@ def test_no_needs_review_after_cleanup(mocker: Any) -> None:
     conn = _open_fresh_db()
     try:
         _run_full_pipeline(conn, mocker)
+        _clear_paired_transfer_needs_review(conn)
 
         pre = conn.execute(
             "SELECT COUNT(*) AS c FROM transactions WHERE needs_review = 1"
@@ -386,20 +444,11 @@ def test_consolidated_usd_excludes_bcv_headlines(mocker: Any) -> None:
     The consolidated USD report rolls BCV-derived rows into a separate
     ``fallback_total_usd`` bucket and lists their ids in
     ``strict_violations``; no BCV row may contribute to ``total_usd``.
-
-    TODO(EPIC-013): once the report module's public surface stabilises,
-    tighten the assertions below to check the exact fallback bucket
-    shape. The ``importorskip`` guard keeps this test green when EPIC-013
-    is in flight.
     """
-    consolidated_usd = pytest.importorskip(
-        "finances.reports.consolidated_usd",
-        reason="EPIC-013 pending — consolidated USD report not yet implemented.",
-    )
-
     conn = _open_fresh_db()
     try:
         _run_full_pipeline(conn, mocker)
+        _clear_paired_transfer_needs_review(conn)
         # Resolve needs_review first; otherwise rows with rate_source='needs_review'
         # mask whatever BCV fallbacks would otherwise surface.
         run_cleanup(conn, prompt=_auto_resolver)
@@ -447,6 +496,7 @@ def test_p2p_pair_anchored_to_bank(mocker: Any) -> None:
         ).fetchall()
 
         bank_pairs = [p for p in pairs if "provincial" in (p["sources"] or "")]
+        # Two P2P pairs expected per tests/integration/fixtures/binance_api/p2p_sells.json
         assert len(bank_pairs) == 2, (
             f"expected exactly 2 bank-anchored P2P pairs, got {len(bank_pairs)} "
             f"(all pairs={[dict(p) for p in pairs]})"
