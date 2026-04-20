@@ -422,15 +422,13 @@ def test_run_backfill_auto_categorizes_matching_rows(
     in_memory_db: sqlite3.Connection, backfill_data_dir: Path
 ) -> None:
     """Per ADR-006 / rule-006, the categorization engine runs as part of
-    the backfill. Rows whose description hits a seeded rule must come out
-    with ``category_id`` set and ``needs_review=0``; unmatched rows stay
-    ``needs_review=1`` with ``category_id IS NULL``."""
+    the backfill. Rows whose description hits a seeded rule — or whose
+    legacy Sub-Category maps via the closed table — must come out with
+    ``category_id`` set and ``needs_review=0``."""
     from finances.migration.backfill import run_backfill
 
-    report = run_backfill(in_memory_db, backfill_data_dir)
+    run_backfill(in_memory_db, backfill_data_dir)
 
-    # "PANADERIA LUISANA 2004" matches the seeded ``PANADERIA|PANADERÍA``
-    # rule. After backfill it must be categorized and cleared for review.
     matched = in_memory_db.execute(
         "SELECT category_id, needs_review FROM transactions "
         "WHERE description LIKE '%PANADERIA%'"
@@ -439,7 +437,6 @@ def test_run_backfill_auto_categorizes_matching_rows(
     assert matched["category_id"] is not None
     assert matched["needs_review"] == 0
 
-    # "COM. PAGO MOVIL" matches the bank-commission rule.
     commission = in_memory_db.execute(
         "SELECT category_id, needs_review FROM transactions "
         "WHERE description LIKE 'COM. PAGO MOVIL%'"
@@ -448,23 +445,32 @@ def test_run_backfill_auto_categorizes_matching_rows(
     assert commission["category_id"] is not None
     assert commission["needs_review"] == 0
 
-    # Report surfaces the count so the orchestrator can log it.
-    assert report.rows_categorized >= 2
-
 
 def test_run_backfill_leaves_unmatched_rows_needing_review(
-    in_memory_db: sqlite3.Connection, backfill_data_dir: Path
+    in_memory_db: sqlite3.Connection, tmp_path: Path
 ) -> None:
-    """Binance P2P-Sell descriptions don't match any seeded rule (those are
-    resolved via reconciliation, not categorization rules) — they must
-    stay ``needs_review=1`` with ``category_id`` NULL after backfill."""
+    """Rows with no legacy Sub-Category mapping AND no rules-engine match
+    stay ``needs_review=1`` with ``category_id`` NULL — Phase F residual."""
     from finances.migration.backfill import run_backfill
 
-    run_backfill(in_memory_db, backfill_data_dir)
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    # Sub-Category 'Mystery' is not in the closed mapping and matches no
+    # seeded rule; the row must stay needs_review after backfill.
+    _write_provincial_csv(data_dir / "Finanzas - Provincial.csv", [
+        {"Fecha": "15-Feb-2026", "Sub-Category": "Mystery",
+         "Referencia": "UNFAMILIAR MERCHANT XYZ",
+         "Descripción": "Gasto raro", "Monto": "-Bs 100.00",
+         "Tipo": "Expense", "Tasa USDT": "Bs 400.00"},
+    ])
+    _write_binance_csv(data_dir / "Finanzas - Binance.csv", [])
+    _write_csv(data_dir / "Finanzas - BCV.csv", ["Dia", "USD", "EURO"], [])
+
+    run_backfill(in_memory_db, data_dir)
 
     row = in_memory_db.execute(
         "SELECT category_id, needs_review FROM transactions "
-        "WHERE description LIKE 'Binance deposit%'"
+        "WHERE description LIKE 'UNFAMILIAR%'"
     ).fetchone()
     assert row is not None
     assert row["category_id"] is None

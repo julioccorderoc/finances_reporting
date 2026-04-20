@@ -99,9 +99,52 @@ class BackfillReport:
     provincial_rows_inserted: int = 0
     bcv_rows_seen: int = 0
     bcv_rates_inserted: int = 0
+    rows_legacy_mapped: int = 0
     rows_categorized: int = 0
     errors: list[str] = field(default_factory=list)
     reconciliation: ReconciliationReport | None = None
+
+
+# Closed legacy Sub-Category → v1 category mapping (2026-04-20 session).
+# Per rule-006, category additions require a forward migration; every
+# destination name here must exist in the categories table after
+# migrations 002-005 apply.
+LEGACY_SUB_CATEGORY_TO_V1: dict[str, str] = {
+    # Expense — direct legacy=v1 matches
+    "Groceries": "Groceries",
+    "Transport": "Transport",
+    "Health": "Health",
+    "Family": "Family",
+    "Dating": "Dating",
+    "Gifts": "Gifts",
+    "Utilities": "Utilities",
+    "Subscriptions": "Subscriptions",
+    "Purchases": "Purchases",
+    "Lending": "Lending",
+    "Education": "Education",
+    "Clothing": "Clothing",
+    # Expense — renamed / re-routed
+    "Food": "Groceries",            # 2026-04-20 rename
+    "Outings": "Leisure",
+    "Personal care": "Personal Care",
+    "Commissions": "Fees",
+    "Ant": "Other Expense",         # heterogeneous gastos hormiga
+    "No ID": "Other Expense",
+    "Debt": "Other Expense",
+    # Income
+    "Salary": "Salary",
+    "Gigs": "Gigs",
+    "Interest": "Interest",
+    "Interests": "Interest",
+    "Loan Payment": "Loan Repayment",
+    # Transfer (legacy rows where kind got ingested as income/expense —
+    # these get re-routed to transfer via reconciliation, but if
+    # reconciliation missed them we still stamp a transfer category so
+    # needs_review clears. ``Transit`` = external flow, ``Exchange`` =
+    # own-account USDT↔bolivars).
+    "Transit": "External Transfer",
+    "Exchange": "Internal Transfer",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -801,8 +844,46 @@ def run_backfill(
     )
     report.reconciliation = run_reconciliation_pass(strategy)
 
+    report.rows_legacy_mapped = apply_legacy_category_annotations(conn, data_dir)
     report.rows_categorized = apply_category_rules(conn)
     return report
+
+
+def apply_legacy_category_annotations(
+    conn: sqlite3.Connection, data_dir: Path
+) -> int:
+    """Stamp ``category_id`` + clear ``needs_review`` on every row whose
+    legacy CSV carried a ``Sub-Category`` resolvable via
+    ``LEGACY_SUB_CATEGORY_TO_V1``. This is Julio's own hand-categorization
+    being ported to the v1 taxonomy — ground truth, preferred over the
+    regex rules engine. Called before ``apply_category_rules`` so any
+    rows without a legacy annotation (e.g. live Binance sync rows) still
+    get a shot at auto-classification.
+
+    Unrecognized Sub-Category values are skipped (per user rule: ask
+    before mapping anything outside the closed list). Those rows stay
+    ``needs_review=1`` and flow into Phase F residual cleanup.
+    """
+    cat_ids: dict[str, int] = {
+        row["name"]: int(row["id"])
+        for row in conn.execute("SELECT id, name FROM categories")
+    }
+    mapped = 0
+    for source, source_ref, sub_cat, _category in iter_legacy_annotations(data_dir):
+        v1_name = LEGACY_SUB_CATEGORY_TO_V1.get(sub_cat)
+        if v1_name is None:
+            continue
+        v1_id = cat_ids.get(v1_name)
+        if v1_id is None:
+            continue  # migration gap — category not in DB yet; skip safely
+        cursor = conn.execute(
+            "UPDATE transactions SET category_id = ?, needs_review = 0 "
+            "WHERE source = ? AND source_ref = ? AND category_id IS NULL",
+            (v1_id, source, source_ref),
+        )
+        mapped += cursor.rowcount
+    conn.commit()
+    return mapped
 
 
 def apply_category_rules(conn: sqlite3.Connection) -> int:
