@@ -18,7 +18,7 @@
 - Coverage: `pytest-cov` (CI uses `--cov-fail-under=<threshold>`)
 - Property-based: `hypothesis` (mandatory for rate resolver, categorization engine)
 - Pydantic factories: `polyfactory`
-- HTTP mocking: `responses` (BCV, P2P fetcher)
+- HTTP mocking: `responses` when code uses `requests`; `pytest-mock` (`mocker.patch.object(<module>.httpx, "Client")`) when code uses `httpx`. **BCV and P2P scrapers use `httpx` per ADR-007 / EPIC-010 and therefore cannot be mocked with `responses` — use `pytest-mock`. See [MEMORY.md](../../../MEMORY.md) 2026-04-19 entry for the canonical mock shape.**
 - SDK mocking: `pytest-mock` (Binance)
 
 ## Exemptions

@@ -68,6 +68,20 @@ def ingest_binance(
         raise typer.Exit(code=1)
 
 
+@ingest_app.command("bcv")
+def ingest_bcv() -> None:
+    """Fetch BCV reference rates (USD/VES, EUR/VES) and upsert into rates (EPIC-009)."""
+    from finances.ingest.bcv import ingest_bcv as run_bcv
+
+    conn = get_connection(DB_PATH)
+    apply_migrations(conn)
+    try:
+        inserted = run_bcv(conn)
+    finally:
+        conn.close()
+    typer.echo(f"bcv: inserted {inserted} rate rows")
+
+
 def _parse_cash_amount(raw: str) -> Decimal:
     try:
         return Decimal(raw)
