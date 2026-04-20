@@ -18,10 +18,10 @@
 | Wave | Epics | Parallel? | Gate |
 | --- | --- | --- | --- |
 | 0 | EPIC-001 | No | Package layout merged, `pyproject.toml` updated, legacy scripts archived |
-| 1 | EPIC-002, EPIC-003 | Yes (different concerns) | Schema + migrations green; PRD/ADRs merged |
-| 2 | EPIC-004 … EPIC-011 | Yes (8-way) | All ingest + domain modules green; unit tests pass |
-| 3 | EPIC-012, EPIC-013, EPIC-014 | Partial (013 ‖ 014 after 012) | Backfill clean; balances reconcile; Sheets mirror live |
-| 4 (future) | EPIC-015, EPIC-016 | Yes | Out of scope for v1 cut |
+| 1 | EPIC-002, EPIC-003, EPIC-002b | Yes (3-way; disjoint files) | Schema + migrations green; PRD/ADRs merged; testing infra + CI live; coverage gate enforced |
+| 2 | EPIC-004 … EPIC-011 | Yes (8-way) | All ingest + domain modules green; unit tests pass; per-epic TDD checklist met (rule-011) |
+| 3 | EPIC-012, EPIC-013, EPIC-014, EPIC-021 | Partial (012 first; then 013 ‖ 014 ‖ 021) | Backfill clean; balances reconcile; Sheets mirror live; integration suite green |
+| 4 (future) | EPIC-015, EPIC-016, EPIC-017, EPIC-018, EPIC-019, EPIC-020 | Partial (017 → 018 → 019; 020 after 017; 016 after 017+018) | Out of scope for v1 cut |
 
 ## Epic Ledger
 
@@ -105,7 +105,44 @@
 
 - All eight ADRs exist, each with a non-empty `Rule Extraction` block referencing a file under `docs/architecture/rules/`.
 - All referenced rule files exist and contain a single, machine-readable constraint statement.
-- `docs/PRD.md` and `docs/roadmap.md` contain no TODO markers.
+- `docs/PRD.md` and `docs/roadmap.md` contain no unresolved placeholder markers (see the repository contribution notes for the banned-token list). The two deferred-epic `ADRs:` lines under EPIC-015 and EPIC-016 are the only permitted exception and are intentional per the wave-4 design.
+
+---
+
+### EPIC-002b — Testing Infrastructure & TDD Foundation
+
+**Status:** Pending
+**Wave:** 1
+**Dependencies:** EPIC-001 (uses the package layout). Runs in parallel with EPIC-002 and EPIC-003 — disjoint files.
+**ADRs:** ADR-011
+
+**Business Objective:** Land shared testing infrastructure and TDD discipline before any Wave 2 agent writes a line of production code, so the parallel epics inherit a uniform, CI-enforced testing floor instead of inventing their own conventions.
+
+**Technical Boundary:**
+
+- Add dev dependencies via `uv add --dev`: `pytest-cov`, `hypothesis`, `polyfactory`, `responses`, `pytest-mock`.
+- Author `tests/conftest.py` with shared fixtures:
+  - `in_memory_db()` — fresh in-memory SQLite with the EPIC-002 migrations applied.
+  - `seeded_db()` — `in_memory_db` + the v1 categories/accounts seed (so Wave 2 epics don't each rebuild the seed).
+  - Pydantic factories via `polyfactory` for `Account`, `Category`, `Transaction`, `Rate`, `EarnPosition`.
+  - `mocked_binance_sdk()` and `mocked_http()` (responses) helpers with conventions documented in module docstrings.
+- Add `pyproject.toml` `[tool.coverage]` section:
+  - `[tool.coverage.report] fail_under = 85` baseline; per-package overrides via `[tool.coverage.run] source = ["finances"]` and a custom `--cov-config` invocation that bumps `finances/ingest/**` to 70 and excludes `finances/cli/**` + `finances/reports/**` from the gate in v1.
+- Add `pytest.ini` (or `[tool.pytest.ini_options]` in `pyproject.toml`) registering markers `snapshot`, `smoke`.
+- Add CI workflow `.github/workflows/ci.yml` (or `pre-commit` hook if no GitHub setup yet) that runs `pytest --cov` on every PR and blocks merge on failure or coverage regression.
+- Write `docs/architecture/rules/rule-011-tdd-discipline.md` (already created; verify it lives in the repo).
+- One-time retroactive pass: measure EPIC-002's coverage post-merge; if below 85% on `finances/db/**` or `finances/domain/models.py`, add tests to bring it to threshold (does not block EPIC-002 completion, but blocks EPIC-002b).
+
+**Verification Criteria (Definition of Done):**
+
+- `pytest --cov` runs locally and in CI; coverage report renders.
+- The five dev dependencies are installed and pinned in `uv.lock`.
+- `tests/conftest.py` exposes `in_memory_db`, `seeded_db`, factories for all Pydantic models.
+- A sample property-based test (e.g. `tests/test_smoke_property.py`) exercises hypothesis to prove the integration works.
+- CI workflow exists and is green on a no-op PR.
+- Coverage of merged EPIC-002 code is ≥85% for `finances/db/**` and `finances/domain/models.py`; gaps closed by tests added in this epic.
+
+**TDD discipline (per ADR-011 / rule-011):** EPIC-002b is itself a bootstrap epic — exempt from the commit-ordering TDD-evidence rule, but the infrastructure it ships must enable the rule for every downstream epic.
 
 ---
 
@@ -132,6 +169,13 @@
 - `pytest tests/test_categorization.py` is green.
 - A dry-run script `finances categorize --dry-run --source provincial` reports the % of rows the rules would auto-classify.
 
+**TDD discipline (per ADR-011 / rule-011):**
+
+- Every public function in `finances/domain/categorization.py` has ≥1 happy-path test AND ≥1 failure-mode test.
+- Coverage of `finances/domain/categorization.py` ≥ 85%.
+- Test commits precede implementation commits in the branch history.
+- Property-based tests (hypothesis) exercise rule priority ordering and source/account scoping (mandatory per rule-011).
+
 ---
 
 ### EPIC-005 — Rate Resolution Engine
@@ -154,9 +198,16 @@
 - `pytest tests/test_rates.py` is green.
 - Engine never raises on missing rates; always returns either a value or `None` + sets `needs_review`.
 
+**TDD discipline (per ADR-011 / rule-011):**
+
+- Every public function in `finances/domain/rates.py` has ≥1 happy-path test AND ≥1 failure-mode test.
+- Coverage of `finances/domain/rates.py` ≥ 85%.
+- Test commits precede implementation commits in the branch history.
+- Property-based tests (hypothesis) exercise the 4-branch priority chain and carry-forward logic (mandatory per rule-011).
+
 ---
 
-### EPIC-006 — Transfer Pairing Engine (Double-Entry)
+### EPIC-006 — Reconciliation Engine (Double-Entry Transfers as First Strategy)
 
 **Status:** Pending
 **Wave:** 2
@@ -184,6 +235,13 @@
 - `pytest tests/test_transfers.py` is green.
 - `v_unreconciled_transfers` returns 0 rows after a successful `create_transfer` call.
 - A deliberately broken pair (one leg missing) shows up in `v_unreconciled_transfers`.
+
+**TDD discipline (per ADR-011 / rule-011):**
+
+- Every public function in `finances/domain/reconciliation.py` and `finances/domain/transfers.py` has ≥1 happy-path test AND ≥1 failure-mode test.
+- Coverage of both modules ≥ 85%.
+- Test commits precede implementation commits in the branch history.
+- The `ReconciliationStrategy` Protocol is exercised by ≥1 test that uses a fake strategy implementation, proving the seam is genuinely pluggable for future strategies (EPIC-017).
 
 ---
 
@@ -217,6 +275,13 @@
 - Internal Funding↔Spot transfers appear as paired rows with shared `transfer_id`.
 - `--since` and `--lookback-days` flags respected (default 35 days).
 
+**TDD discipline (per ADR-011 / rule-011):**
+
+- Every public function in `finances/ingest/binance.py` and `finances/domain/earn.py` has ≥1 happy-path test AND ≥1 failure-mode test.
+- Coverage of `finances/ingest/binance.py` ≥ 70%; `finances/domain/earn.py` ≥ 85%.
+- Test commits precede implementation commits in the branch history.
+- Binance SDK is mocked via `pytest-mock` per the convention documented in `tests/conftest.py` (rule-011); no live API calls in the suite.
+
 ---
 
 ### EPIC-008 — Provincial Bank Ingest Refactor (P2P Pairing Anchor)
@@ -245,6 +310,13 @@
 - After running provincial + binance ingesters on a paired fixture, `SELECT COUNT(*) FROM transactions WHERE kind='transfer' AND transfer_id IS NULL` = 0.
 - `RawProvincialRow.model_validate` rejects a fixture with a malformed `Monto` value with `pydantic.ValidationError`.
 
+**TDD discipline (per ADR-011 / rule-011):**
+
+- Every public function in `finances/ingest/provincial.py` has ≥1 happy-path test AND ≥1 failure-mode test.
+- Coverage of `finances/ingest/provincial.py` ≥ 70%.
+- Test commits precede implementation commits in the branch history.
+- The bank-anchored P2P pairing call site is covered by a dedicated test using a synthetic Provincial deposit + Binance P2P fixture pair.
+
 ---
 
 ### EPIC-009 — BCV Automated Scraper
@@ -270,6 +342,14 @@
 - A snapshot-driven unit test passes.
 - Layout-change simulation (mangled fixture) → non-zero exit, no DB corruption.
 
+**TDD discipline (per ADR-011 / rule-011):**
+
+- Every public function in `finances/ingest/bcv.py` has ≥1 happy-path test AND ≥1 failure-mode test.
+- Coverage of `finances/ingest/bcv.py` ≥ 70%.
+- HTTP calls mocked via `responses`; no live BCV fetches in the suite.
+- The snapshot-based parsing tests are tagged `@pytest.mark.snapshot` and are exempt from the TDD-evidence (commit-ordering) rule per rule-011.
+- All other tests follow standard test-first commit ordering.
+
 ---
 
 ### EPIC-010 — Binance P2P Rate Fetcher
@@ -293,6 +373,13 @@
 - `finances ingest p2p-rates` writes one row per `(date, base='USDT', quote='VES', source='binance_p2p_median')` per day.
 - Re-running the same day is idempotent (`UNIQUE` constraint covers it).
 
+**TDD discipline (per ADR-011 / rule-011):**
+
+- Every public function in `finances/ingest/p2p_rates.py` has ≥1 happy-path test AND ≥1 failure-mode test.
+- Coverage of `finances/ingest/p2p_rates.py` ≥ 70%.
+- HTTP calls mocked via `responses`; no live Binance P2P fetches in the suite.
+- Test commits precede implementation commits in the branch history.
+
 ---
 
 ### EPIC-011 — Cash CLI Tool
@@ -314,6 +401,13 @@
 
 - `finances cash add --amount 12 --description "lunch"` creates a row and exits 0.
 - The row appears in `v_account_balances` for `Cash USD` and `v_transactions_usd`.
+
+**TDD discipline (per ADR-011 / rule-011):**
+
+- Every public function in `finances/ingest/cash_cli.py` has ≥1 happy-path test AND ≥1 failure-mode test.
+- Coverage of `finances/ingest/cash_cli.py` ≥ 70%.
+- Test commits precede implementation commits in the branch history.
+- The Typer CLI is tested via Typer's `CliRunner` so non-interactive invocations are fully covered.
 
 ---
 
@@ -342,6 +436,13 @@
 - Total transactions ≈ 172 (Binance) + 843 (Provincial) + paired transfer rows.
 - Spot-check: 5 random Bs transactions show the expected USD value via `v_transactions_usd`.
 
+**TDD discipline (per ADR-011 / rule-011):**
+
+- The backfill orchestrator is thin (per rule-004); coverage focus is on the interactive cleanup pass and the implicit-transfer detection helpers.
+- Every public function in `finances/migration/backfill.py` and `finances/migration/interactive_cleanup.py` has ≥1 happy-path test AND ≥1 failure-mode test.
+- Test commits precede implementation commits in the branch history.
+- Coverage gate not enforced on `finances/migration/**` in v1 (one-time scripts), but the test suite must include at least one end-to-end test on a small synthetic CSV slice; the full real-data backfill is acceptance-tested by the user, not pytest.
+
 ---
 
 ### EPIC-013 — Reporting Views + Account Balances
@@ -365,6 +466,13 @@
 - `finances report balances` returns Binance Spot, Funding, Earn, Provincial, Cash USD balances; each within 0.01 (native) of the source UI on a freshly-backfilled DB.
 - `finances report monthly` returns rows summing to the same total as `v_transactions_usd` for the month.
 - `finances report consolidated --strict` exits non-zero if any headline row would use a BCV-sourced rate; `finances report consolidated` (default) annotates them.
+
+**TDD discipline (per ADR-011 / rule-011):**
+
+- Every public function in `finances/reports/{balances,consolidated_usd,monthly}.py` has ≥1 happy-path test AND ≥1 failure-mode test.
+- Coverage gate not enforced on `finances/reports/**` in v1; reporting correctness is exhaustively covered by the integration suite (EPIC-021).
+- Test commits precede implementation commits in the branch history.
+- Headline rule (per ADR-005 amendment) is covered by a dedicated test asserting `--strict` exits non-zero when a BCV-sourced row would appear in the consolidated headline.
 
 ---
 
@@ -390,6 +498,52 @@
 - Row counts in each tab match the corresponding SQL view.
 - The sentinel row is present and non-editable (frozen).
 
+**TDD discipline (per ADR-011 / rule-011):**
+
+- `gspread` calls are mocked via `pytest-mock`; no live Sheets writes in the suite.
+- Every public function in `finances/reports/sheets_sync.py` has ≥1 happy-path test AND ≥1 failure-mode test.
+- Coverage gate not enforced on `finances/reports/**` in v1; live correctness is acceptance-tested by the user against a sandbox spreadsheet.
+- A dedicated test asserts the sentinel row is written first and that the destructive-per-tab semantics (clear + write, no merge) is preserved.
+- Test commits precede implementation commits in the branch history.
+
+---
+
+### EPIC-021 — Integration Test Suite (End-to-End Pipeline)
+
+**Status:** Pending
+**Wave:** 3
+**Dependencies:** EPIC-002, EPIC-002b, EPIC-004 through EPIC-012, EPIC-013
+**ADRs:** ADR-011
+
+**Business Objective:** Provide a re-runnable end-to-end test that exercises the full ingest → reconcile → report pipeline against synthetic but realistic fixtures. Without this, EPIC-012 (one-time backfill) is the only thing exercising integration, and the next regression has no cheap reproduction path.
+
+**Technical Boundary:**
+
+- Author `tests/integration/` package separate from unit tests:
+  - `tests/integration/fixtures/binance_api/` — JSON snapshots of every Binance endpoint covering: P2P sells with paired Provincial deposits, internal transfers, deposits, withdrawals, converts, Earn rewards, Earn positions.
+  - `tests/integration/fixtures/provincial.csv` — synthetic bank statement with deposits, expenses, fees, ATM withdrawals, transfers between own accounts; deliberately includes the shapes that should pair with the Binance fixtures.
+  - `tests/integration/fixtures/bcv_snapshot.html` — pinned snapshot of the BCV page.
+  - `tests/integration/fixtures/p2p_response.json` — mocked P2P median fixture.
+- `tests/integration/test_pipeline.py`:
+  - `test_full_pipeline_idempotent`: runs `finances ingest all` twice on a fresh DB, asserts second run inserts 0 rows (per ADR-010).
+  - `test_balances_reconcile`: after full pipeline, asserts every account balance matches an expected ledger sum within 0.01.
+  - `test_no_unreconciled_transfers`: asserts `v_unreconciled_transfers` returns 0 rows.
+  - `test_no_needs_review_after_cleanup`: simulates the interactive cleanup pass (with deterministic auto-pick) and asserts `needs_review = 1` count drops to 0.
+  - `test_consolidated_usd_excludes_bcv_headlines` (per ADR-005 amendment): asserts no headline row uses BCV.
+  - `test_p2p_pair_anchored_to_bank` (per ADR-002 amendment): asserts paired transfers identify the Provincial leg as anchor.
+  - `test_earn_position_sum_matches_subscriptions_minus_redemptions` (per ADR-003).
+- Mark all integration tests with `@pytest.mark.integration` and run them via `pytest -m integration` separately from unit tests; CI runs both.
+- Add `make integration` (or `uv run pytest -m integration`) helper.
+
+**Verification Criteria (Definition of Done):**
+
+- `pytest -m integration` is green.
+- Total integration suite runtime < 30s on a developer machine.
+- A deliberate regression (e.g. setting `transfer_id=NULL` on a paired row, or breaking the rate resolver) causes at least one integration test to fail with a clear message.
+- CI runs integration tests on every PR.
+
+**TDD discipline (per ADR-011 / rule-011):** Integration tests are written before the pipeline integrations they cover are wired together. `@pytest.mark.smoke` is permitted for genuinely wiring-only tests.
+
 ---
 
 ### EPIC-015 — Telegram Bot for Cash Entry (Future)
@@ -411,12 +565,101 @@
 
 **Status:** Deferred
 **Wave:** 4
-**Dependencies:** EPIC-002, EPIC-004
+**Dependencies:** EPIC-002, EPIC-004, EPIC-006, EPIC-009 (ADR-009 Pydantic models), EPIC-017, EPIC-018
+**ADRs:** TBD (will reference ADR-009, future ADR-011, future ADR-012)
+
+**Business Objective:** Authenticated POST endpoint that the planned receipt-parsing mobile app calls to push structured receipts into the ledger.
+
+**v1 prerequisites already in place (do not regress):**
+
+- Pydantic v2 domain models (ADR-009) — request bodies validate via the same models.
+- Repos accept Pydantic instances only; no raw `dict` (rule-009).
+- Deterministic `source_ref` strategy supports an `Idempotency-Key` header (ADR-010).
+- Reconciliation-passes pattern (`run_reconciliation_pass(strategy)`) is the seam for `ReceiptToTransactionMatch`.
+- Categorization priority chain (ADR-006 amendment) admits a "receipt-supplied category" tier without modifying the rules engine.
+
+**Technical Boundary:** Out of scope for v1. Placeholder. When activated: FastAPI (or similar) + auth + a single `POST /receipts` endpoint backed by `repos.receipts.upsert_by_source_ref`.
+
+**Verification Criteria (Definition of Done):** Defined when activated.
+
+---
+
+### EPIC-017 — Receipts Schema + Reconciliation Strategy (Future)
+
+**Status:** Deferred
+**Wave:** 4
+**Dependencies:** EPIC-002, EPIC-006
+**ADRs:** TBD (will be ADR-011)
+
+**Business Objective:** Make the receipt the source of truth for category + description, and reconcile incoming bank/Binance rows against pending receipts so the user's manual categorization happens once, at point-of-sale.
+
+**Anticipated technical boundary (sketch only):**
+
+- Forward migration: add `receipts` table (`id, captured_at, amount, currency, merchant, category_id, description, receipt_url, tax_relevant, tax_year, source, status, matched_transaction_id, source_ref, created_at`) and `transactions.receipt_id` nullable FK.
+- Pydantic `Receipt` model in `finances/domain/models.py` (additive — does not change existing models).
+- `finances/db/repos/receipts.py` — same shape as `transactions` repo (`upsert_by_source_ref`).
+- `finances/domain/reconciliation_strategies/receipt_match.py` — implements `ReconciliationStrategy`. Matches by `(amount within tolerance, ±5 days, optional merchant fuzzy match)`.
+- `finances/domain/categorization.py` extension: insert a "receipt-supplied" tier at the top of the priority chain (per ADR-006 amendment).
+- Provincial + Binance ingesters call `run_reconciliation_pass(ReceiptToTransactionMatch())` after their existing reconciliation passes.
+
+**Open architectural questions (decide before activation):** matching tolerance (% on `amount_usd` vs. native), behavior for receipts that never match (keep pending vs. auto-promote to synthetic Cash USD expense), tax fields scope.
+
+**Verification Criteria (Definition of Done):** Defined when activated.
+
+---
+
+### EPIC-018 — Cloud Receipt Storage (Future)
+
+**Status:** Deferred
+**Wave:** 4
+**Dependencies:** EPIC-001 (config + auth conventions)
+**ADRs:** TBD (will be ADR-012)
+
+**Business Objective:** Persistent, audit-grade storage for receipt images, retained across multiple tax years.
+
+**Anticipated boundary (sketch only):**
+
+- Choose storage target — recommended **Google Drive** (already in the user's Workspace stack; integrates with the existing Sheets mirror auth; the `gws-drive-upload` skill is already available locally). Alternatives if circumstances change: S3, Supabase Storage.
+- `finances/storage/receipts.py` provides `upload(local_path) -> ReceiptUrl` and `verify(url) -> bool`.
+- Folder layout in Drive: `Finances/Receipts/<YYYY>/<YYYY-MM>/<receipt_id>_<merchant>.<ext>`.
+- Auth lives in `.env` (extends existing Workspace credentials, does not require a new account).
+
+**Verification Criteria (Definition of Done):** Defined when activated.
+
+---
+
+### EPIC-019 — Receipt CLI Stop-Gap (Future)
+
+**Status:** Deferred
+**Wave:** 4
+**Dependencies:** EPIC-017, EPIC-018
 **ADRs:** TBD
 
-**Business Objective:** Authenticated POST endpoint that the planned receipt-parsing mobile app calls to insert structured transactions.
+**Business Objective:** Before the mobile app exists, allow receipt entry from the workstation. Bridges the gap and exercises the same code path the future mobile API will call.
 
-**Technical Boundary:** Out of scope for v1. Placeholder.
+**Anticipated boundary (sketch only):**
+
+- `finances receipt add <file>` — Typer subcommand with `--amount`, `--category`, `--description`, `--merchant`, `--captured-at`, `--tax-relevant` flags.
+- Calls `storage.receipts.upload()` (EPIC-018), then `repos.receipts.upsert_by_source_ref()` (EPIC-017).
+- After insert, runs `run_reconciliation_pass(ReceiptToTransactionMatch())` so the new receipt immediately attempts to find a bank match.
+
+**Verification Criteria (Definition of Done):** Defined when activated.
+
+---
+
+### EPIC-020 — Tax Export (Future)
+
+**Status:** Deferred
+**Wave:** 4
+**Dependencies:** EPIC-017
+**ADRs:** TBD
+
+**Business Objective:** Produce a deductible-receipts export per tax year, with cloud URLs, suitable for filing or sharing with an accountant.
+
+**Anticipated boundary (sketch only):**
+
+- `finances report tax --year YYYY [--format csv|pdf]` — reads `receipts WHERE tax_relevant=1 AND tax_year=YYYY`, joins to `transactions` for matched amounts, emits CSV by default.
+- View `v_receipts_tax` materializes the join.
 
 **Verification Criteria (Definition of Done):** Defined when activated.
 
@@ -438,9 +681,9 @@ This roadmap is written so that another session — invoked once per epic — ca
 | Wave | Epics | Can run concurrently? | Why |
 | --- | --- | --- | --- |
 | 0 | EPIC-001 | n/a (single epic) | Establishes package structure |
-| 1 | EPIC-002, EPIC-003 | **Yes** | EPIC-002 writes `finances/db/**`, `finances/domain/models.py`, `tests/test_db_schema.py`. EPIC-003 writes `docs/**`. Disjoint. |
+| 1 | EPIC-002, EPIC-003, EPIC-002b | **Yes (3-way)** | EPIC-002 writes `finances/db/**` + `finances/domain/models.py`. EPIC-003 writes `docs/**`. EPIC-002b writes `tests/conftest.py`, `pyproject.toml` `[tool.coverage]`/`[tool.pytest.ini_options]` sections, `.github/workflows/ci.yml`. Disjoint. (EPIC-002b's retroactive coverage pass on EPIC-002 must wait until EPIC-002 lands.) |
 | 2 | EPIC-004, EPIC-005, EPIC-006, EPIC-007, EPIC-008, EPIC-009, EPIC-010, EPIC-011 | **Mostly yes — see caveats** | Each touches its own module. See the matrix below. |
-| 3 | EPIC-012 (then EPIC-013 ‖ EPIC-014) | EPIC-013 ‖ EPIC-014 only | EPIC-012 must finish before reporting/sync run on real data. After 012, 013 (`finances/reports/{balances,consolidated_usd,monthly}.py`) and 014 (`finances/reports/sheets_sync.py`) are disjoint. |
+| 3 | EPIC-012, EPIC-013, EPIC-014, EPIC-021 | **Partial: EPIC-012 sequential; then EPIC-013 ‖ EPIC-014 ‖ EPIC-021** | EPIC-012 must finish before reporting/sync/integration run on real data. After 012, 013 (`finances/reports/{balances,consolidated_usd,monthly}.py`), 014 (`finances/reports/sheets_sync.py`), and 021 (`tests/integration/**`) are file-disjoint. |
 
 ### Wave 2 file-ownership matrix (use to detect collisions)
 
@@ -464,8 +707,17 @@ This roadmap is written so that another session — invoked once per epic — ca
 ### Suggested parallel-launch script (for a multi-agent runner)
 
 ```text
-# After EPIC-001 + EPIC-002 + EPIC-003 are Complete:
-parallel: EPIC-006   # owns transfers.create_transfer signature
+# Wave 0
+sequential: EPIC-001
+
+# Wave 1 — 3-way parallel (EPIC-002 + EPIC-003 + EPIC-002b)
+parallel:
+  EPIC-002    # schema + repos + Pydantic models
+  EPIC-003    # docs (PRD/roadmap/ADRs)
+  EPIC-002b   # testing infra + CI + TDD foundation
+
+# Wave 2 — after Wave 1 Complete
+parallel: EPIC-006   # owns reconciliation.run_reconciliation_pass + transfers.create_transfer signatures
 then parallel:
   EPIC-004
   EPIC-005
@@ -475,13 +727,14 @@ then parallel:
   EPIC-010
   EPIC-011
 
-# After all of Wave 2 is Complete:
-sequential: EPIC-012
+# Wave 3 — after all of Wave 2 Complete
+sequential: EPIC-012   # one-time backfill
 then parallel:
   EPIC-013
   EPIC-014
+  EPIC-021   # integration test suite
 ```
 
 ### Epic invocation template (for the user when commanding the next session)
 
-> "Read `docs/roadmap.md` and execute **EPIC-XXX** end-to-end. Stop at the Verification Criteria; report what to run to confirm."
+> "Read `docs/roadmap.md` and execute **EPIC-NNN** end-to-end. Stop at the Verification Criteria; report what to run to confirm."
