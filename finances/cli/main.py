@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, time
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 from typing import Any
 
 import typer
@@ -182,6 +183,84 @@ def cash_add(
     if recent:
         hints = ", ".join(c.name for c in recent)
         typer.echo(f"Recent categories on this account: {hints}")
+
+
+@app.command("categorize")
+def categorize(
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Report what would match without writing category_id changes.",
+    ),
+    source: str | None = typer.Option(
+        None,
+        "--source",
+        help="Restrict to transactions with this source (e.g. 'provincial', 'binance').",
+    ),
+    db_path: Path = typer.Option(
+        None,
+        "--db-path",
+        help="Path to the SQLite database. Defaults to finances.config.DB_PATH.",
+    ),
+) -> None:
+    """Run the categorization engine over stored transactions (EPIC-004).
+
+    In ``--dry-run`` mode, prints how many rows the seeded rules would classify
+    without mutating any data — used to measure rule coverage before running
+    the backfill.
+    """
+    from finances.domain.categorization import CategorizationRequest, suggest
+
+    target_db = Path(db_path) if db_path is not None else Path(DB_PATH)
+    conn = get_connection(target_db)
+    apply_migrations(conn)
+    try:
+        params: tuple[Any, ...]
+        if source is not None:
+            query = (
+                "SELECT id, description, source, account_id "
+                "FROM transactions WHERE source = ?"
+            )
+            params = (source,)
+        else:
+            query = "SELECT id, description, source, account_id FROM transactions"
+            params = ()
+        rows = conn.execute(query, params).fetchall()
+
+        total = len(rows)
+        matched = 0
+        for row in rows:
+            if suggest(
+                conn,
+                CategorizationRequest(
+                    description=row["description"],
+                    source=row["source"],
+                    account_id=row["account_id"],
+                ),
+            ) is not None:
+                matched += 1
+    finally:
+        conn.close()
+
+    scope = source or "all sources"
+    if total == 0:
+        typer.echo(f"categorize dry-run [{scope}]: no transactions to categorize.")
+        return
+
+    pct = matched / total * 100.0
+    if dry_run:
+        typer.echo(
+            f"categorize dry-run [{scope}]: {matched}/{total} = {pct:.1f}% "
+            "would auto-classify."
+        )
+        return
+
+    typer.echo(
+        "Refusing to write: re-categorization is owned by EPIC-012 backfill.\n"
+        "Re-run with --dry-run to see preview counts.",
+        err=True,
+    )
+    raise typer.Exit(code=2)
 
 
 if __name__ == "__main__":
