@@ -247,7 +247,7 @@
 
 ### EPIC-007 — Binance Ingest Refactor + Earn Positions
 
-**Status:** Pending
+**Status:** Complete
 **Wave:** 2
 **Dependencies:** EPIC-002 (also benefits from EPIC-004, EPIC-006 once available; coordinate via interfaces, not file overlap)
 **ADRs:** ADR-003, ADR-009, ADR-010
