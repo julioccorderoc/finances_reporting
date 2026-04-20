@@ -23,6 +23,12 @@ finances.db
 finances.db-*
 finances.db-journal
 
+# Test artifacts
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+
 # Claude auto-memory (local only)
 CLAUDE.md
 ERRORS.md
