@@ -10,7 +10,7 @@ from binance.error import ClientError
 load_dotenv()
 
 # --- CONFIGURATION ---
-DAYS_TO_LOOKBACK = 7
+DAYS_TO_LOOKBACK = 21
 TIMEZONE = "America/Caracas"
 BINANCE_API_KEY = os.getenv("BINANCE_API_KEY")
 BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET")
@@ -153,6 +153,7 @@ def main():
         endTimestamp=end_ts,
     )
     for r in p2p_buy:
+        remark = f"Order: {r.get('orderNumber')}, Price: {r.get('unitPrice')} {r.get('fiat')}"
         ledger.append(
             format_record(
                 r.get("createTime"),
@@ -160,7 +161,7 @@ def main():
                 "P2P-Buy",
                 r.get("asset"),
                 r.get("amount"),
-                f"Order: {r.get('orderNumber')}",
+                remark,
             )
         )
 
@@ -173,6 +174,7 @@ def main():
         endTimestamp=end_ts,
     )
     for r in p2p_sell:
+        remark = f"Order: {r.get('orderNumber')}, Price: {r.get('unitPrice')} {r.get('fiat')}"
         ledger.append(
             format_record(
                 r.get("createTime"),
@@ -180,7 +182,7 @@ def main():
                 "P2P-Sell",
                 r.get("asset"),
                 -float(r.get("amount")),
-                f"Order: {r.get('orderNumber')}",
+                remark,
             )
         )
 
