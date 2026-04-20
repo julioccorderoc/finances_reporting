@@ -259,6 +259,84 @@ def build_rate_index_from_provincial(csv_path: Path) -> dict[date, Decimal]:
     return index
 
 
+def derive_p2p_rates_greedy(
+    binance_path: Path,
+    provincial_path: Path,
+    *,
+    rate_lookup: dict[date, Decimal],
+) -> dict[str, Decimal]:
+    """Per-order ``{source_ref → rate}`` for Binance P2P-Sells whose date
+    is not covered by ``build_rate_index_from_provincial``.
+
+    The April 2026 orphan case: the user's Google Sheet lost its ``Tasa
+    USDT`` / ``Monto (USDT)`` values (``#DIV/0!``) but the Provincial
+    ``Sub-Category=Exchange`` rows still record the Bs that landed. For
+    each orphan date, pair same-day Binance USDT amounts with same-day
+    Provincial Bs amounts sorted magnitude-descending and compute
+    ``rate = Bs / |USDT|``. Dates with no Provincial Exchange row stay
+    orphan (October 2025 case) — pairing must not invent data.
+    """
+    binance_by_date: dict[date, list[tuple[Decimal, str]]] = {}
+    if binance_path.exists():
+        for row in _iter_legacy_csv_rows(binance_path):
+            op = (row.get("Operación") or row.get("Operacion") or "").strip().lower()
+            if op != "p2p-sell":
+                continue
+            fecha = (row.get("Fecha") or "").strip()
+            amount_raw = (row.get("Amount") or "").strip()
+            remark = (row.get("Remark") or "").strip()
+            coin = (row.get("Coin") or "").strip()
+            if not fecha or not amount_raw:
+                continue
+            try:
+                occurred = parse_legacy_date(fecha)
+                amount = parse_usd_amount(amount_raw)
+            except ValueError:
+                continue
+            if rate_lookup.get(occurred.date()):
+                continue
+            order_match = _P2P_ORDER_RE.search(remark)
+            order_number = (
+                order_match.group(1)
+                if order_match is not None
+                else _hash_ref("legacy-p2p", occurred.isoformat(), coin, amount)
+            )
+            binance_by_date.setdefault(occurred.date(), []).append(
+                (abs(amount), f"p2p:{order_number}")
+            )
+
+    prov_by_date: dict[date, list[Decimal]] = {}
+    if provincial_path.exists():
+        for row in _iter_legacy_csv_rows(provincial_path):
+            if (row.get("Sub-Category") or "").strip() != "Exchange":
+                continue
+            fecha = (row.get("Fecha") or "").strip()
+            monto_raw = (row.get("Monto") or "").strip()
+            if not fecha or not monto_raw:
+                continue
+            try:
+                occurred = parse_legacy_date(fecha)
+                bs = parse_bs_amount(monto_raw)
+            except ValueError:
+                continue
+            if bs is None or bs <= 0:
+                continue
+            prov_by_date.setdefault(occurred.date(), []).append(bs)
+
+    derived: dict[str, Decimal] = {}
+    for d, bin_entries in binance_by_date.items():
+        provincial_list = prov_by_date.get(d)
+        if not provincial_list:
+            continue
+        bin_sorted = sorted(bin_entries, key=lambda t: -t[0])
+        prov_sorted = sorted(provincial_list, reverse=True)
+        for (usdt, source_ref), bs in zip(bin_sorted, prov_sorted):
+            if usdt <= 0:
+                continue
+            derived[source_ref] = bs / usdt
+    return derived
+
+
 # ---------------------------------------------------------------------------
 # BCV backfill
 # ---------------------------------------------------------------------------
@@ -456,6 +534,7 @@ def _handle_binance_p2p_sell(
     remark: str,
     account_id: int,
     rate_lookup: dict[date, Decimal],
+    derived_rates: dict[str, Decimal] | None,
     report: BackfillReport,
 ) -> None:
     order_match = _P2P_ORDER_RE.search(remark)
@@ -465,6 +544,10 @@ def _handle_binance_p2p_sell(
         else _hash_ref("legacy-p2p", occurred.isoformat(), coin, amount)
     )
     unit_price = rate_lookup.get(occurred.date())
+    if (unit_price is None or unit_price <= 0) and derived_rates is not None:
+        fallback = derived_rates.get(f"p2p:{order_number}")
+        if fallback is not None and fallback > 0:
+            unit_price = fallback
     if unit_price is None or unit_price <= 0:
         # Without a rate the row still has to exist (balances depend on
         # it); leave user_rate unset and let the cleanup pass collect it.
@@ -580,6 +663,7 @@ def backfill_binance(
     *,
     account_ids: dict[str, int],
     rate_lookup: dict[date, Decimal],
+    derived_rates: dict[str, Decimal] | None = None,
     report: BackfillReport,
 ) -> None:
     for row in _iter_legacy_csv_rows(csv_path):
@@ -619,7 +703,8 @@ def backfill_binance(
                 _handle_binance_p2p_sell(
                     conn,
                     occurred=occurred, coin=coin, amount=amount, remark=remark,
-                    account_id=account_id, rate_lookup=rate_lookup, report=report,
+                    account_id=account_id, rate_lookup=rate_lookup,
+                    derived_rates=derived_rates, report=report,
                 )
             elif op == "internal transfer":
                 _handle_binance_internal_transfer(
@@ -688,6 +773,9 @@ def run_backfill(
     report = BackfillReport()
     account_ids = ensure_accounts(conn)
     rate_lookup = build_rate_index_from_provincial(provincial_path)
+    derived_rates = derive_p2p_rates_greedy(
+        binance_path, provincial_path, rate_lookup=rate_lookup
+    )
 
     if bcv_path.exists():
         backfill_bcv(conn, bcv_path, report=report)
@@ -699,6 +787,7 @@ def run_backfill(
         binance_path,
         account_ids=account_ids,
         rate_lookup=rate_lookup,
+        derived_rates=derived_rates,
         report=report,
     )
 
