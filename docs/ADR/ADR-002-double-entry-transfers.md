@@ -52,3 +52,17 @@ Use **double-entry**. A transfer is two rows in `transactions`, each on its own 
 **Amendment:** When pairing a P2P sell to its bolívar receipt, the **Provincial deposit row is the anchor**. The pairing algorithm runs as part of `finances/ingest/provincial.py` (or as a post-pass in `finances/migration/backfill.py`) and walks unpaired Provincial deposits matching the shape of a P2P inflow (large amount, source description matching known counterparties or "transfer recibido"), then searches Binance P2P sell rows within a configurable date window (default ±2 days) for a match by amount × rate. On match, `domain.transfers.create_transfer` writes the pair with the Binance leg pointing at the bank-side leg as the canonical receipt.
 
 **Rule update:** `docs/architecture/rules/rule-002-transfers-must-be-paired.md` is updated to require that, for P2P-derived transfer pairs, the Provincial leg is created/identified first and the Binance leg is paired to it — not vice versa.
+
+---
+
+## Amendment 2026-04-19 — Reconciliation Passes as a General Pattern
+
+**Context:** The bank-anchored P2P pairing routine is the first instance of a broader pattern: a *reconciliation pass* that walks unpaired/unmatched rows on one side, finds candidate matches on the other, and links them. Future features (e.g. receipt↔transaction matching from a mobile app, see EPIC-017+) will use the same shape. The v1 module should expose a generic interface so future strategies plug in without touching the existing one.
+
+**Amendment:** EPIC-006's deliverable is renamed from "transfer pairing engine" to **"reconciliation engine"**. Its public surface is:
+
+- `run_reconciliation_pass(strategy)` — generic entry point.
+- `BankAnchoredP2pPairing` — the v1 strategy implementation. Uses `domain.transfers.create_transfer` to write paired rows.
+- Future strategies (e.g. `ReceiptToTransactionMatch`) implement the same protocol and are registered without modifying the existing strategy.
+
+`domain.transfers.create_transfer` and the `transfer_id` invariant (rule-002) remain the only path for `kind='transfer'` inserts. Receipt-style reconciliation (which links rows but does not create transfers) will use a different linking column (e.g. `receipt_id`) introduced via a future forward migration; it does not affect the transfer rules.
