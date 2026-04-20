@@ -159,7 +159,7 @@
 
 - Implement `finances/domain/categorization.py`: a regex-rules engine that takes a description + source + account and returns a `category_id` or `None`.
 - Seed data: a Python module (or YAML) that the migration runner writes into `categories` and `category_rules`.
-- v1 taxonomy (drop "Ant"; drop "No ID" as a destination — use `needs_review=1` instead): `income` (Salary, Gigs, Interest, Other Income); `expense` (Food, Transport, Health, Family, Lifestyle, Subscriptions, Purchases, Fees, Tools, Other Expense); `transfer` (Internal Transfer, External Transfer / Lending); `adjustment` (Reconciliation, FX Diff).
+- v1 taxonomy (drop "Ant"; drop "No ID" as a destination — use `needs_review=1` instead): `income` (Salary, Gigs, Interest, Other Income, Loan Repayment); `expense` (Groceries, Transport, Health, Family, Lifestyle, Subscriptions, Purchases, Fees, Tools, Other Expense, Dating, Gifts, Leisure, Personal Care, Utilities, Lending, Education); `transfer` (Internal Transfer, External Transfer / Lending); `adjustment` (Reconciliation, FX Diff).
 - Tests: `tests/test_categorization.py` covers rule priority, no-match → `needs_review`, source/account scoping.
 
 **Verification Criteria (Definition of Done):**
@@ -413,7 +413,7 @@
 
 ### EPIC-012 — One-Time Backfill Migration
 
-**Status:** In Review
+**Status:** Complete
 **Wave:** 3
 **Dependencies:** EPIC-002, EPIC-004, EPIC-005, EPIC-006, EPIC-007, EPIC-008, EPIC-009
 **ADRs:** ADR-004
