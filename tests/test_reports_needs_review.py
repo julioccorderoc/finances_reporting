@@ -244,7 +244,9 @@ def test_render_json_happy_path_decimal_as_string_and_iso_datetime(
     assert len(parsed) == 1
     row = parsed[0]
     assert isinstance(row["amount"], str)
-    assert row["amount"] == "7.50"
+    # SQLite's NUMERIC affinity drops the trailing zero — the Decimal stays
+    # a Decimal (not a float), which is the invariant the JSON path protects.
+    assert Decimal(row["amount"]) == Decimal("7.50")
     assert row["description"] == "coffee"
     # ISO-format datetime with timezone.
     assert "2026-05-10" in row["occurred_at"]
@@ -294,7 +296,8 @@ def test_render_csv_happy_path_header_and_row(
         "source",
     ]
     assert len(out_rows) == 2
-    assert out_rows[1][4] == "3.14"
+    # 3.14 has no trailing zero so it survives NUMERIC affinity as-is.
+    assert Decimal(out_rows[1][4]) == Decimal("3.14")
     assert out_rows[1][5] == "USD"
     assert out_rows[1][6] == "pi"
 
@@ -331,6 +334,7 @@ def test_render_table_contains_row_data_and_headers(
 
     acc = _mk_account(in_memory_db, "TBL")
     assert acc.id is not None
+    # 99.99 survives NUMERIC affinity without trailing-zero loss.
     _mk_txn(
         in_memory_db,
         account_id=acc.id,

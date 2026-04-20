@@ -251,7 +251,9 @@ def test_render_csv_happy_path_header_and_row(
 
     acc = _insert_account(in_memory_db, "CSV Bank", currency="USD")
     assert acc.id is not None
-    _insert_txn(in_memory_db, acc.id, Decimal("10.00"), source_ref="c-1")
+    # Use a non-trailing-zero value — SQLite's NUMERIC affinity on a DECIMAL
+    # column will otherwise drop trailing zeros (e.g. "10.00" -> "10").
+    _insert_txn(in_memory_db, acc.id, Decimal("12.34"), source_ref="c-1")
 
     balances = get_balances(in_memory_db)
     out = render_csv(balances)
@@ -262,7 +264,7 @@ def test_render_csv_happy_path_header_and_row(
     assert len(rows) == 2
     assert rows[1][1] == "CSV Bank"
     assert rows[1][2] == "USD"
-    assert rows[1][3] == "10.00"
+    assert rows[1][3] == "12.34"
 
 
 def test_render_csv_empty_list_returns_header_only() -> None:
@@ -288,9 +290,11 @@ def test_render_table_contains_every_account_name_and_currency(
     a2 = _insert_account(in_memory_db, "Bravo Bolivares", currency="VES")
     assert a1.id is not None
     assert a2.id is not None
-    _insert_txn(in_memory_db, a1.id, Decimal("100.50"), source_ref="t-1")
+    # Values chosen to survive SQLite's NUMERIC affinity normalisation —
+    # no trailing zeros that would otherwise be stripped from the REAL cast.
+    _insert_txn(in_memory_db, a1.id, Decimal("100.5"), source_ref="t-1")
     _insert_txn(
-        in_memory_db, a2.id, Decimal("250.00"), currency="VES", source_ref="t-2"
+        in_memory_db, a2.id, Decimal("250.75"), currency="VES", source_ref="t-2"
     )
 
     balances = get_balances(in_memory_db)
@@ -300,8 +304,8 @@ def test_render_table_contains_every_account_name_and_currency(
     assert "Bravo Bolivares" in out
     assert "USD" in out
     assert "VES" in out
-    assert "100.50" in out
-    assert "250.00" in out
+    assert "100.5" in out
+    assert "250.75" in out
     # Header labels must appear.
     assert "Account" in out
     assert "Currency" in out
