@@ -33,6 +33,8 @@ INSERT OR IGNORE INTO categories (kind, name) VALUES
     ('expense', 'Fees'),
     ('expense', 'Tools'),
     ('expense', 'Other Expense'),
+    ('expense', 'Dating'),
+    ('expense', 'Gifts'),
     -- transfer
     ('transfer', 'Internal Transfer'),
     ('transfer', 'External Transfer'),

@@ -447,7 +447,7 @@
 
 ### EPIC-013 — Reporting Views + Account Balances
 
-**Status:** Pending
+**Status:** Complete
 **Wave:** 3
 **Dependencies:** EPIC-002, EPIC-005
 **ADRs:** ADR-001
@@ -478,7 +478,7 @@
 
 ### EPIC-014 — Google Sheets Read-Only Mirror
 
-**Status:** Pending
+**Status:** Complete
 **Wave:** 3
 **Dependencies:** EPIC-013
 **ADRs:** ADR-001
