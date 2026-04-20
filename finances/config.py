@@ -1,5 +1,7 @@
+import json
 import os
 from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import dotenv
@@ -35,3 +37,27 @@ def binance_credentials() -> tuple[str, str]:
             "BINANCE_API_KEY and BINANCE_API_SECRET must be set in the environment"
         )
     return api_key, api_secret
+
+
+def google_service_account() -> dict[str, Any]:
+    """Load Google Workspace service-account credentials for EPIC-014.
+
+    Priority: ``GOOGLE_SERVICE_ACCOUNT_FILE`` (path to a JSON key file) wins
+    over ``GOOGLE_SERVICE_ACCOUNT_JSON`` (inline JSON). Returns the parsed
+    credentials dict suitable for ``google.oauth2.service_account.Credentials``.
+    """
+    load_env()
+    key_file = os.environ.get("GOOGLE_SERVICE_ACCOUNT_FILE")
+    if key_file:
+        path = Path(key_file)
+        if not path.is_file():
+            raise RuntimeError(
+                f"GOOGLE_SERVICE_ACCOUNT_FILE does not exist: {key_file}"
+            )
+        return json.loads(path.read_text())
+    key_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
+    if key_json:
+        return json.loads(key_json)
+    raise RuntimeError(
+        "GOOGLE_SERVICE_ACCOUNT_FILE or GOOGLE_SERVICE_ACCOUNT_JSON must be set"
+    )

@@ -69,13 +69,25 @@ def _build_mock_gspread_client() -> tuple[MagicMock, dict[str, MagicMock]]:
     return client, worksheets
 
 
-def _seed_rate(conn: sqlite3.Connection, *, source: str, rate: Decimal) -> None:
-    """Add a USDT/VES rate row for rate resolution."""
+def _seed_rate(
+    conn: sqlite3.Connection,
+    *,
+    source: str,
+    rate: Decimal,
+    base: str = "USDT",
+    quote: str = "VES",
+) -> None:
+    """Add a rate row for rate resolution.
+
+    BCV publishes ``USD/VES``; Binance P2P publishes ``USDT/VES`` — the
+    rate resolver discriminates by source, so callers that want to
+    exercise the BCV branch must pass ``base="USD"``.
+    """
     rates_repo.insert(
         conn,
         Rate(
-            base="USDT",
-            quote="VES",
+            base=base,
+            quote=quote,
             rate=rate,
             as_of_date=datetime(2026, 3, 15, tzinfo=UTC).date(),
             source=source,
@@ -96,11 +108,9 @@ def _insert_ves_expense(
     account_id = conn.execute(
         "SELECT id FROM accounts WHERE name = 'Provincial Bolivares'"
     ).fetchone()[0]
-    n = transactions_repo.upsert_by_source_ref(
+    result = transactions_repo.upsert_by_source_ref(
         conn,
-        source=source,
-        source_ref=source_ref,
-        transaction=Transaction(
+        Transaction(
             account_id=account_id,
             occurred_at=datetime(2026, 3, 15, 12, 0, tzinfo=UTC),
             kind=TransactionKind.EXPENSE,
@@ -112,23 +122,17 @@ def _insert_ves_expense(
             user_rate=user_rate,
         ),
     )
-    assert n == 1
-    row = conn.execute(
-        "SELECT id FROM transactions WHERE source = ? AND source_ref = ?",
-        (source, source_ref),
-    ).fetchone()
-    return int(row[0])
+    assert result["rows_inserted"] == 1
+    return int(result["id"])
 
 
 def _insert_needs_review(conn: sqlite3.Connection, *, source_ref: str) -> int:
     account_id = conn.execute(
         "SELECT id FROM accounts WHERE name = 'Provincial Bolivares'"
     ).fetchone()[0]
-    transactions_repo.upsert_by_source_ref(
+    result = transactions_repo.upsert_by_source_ref(
         conn,
-        source="provincial",
-        source_ref=source_ref,
-        transaction=Transaction(
+        Transaction(
             account_id=account_id,
             occurred_at=datetime(2026, 3, 15, 12, 0, tzinfo=UTC),
             kind=TransactionKind.EXPENSE,
@@ -140,10 +144,7 @@ def _insert_needs_review(conn: sqlite3.Connection, *, source_ref: str) -> int:
             needs_review=True,
         ),
     )
-    row = conn.execute(
-        "SELECT id FROM transactions WHERE source_ref = ?", (source_ref,)
-    ).fetchone()
-    return int(row[0])
+    return int(result["id"])
 
 
 # ---------------------------------------------------------------------------
@@ -182,7 +183,9 @@ class TestBuildBalancesTab:
         tab = sheets_sync.build_balances_tab(seeded_db)
         provincial = next(r for r in tab.rows if r[1] == "Provincial Bolivares")
         # Column order: account_id, account_name, currency, balance_native.
-        assert provincial[3] == "-1000.00"
+        # The v_account_balances view casts to REAL, so exact-string equality
+        # would drift on trailing-zero formatting — compare numerically.
+        assert Decimal(provincial[3]) == Decimal("-1000.00")
 
 
 # ---------------------------------------------------------------------------
@@ -216,7 +219,8 @@ class TestBuildTransactionsTab:
         from finances.reports import sheets_sync
 
         # BCV-only resolver path: no user_rate, no P2P median, just a BCV row.
-        _seed_rate(seeded_db, source="bcv", rate=Decimal("36.50"))
+        # BCV publishes USD/VES (not USDT/VES), which is why base="USD" here.
+        _seed_rate(seeded_db, source="bcv", rate=Decimal("36.50"), base="USD")
         _insert_ves_expense(
             seeded_db,
             amount=Decimal("-1000.00"),
@@ -241,9 +245,7 @@ class TestBuildTransactionsTab:
         ).fetchone()[0]
         transactions_repo.upsert_by_source_ref(
             seeded_db,
-            source="cash_cli",
-            source_ref="usd-1",
-            transaction=Transaction(
+            Transaction(
                 account_id=account_id,
                 occurred_at=datetime(2026, 3, 15, 12, 0, tzinfo=UTC),
                 kind=TransactionKind.EXPENSE,
@@ -353,9 +355,7 @@ class TestBuildNeedsReviewTab:
         ).fetchone()[0]
         transactions_repo.upsert_by_source_ref(
             seeded_db,
-            source="provincial",
-            source_ref="nr-nodesc",
-            transaction=Transaction(
+            Transaction(
                 account_id=account_id,
                 occurred_at=datetime(2026, 3, 15, 12, 0, tzinfo=UTC),
                 kind=TransactionKind.EXPENSE,
@@ -592,17 +592,14 @@ class TestGoogleServiceAccountConfig:
 class TestSyncSheetsCLI:
     def test_exits_zero_and_reports_tab_counts(
         self,
-        seeded_db: sqlite3.Connection,
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
-        from finances import config as config_module
         from finances.cli import main as cli_main
         from finances.reports import sheets_sync
 
-        # Point the CLI at a freshly-migrated throwaway DB. The seeded_db
-        # fixture is :memory: so we can't reuse it across a CliRunner
-        # subprocess-ish invocation — instead, mirror its schema onto disk.
+        # Point the CLI at a freshly-migrated throwaway DB. Don't reuse
+        # seeded_db because it's :memory: and the CLI reopens the file path.
         db_path = tmp_path / "cli.db"
         monkeypatch.setattr(cli_main, "DB_PATH", db_path)
 

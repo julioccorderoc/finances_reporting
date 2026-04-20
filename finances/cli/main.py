@@ -22,6 +22,9 @@ app.add_typer(ingest_app, name="ingest")
 report_app = typer.Typer(help="Reports over the ledger (EPIC-013).")
 app.add_typer(report_app, name="report")
 
+sync_app = typer.Typer(help="Mirror the ledger out to external read-only surfaces.")
+app.add_typer(sync_app, name="sync")
+
 
 @app.callback()
 def _root() -> None:
@@ -658,6 +661,33 @@ def report_needs_review(
         typer.echo(needs_review_report.render_csv(rows), nl=False)
     else:
         typer.echo(needs_review_report.render_table(rows), nl=False)
+
+
+@sync_app.command("sheets")
+def sync_sheets(
+    spreadsheet_id: str = typer.Option(
+        ...,
+        "--spreadsheet-id",
+        help="Google Sheets spreadsheet ID. Must be shared with the service account as editor.",
+    ),
+) -> None:
+    """Destructively mirror the ledger into four read-only tabs (EPIC-014)."""
+    from finances.reports.sheets_sync import sync_to_sheets
+
+    conn = get_connection(DB_PATH)
+    apply_migrations(conn)
+    try:
+        report = sync_to_sheets(conn, spreadsheet_id=spreadsheet_id)
+    finally:
+        conn.close()
+
+    counts = " ".join(f"{name}={report.rows_written[name]}" for name in report.tabs)
+    typer.echo(
+        f"sheets sync: spreadsheet={spreadsheet_id} "
+        f"tabs={len(report.tabs)} "
+        f"rows={{{counts}}} "
+        f"duration={report.duration_s:.2f}s"
+    )
 
 
 if __name__ == "__main__":
