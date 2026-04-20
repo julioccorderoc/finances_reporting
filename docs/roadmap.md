@@ -161,18 +161,23 @@
 **Status:** Pending
 **Wave:** 2
 **Dependencies:** EPIC-002
-**ADRs:** ADR-002
+**ADRs:** ADR-002 (+ amendment for reconciliation-passes pattern)
 
-**Business Objective:** Make movements between own accounts visible per-account but invisible in income/expense reports, eliminating the current double-counting risk.
+**Business Objective:** Make movements between own accounts visible per-account but invisible in income/expense reports, eliminating the current double-counting risk. **Establish the reconciliation-pass pattern** so future features (e.g. receipt↔transaction matching, EPIC-017+) plug in as new strategies without touching the existing code.
 
 **Technical Boundary:**
 
-- Implement `finances/domain/transfers.py`:
+- Implement `finances/domain/reconciliation.py` exposing the generic interface:
+  - `class ReconciliationStrategy(Protocol)` — `match() -> list[MatchProposal]`, `apply(proposal) -> None`.
+  - `run_reconciliation_pass(strategy: ReconciliationStrategy) -> ReconciliationReport` — the public entry point.
+- Implement `finances/domain/transfers.py` (the first strategy lives here):
   - `create_transfer(from_account, to_account, amount, ..., anchor_transaction_id=None)` writes two transactions sharing a UUID `transfer_id`, signed appropriately. When `anchor_transaction_id` is supplied, it identifies the canonical leg (used by the bank-anchored P2P pairing path).
-  - `pair_p2p_inflows(window_days=2)` — the **bank-anchored** pairing routine called by `finances/ingest/provincial.py`: walks unpaired Provincial deposits, finds a matching unpaired Binance P2P sell within `±window_days`, and calls `create_transfer` with the bank row as anchor.
+  - `class BankAnchoredP2pPairing(ReconciliationStrategy)` — the v1 strategy. Walks unpaired Provincial deposits, finds a matching unpaired Binance P2P sell within `±window_days` (default 2), and on apply calls `create_transfer` with the bank row as anchor.
   - `validate(transfer_id)` confirms the two legs sum to zero in their respective USD-equivalents (within tolerance 0.01).
   - `find_unreconciled()` queries `v_unreconciled_transfers`.
-- Tests: `tests/test_transfers.py` covers happy path, validation failure, the unreconciled detector, and the bank-anchored pairing routine with mixed paired/unpaired fixtures.
+- Tests: `tests/test_transfers.py` covers happy path, validation failure, the unreconciled detector, and the bank-anchored strategy via `run_reconciliation_pass(BankAnchoredP2pPairing(window_days=2))` with mixed paired/unpaired fixtures.
+
+**Forward-compatibility note:** `ReconciliationStrategy` is the seam through which future strategies (e.g. `ReceiptToTransactionMatch` in EPIC-017) attach. Do not specialize the engine to transfers only.
 
 **Verification Criteria (Definition of Done):**
 
@@ -230,7 +235,7 @@
   - Port the `Decimal`-safe parsing and Caracas-timezone date logic from `legacy/extract_provincial.py`.
   - **`source_ref` strategy (per ADR-010):** use bank `Referencia` if present and non-empty; else compute `"hash:" + sha256(occurred_at || amount || description)[:16]`.
   - Apply categorization rules; unmatched rows get `needs_review=1`.
-  - **Bank-anchored P2P pairing pass:** after inserting bank rows, run `finances.domain.transfers.pair_p2p_inflows()` which scans unpaired Provincial deposits matching the shape of a P2P inflow (large amount, descriptions matching known counterparties or generic "transfer recibido"), then searches `transactions WHERE source='binance' AND source_ref LIKE 'p2p%' AND transfer_id IS NULL` within a `±2-day` window (configurable). On match, calls `domain.transfers.create_transfer` with the bank row as the canonical anchor.
+  - **Bank-anchored P2P pairing pass:** after inserting bank rows, call `finances.domain.reconciliation.run_reconciliation_pass(BankAnchoredP2pPairing(window_days=2))`. The strategy scans unpaired Provincial deposits matching the shape of a P2P inflow (large amount, descriptions matching known counterparties or generic "transfer recibido"), searches `transactions WHERE source='binance' AND source_ref LIKE 'p2p%' AND transfer_id IS NULL` within a `±2-day` window (configurable), and on match calls `domain.transfers.create_transfer` with the bank row as the canonical anchor.
 - Tests: `tests/test_ingest_provincial.py` with a fixture CSV; explicit re-ingest idempotency test; explicit P2P-pairing test with a paired Binance fixture.
 
 **Verification Criteria (Definition of Done):**
