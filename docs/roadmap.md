@@ -413,7 +413,7 @@
 
 ### EPIC-012 — One-Time Backfill Migration
 
-**Status:** Pending
+**Status:** In Review
 **Wave:** 3
 **Dependencies:** EPIC-002, EPIC-004, EPIC-005, EPIC-006, EPIC-007, EPIC-008, EPIC-009
 **ADRs:** ADR-004
