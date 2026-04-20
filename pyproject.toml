@@ -51,6 +51,7 @@ addopts = "-q --strict-markers"
 markers = [
     "snapshot: golden-file snapshot tests (test-after by nature; exempt from TDD-evidence audit per rule-011).",
     "smoke: fast smoke tests that exercise wiring rather than logic.",
+    "integration: end-to-end pipeline tests (EPIC-021); live only on `pytest -m integration` and on the dedicated CI step.",
 ]
 
 # -----------------------------------------------------------------------------
