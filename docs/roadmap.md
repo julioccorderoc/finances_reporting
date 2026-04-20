@@ -1,7 +1,7 @@
 # ROADMAP
 
 **Version:** 1.0
-**Last Updated:** 2026-04-19
+**Last Updated:** 2026-04-20
 **Primary Human Owner:** Julio Cordero
 
 ## Operating Rules for the Planner Agent
@@ -148,7 +148,7 @@
 
 ### EPIC-004 — Category Taxonomy Revamp + Rules Engine
 
-**Status:** Pending
+**Status:** Complete
 **Wave:** 2
 **Dependencies:** EPIC-002
 **ADRs:** ADR-006
@@ -209,7 +209,7 @@
 
 ### EPIC-006 — Reconciliation Engine (Double-Entry Transfers as First Strategy)
 
-**Status:** In Review — implementation + tests green on branch; awaiting merge to `main` before marking Complete.
+**Status:** Complete
 **Wave:** 2
 **Dependencies:** EPIC-002
 **ADRs:** ADR-002 (+ amendment for reconciliation-passes pattern)
@@ -286,7 +286,7 @@
 
 ### EPIC-008 — Provincial Bank Ingest Refactor (P2P Pairing Anchor)
 
-**Status:** Pending
+**Status:** Complete
 **Wave:** 2
 **Dependencies:** EPIC-002 (benefits from EPIC-004; coordinates with EPIC-006 transfer pairing and EPIC-007 Binance ingest)
 **ADRs:** ADR-001, ADR-002 (amendment), ADR-009, ADR-010
@@ -321,7 +321,7 @@
 
 ### EPIC-009 — BCV Automated Scraper
 
-**Status:** Pending
+**Status:** Complete
 **Wave:** 2
 **Dependencies:** EPIC-002
 **ADRs:** ADR-007
@@ -354,7 +354,7 @@
 
 ### EPIC-010 — Binance P2P Rate Fetcher
 
-**Status:** In Review
+**Status:** Complete
 **Wave:** 2
 **Dependencies:** EPIC-002
 **ADRs:** ADR-005
@@ -384,7 +384,7 @@
 
 ### EPIC-011 — Cash CLI Tool
 
-**Status:** In Review — implementation + tests green on `main` (RED `4ad7dea`, GREEN bundled into `1d6b154`); awaiting user verification per criteria below.
+**Status:** Complete
 **Wave:** 2
 **Dependencies:** EPIC-002 (benefits from EPIC-004)
 **ADRs:** ADR-008

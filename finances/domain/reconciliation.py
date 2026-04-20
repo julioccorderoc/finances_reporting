@@ -10,12 +10,12 @@ Concrete strategies (e.g. BankAnchoredP2pPairing) live in
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
+from pydantic import BaseModel, ConfigDict, Field
 
-@dataclass(frozen=True)
-class MatchProposal:
+
+class MatchProposal(BaseModel):
     """An immutable suggestion produced by a reconciliation strategy.
 
     ``details`` is an arbitrary payload whose shape is agreed between the
@@ -23,19 +23,20 @@ class MatchProposal:
     runner never inspects it.
     """
 
+    model_config = ConfigDict(frozen=True)
+
     strategy: str
     details: dict[str, Any]
     confidence: float = 1.0
 
 
-@dataclass
-class ReconciliationReport:
+class ReconciliationReport(BaseModel):
     """Summary of a single reconciliation pass."""
 
     strategy: str
     proposals_found: int = 0
     proposals_applied: int = 0
-    errors: list[str] = field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
 
 
 @runtime_checkable

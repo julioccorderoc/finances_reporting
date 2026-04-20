@@ -12,10 +12,11 @@ from __future__ import annotations
 
 import sqlite3
 import uuid
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
+
+from pydantic import BaseModel, ConfigDict
 
 from finances.db.repos import transactions as txn_repo
 from finances.domain.models import Transaction, TransactionKind
@@ -73,9 +74,10 @@ SQL_UNRECONCILED_VIEW = """
 # Public types
 # ---------------------------------------------------------------------------
 
-@dataclass(frozen=True)
-class TransferPair:
+class TransferPair(BaseModel):
     """Identifiers for a paired transfer's two legs."""
+
+    model_config = ConfigDict(frozen=True)
 
     transfer_id: str
     from_transaction_id: int

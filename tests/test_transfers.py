@@ -27,7 +27,6 @@ see at a glance that the row is crafted for negative-path testing.
 
 from __future__ import annotations
 
-import dataclasses
 import sqlite3
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -271,18 +270,21 @@ class TestReconciliation:
         assert report.strategy == "noop_duck"
         assert report.proposals_applied == 1
 
-    def test_match_proposal_is_dataclass_and_frozen(self):
-        # MatchProposal must be a dataclass so downstream code can inspect
-        # fields and ship it over the wire via dataclasses.asdict.
-        assert dataclasses.is_dataclass(MatchProposal)
+    def test_match_proposal_is_frozen_pydantic_model(self):
+        # MatchProposal is a frozen Pydantic model (rule-009): downstream
+        # code inspects fields via model attrs and ships it via model_dump().
+        from pydantic import BaseModel, ValidationError
+
+        assert issubclass(MatchProposal, BaseModel)
 
         mp = MatchProposal(strategy="x", details={"k": "v"}, confidence=0.9)
         assert mp.strategy == "x"
         assert mp.details == {"k": "v"}
         assert mp.confidence == 0.9
+        assert mp.model_dump() == {"strategy": "x", "details": {"k": "v"}, "confidence": 0.9}
 
         # Frozen: cannot rebind fields after construction.
-        with pytest.raises(dataclasses.FrozenInstanceError):
+        with pytest.raises(ValidationError):
             mp.strategy = "mutated"  # type: ignore[misc]
 
 

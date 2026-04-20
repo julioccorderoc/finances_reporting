@@ -69,6 +69,56 @@ def ingest_binance(
         raise typer.Exit(code=1)
 
 
+@ingest_app.command("provincial")
+def ingest_provincial(
+    csv_path: Path = typer.Argument(
+        ...,
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        help="Path to a Provincial statement CSV (semicolon-delimited).",
+    ),
+    pairing_window_days: int = typer.Option(
+        2,
+        "--pairing-window-days",
+        help="±Day window used for bank-anchored P2P pairing (default 2).",
+    ),
+    no_pairing: bool = typer.Option(
+        False,
+        "--no-pairing",
+        help="Skip the bank-anchored P2P pairing pass after upserts.",
+    ),
+) -> None:
+    """Ingest a Provincial bank CSV and run the P2P pairing pass (EPIC-008)."""
+    from finances.ingest.provincial import ingest_csv
+
+    conn = get_connection(DB_PATH)
+    apply_migrations(conn)
+    try:
+        report = ingest_csv(
+            conn,
+            csv_path,
+            pairing_window_days=pairing_window_days,
+            run_pairing=not no_pairing,
+        )
+    finally:
+        conn.close()
+
+    typer.echo(
+        f"provincial ingest: seen={report.rows_seen} "
+        f"inserted={report.rows_inserted} updated={report.rows_updated}"
+    )
+    if report.reconciliation is not None:
+        rec = report.reconciliation
+        typer.echo(
+            f"  pairing ({rec.strategy}): "
+            f"found={rec.proposals_found} applied={rec.proposals_applied} "
+            f"errors={len(rec.errors)}"
+        )
+        for err in rec.errors:
+            typer.echo(f"    err: {err}", err=True)
+
+
 @ingest_app.command("bcv")
 def ingest_bcv() -> None:
     """Fetch BCV reference rates (USD/VES, EUR/VES) and upsert into rates (EPIC-009)."""

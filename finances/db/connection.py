@@ -29,13 +29,18 @@ def _register_decimal_adapters() -> None:
         return value.isoformat()
 
     def _convert_datetime(raw: bytes) -> datetime:
+        from datetime import UTC
+
         text = raw.decode("utf-8")
-        # Accept "YYYY-MM-DD HH:MM:SS[.ffff]" (sqlite CURRENT_TIMESTAMP)
-        # and "YYYY-MM-DDTHH:MM:SS[+HH:MM]" (our ISO output).
+        # Accept "YYYY-MM-DD HH:MM:SS[.ffff]" (sqlite CURRENT_TIMESTAMP, UTC-naive)
+        # and "YYYY-MM-DDTHH:MM:SS[+HH:MM]" (our ISO output, tz-aware).
         try:
-            return datetime.fromisoformat(text)
+            parsed = datetime.fromisoformat(text)
         except ValueError:
-            return datetime.fromisoformat(text.replace(" ", "T"))
+            parsed = datetime.fromisoformat(text.replace(" ", "T"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return parsed
 
     def _adapt_date(value: date) -> str:
         return value.isoformat()
