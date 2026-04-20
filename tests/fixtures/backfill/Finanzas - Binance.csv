@@ -1,0 +1,7 @@
+,,,,,,,,,,
+,,,,,,,,,,
+,,,,,,,,,,
+Fecha,Cuenta,Operación,Coin,Amount,Remark,Month,Week,Sub-Category,Category,Type
+01-Nov-2025,Spot,Deposit,USDC,"$500.00",Test paycheck,2025-Nov,25-W44,Salary,Inflow,Income
+05-Nov-2025,Funding,Internal Transfer,USDT,$100.00,External Scenario,2025-Nov,25-W45,Transit,Others,Transfer
+05-Nov-2025,Funding,P2P-Sell,USDT,-$100.00,P2P - 99900001,2025-Nov,25-W45,Exchange,Others,Transfer
