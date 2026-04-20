@@ -2,18 +2,70 @@ from __future__ import annotations
 
 from datetime import datetime, time
 from decimal import Decimal, InvalidOperation
+from typing import Any
 
 import typer
+
+from finances.config import DB_PATH, binance_credentials
+from finances.db.connection import get_connection
+from finances.db.migrate import apply_migrations
 
 app = typer.Typer(help="Finances reporting CLI")
 
 cash_app = typer.Typer(help="Cash USD entries (rule-008 — v1 supports USD cash only).")
 app.add_typer(cash_app, name="cash")
 
+ingest_app = typer.Typer(help="Ingest data from external sources.")
+app.add_typer(ingest_app, name="ingest")
+
 
 @app.callback()
 def _root() -> None:
     """Finances reporting CLI."""
+
+
+def _make_binance_client() -> Any:
+    from binance.spot import Spot
+
+    api_key, api_secret = binance_credentials()
+    return Spot(api_key=api_key, api_secret=api_secret)
+
+
+@ingest_app.command("binance")
+def ingest_binance(
+    since: datetime | None = typer.Option(
+        None,
+        "--since",
+        help="ISO timestamp to start ingest from (overrides lookback and stored state).",
+    ),
+    lookback_days: int = typer.Option(
+        35,
+        "--lookback-days",
+        help="Fallback window when no --since and no stored import_state (default 35).",
+    ),
+) -> None:
+    """Incrementally sync Binance endpoints into the ledger (EPIC-007)."""
+    from finances.ingest.binance import sync_binance
+
+    conn = get_connection(DB_PATH)
+    apply_migrations(conn)
+    try:
+        client = _make_binance_client()
+        result = sync_binance(
+            conn, client=client, since=since, lookback_days=lookback_days
+        )
+    finally:
+        conn.close()
+
+    typer.echo(
+        f"binance sync: inserted={result['rows_inserted']} "
+        f"updated={result['rows_updated']} "
+        f"earn={result['earn_positions']} errors={len(result['errors'])}"
+    )
+    for err in result["errors"]:
+        typer.echo(f"  err: {err}", err=True)
+    if result["errors"]:
+        raise typer.Exit(code=1)
 
 
 def _parse_cash_amount(raw: str) -> Decimal:
