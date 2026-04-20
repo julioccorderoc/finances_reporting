@@ -293,6 +293,11 @@ def backfill(
         "--pairing-window-days",
         help="±Day window used for bank-anchored P2P pairing (default 2).",
     ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Re-run even if the ledger already has transactions (wipes cleanup state).",
+    ),
 ) -> None:
     """One-time backfill of historical CSVs through production ingest (EPIC-012)."""
     from finances.migration.backfill import run_backfill
@@ -301,7 +306,10 @@ def backfill(
     apply_migrations(conn)
     try:
         report = run_backfill(
-            conn, from_dir, pairing_window_days=pairing_window_days
+            conn,
+            from_dir,
+            pairing_window_days=pairing_window_days,
+            force=force,
         )
     finally:
         conn.close()

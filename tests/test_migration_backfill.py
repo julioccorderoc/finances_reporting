@@ -111,7 +111,9 @@ def test_run_backfill_is_idempotent(
     total_first = _count(in_memory_db, "SELECT COUNT(*) FROM transactions")
 
     # Re-running on the same DB with the same CSVs must insert zero rows.
-    second = run_backfill(in_memory_db, backfill_data_dir)
+    # `force=True` bypasses the non-empty-DB guard that otherwise protects
+    # cleanup state from being wiped by an accidental second backfill.
+    second = run_backfill(in_memory_db, backfill_data_dir, force=True)
 
     total_second = _count(in_memory_db, "SELECT COUNT(*) FROM transactions")
     assert total_second == total_first
@@ -151,6 +153,30 @@ def test_run_backfill_missing_file_raises(
     empty.mkdir()
     with pytest.raises(FileNotFoundError):
         run_backfill(in_memory_db, empty)
+
+
+def test_run_backfill_refuses_on_non_empty_db(
+    in_memory_db: sqlite3.Connection, backfill_data_dir: Path
+) -> None:
+    """Re-running backfill resets needs_review/category_id via upsert; refuse
+    by default so a stray re-run can't wipe cleanup work."""
+    from finances.migration.backfill import run_backfill
+
+    run_backfill(in_memory_db, backfill_data_dir)
+    with pytest.raises(RuntimeError, match="already contains"):
+        run_backfill(in_memory_db, backfill_data_dir)
+
+
+def test_run_backfill_force_bypasses_guard(
+    in_memory_db: sqlite3.Connection, backfill_data_dir: Path
+) -> None:
+    """`force=True` allows the explicit re-run (migration author's escape hatch)."""
+    from finances.migration.backfill import run_backfill
+
+    run_backfill(in_memory_db, backfill_data_dir)
+    # Must not raise. Returns a fresh report.
+    second = run_backfill(in_memory_db, backfill_data_dir, force=True)
+    assert second.binance_rows_inserted == 0
 
 
 def test_provincial_rows_carry_user_rate_from_tasa_usdt(

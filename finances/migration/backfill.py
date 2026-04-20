@@ -651,12 +651,20 @@ def run_backfill(
     data_dir: Path,
     *,
     pairing_window_days: int = 2,
+    force: bool = False,
 ) -> BackfillReport:
     """Read all three legacy CSVs and feed them through production ingest.
 
     Raises ``FileNotFoundError`` if either the Binance or Provincial CSV
     is missing. BCV is treated as optional — no BCV file is not fatal,
     only the v_transactions_usd fallback becomes less precise.
+
+    Re-running the backfill resets ``needs_review``, ``category_id``, and
+    ``transfer_id`` on every ingested row (``upsert_by_source_ref`` is
+    deliberately authoritative about the source columns per ADR-010).
+    Once the interactive cleanup pass has started writing categories,
+    a second backfill would wipe that work. Guard against it by refusing
+    to run on a non-empty ``transactions`` table unless ``force=True``.
     """
     binance_path = data_dir / BINANCE_CSV_NAME
     provincial_path = data_dir / PROVINCIAL_CSV_NAME
@@ -665,6 +673,17 @@ def run_backfill(
     for required in (binance_path, provincial_path):
         if not required.exists():
             raise FileNotFoundError(required)
+
+    if not force:
+        existing = conn.execute(
+            "SELECT COUNT(*) FROM transactions"
+        ).fetchone()[0]
+        if existing:
+            raise RuntimeError(
+                f"transactions table already contains {existing} rows; "
+                "re-running backfill would reset needs_review/category_id "
+                "on every row. Pass force=True (CLI: --force) to override."
+            )
 
     report = BackfillReport()
     account_ids = ensure_accounts(conn)
