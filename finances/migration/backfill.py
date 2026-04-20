@@ -33,6 +33,7 @@ from finances.db.repos import accounts as accounts_repo
 from finances.db.repos import rates as rates_repo
 from finances.db.repos import transactions as transactions_repo
 from finances.domain.models import Account, AccountKind, Rate, Transaction, TransactionKind
+from finances.domain.categorization import CategorizationRequest, suggest
 from finances.domain.reconciliation import (
     ReconciliationReport,
     run_reconciliation_pass,
@@ -98,6 +99,7 @@ class BackfillReport:
     provincial_rows_inserted: int = 0
     bcv_rows_seen: int = 0
     bcv_rates_inserted: int = 0
+    rows_categorized: int = 0
     errors: list[str] = field(default_factory=list)
     reconciliation: ReconciliationReport | None = None
 
@@ -798,7 +800,42 @@ def run_backfill(
         binance_source=BINANCE_SOURCE,
     )
     report.reconciliation = run_reconciliation_pass(strategy)
+
+    report.rows_categorized = apply_category_rules(conn)
     return report
+
+
+def apply_category_rules(conn: sqlite3.Connection) -> int:
+    """Run the seeded categorization engine across every row with
+    ``category_id IS NULL``. Per rule-006 this is the one sanctioned
+    place for the engine to stamp ``category_id`` during backfill;
+    ingesters themselves never set it directly. Rows that match a rule
+    get the rule's category_id and ``needs_review=0``; unmatched rows
+    stay exactly as they were."""
+    rows = conn.execute(
+        "SELECT id, description, source, account_id "
+        "FROM transactions WHERE category_id IS NULL"
+    ).fetchall()
+    categorized = 0
+    for row in rows:
+        match = suggest(
+            conn,
+            CategorizationRequest(
+                description=row["description"],
+                source=row["source"],
+                account_id=row["account_id"],
+            ),
+        )
+        if match is None:
+            continue
+        conn.execute(
+            "UPDATE transactions SET category_id = ?, needs_review = 0 "
+            "WHERE id = ?",
+            (match.category_id, int(row["id"])),
+        )
+        categorized += 1
+    conn.commit()
+    return categorized
 
 
 def iter_legacy_annotations(

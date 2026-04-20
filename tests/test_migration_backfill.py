@@ -417,15 +417,16 @@ def test_run_backfill_auto_categorizes_matching_rows(
 def test_run_backfill_leaves_unmatched_rows_needing_review(
     in_memory_db: sqlite3.Connection, backfill_data_dir: Path
 ) -> None:
-    """The Binance deposit ``Test paycheck`` description does not match any
-    seeded rule — it must stay ``needs_review=1``, ``category_id`` NULL."""
+    """Binance P2P-Sell descriptions don't match any seeded rule (those are
+    resolved via reconciliation, not categorization rules) — they must
+    stay ``needs_review=1`` with ``category_id`` NULL after backfill."""
     from finances.migration.backfill import run_backfill
 
     run_backfill(in_memory_db, backfill_data_dir)
 
     row = in_memory_db.execute(
         "SELECT category_id, needs_review FROM transactions "
-        "WHERE description LIKE '%Test paycheck%'"
+        "WHERE description LIKE 'Binance deposit%'"
     ).fetchone()
     assert row is not None
     assert row["category_id"] is None
