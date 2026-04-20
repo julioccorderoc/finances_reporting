@@ -380,6 +380,44 @@ def test_run_backfill_stamps_derived_rate_on_orphan_p2p_sell(
     assert Decimal("627") < rate < Decimal("629")
 
 
+def test_run_backfill_applies_legacy_sub_category_mapping(
+    in_memory_db: sqlite3.Connection, backfill_data_dir: Path
+) -> None:
+    """The legacy Provincial/Binance CSVs carry a `Sub-Category` column
+    that is Julio's own hand-categorization. Per the closed legacy→v1
+    mapping (2026-04-20), backfill stamps `category_id` on every row
+    where the legacy annotation resolves to a v1 category — this is
+    the authoritative source, not the rules engine (the rules engine
+    runs afterwards for rows without a legacy annotation)."""
+    from finances.migration.backfill import run_backfill
+
+    report = run_backfill(in_memory_db, backfill_data_dir)
+
+    # "COM. PAGO MOVIL" with legacy Sub-Category `Commissions` → `Fees`.
+    # The regex rule would also catch it, but the legacy path wins by
+    # running first (lower-latency, more specific to this user's data).
+    commission = in_memory_db.execute(
+        "SELECT c.name FROM transactions t "
+        "JOIN categories c ON c.id = t.category_id "
+        "WHERE t.description LIKE 'COM. PAGO MOVIL%'"
+    ).fetchone()
+    assert commission is not None
+    assert commission["name"] == "Fees"
+
+    # "PANADERIA LUISANA 2004" legacy Sub-Category `Food` → `Groceries`
+    # after 2026-04-20 rename.
+    bakery = in_memory_db.execute(
+        "SELECT c.name FROM transactions t "
+        "JOIN categories c ON c.id = t.category_id "
+        "WHERE t.description LIKE '%PANADERIA%'"
+    ).fetchone()
+    assert bakery is not None
+    assert bakery["name"] == "Groceries"
+
+    # Report exposes how many rows the legacy pass stamped.
+    assert report.rows_legacy_mapped >= 2
+
+
 def test_run_backfill_auto_categorizes_matching_rows(
     in_memory_db: sqlite3.Connection, backfill_data_dir: Path
 ) -> None:

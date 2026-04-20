@@ -30,8 +30,8 @@ Adopt a **full v1 taxonomy rework** alongside a **rules engine** that auto-sugge
 
 v1 taxonomy (top-level kinds × subcategories):
 
-- **income**: Salary, Gigs, Interest, Other Income
-- **expense**: Food, Transport, Health, Family, Lifestyle, Subscriptions, Purchases, Fees, Tools, Other Expense
+- **income**: Salary, Gigs, Interest, Other Income, Loan Repayment
+- **expense**: Groceries, Transport, Health, Family, Lifestyle, Subscriptions, Purchases, Fees, Tools, Other Expense, Dating, Gifts, Leisure, Personal Care, Utilities, Lending, Education, Clothing
 - **transfer**: Internal Transfer, External Transfer (lending given/repaid)
 - **adjustment**: Reconciliation, FX Diff
 
@@ -72,3 +72,13 @@ Drop "Ant". Drop "No ID" as a destination — replaced by `transactions.needs_re
 Future tiers must be added by extending the resolver in `finances.domain.categorization`, **not** by giving ingesters their own category logic. The rule-006 constraint (no ingester sets `category_id` directly) holds for every future tier.
 
 **Forward-compatibility requirement:** the v1 implementation of `suggest()` must accept its inputs as a Pydantic model (per ADR-009) so additional context (receipt match, override) can be added as optional fields without breaking callers.
+
+---
+
+## Amendment 2026-04-20 — Legacy-Taxonomy Alignment
+
+Amendment 2026-04-20: renamed `Food`→`Groceries` (per legacy-taxonomy alignment: Groceries = home food, Leisure = going-out food). Added expense categories `Leisure, Personal Care, Utilities, Lending, Education` and income category `Loan Repayment`. See migration 004.
+
+## Amendment 2026-04-20 (v1.2) — Clothing
+
+Added expense category `Clothing` (migration 005). Julio's legacy ledger uses `Sub-Category=Clothing` for apparel purchases (~10 rows in the backfill). Discussed mapping to `Purchases` or `Lifestyle` and rejected both — Clothing is distinct enough to warrant its own bucket.
