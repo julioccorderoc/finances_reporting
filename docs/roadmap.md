@@ -180,7 +180,7 @@
 
 ### EPIC-005 — Rate Resolution Engine
 
-**Status:** Pending
+**Status:** Complete
 **Wave:** 2
 **Dependencies:** EPIC-002
 **ADRs:** ADR-005
@@ -209,7 +209,7 @@
 
 ### EPIC-006 — Reconciliation Engine (Double-Entry Transfers as First Strategy)
 
-**Status:** Pending
+**Status:** In Review — implementation + tests green on branch; awaiting merge to `main` before marking Complete.
 **Wave:** 2
 **Dependencies:** EPIC-002
 **ADRs:** ADR-002 (+ amendment for reconciliation-passes pattern)
@@ -531,6 +531,7 @@
   - `test_no_needs_review_after_cleanup`: simulates the interactive cleanup pass (with deterministic auto-pick) and asserts `needs_review = 1` count drops to 0.
   - `test_consolidated_usd_excludes_bcv_headlines` (per ADR-005 amendment): asserts no headline row uses BCV.
   - `test_p2p_pair_anchored_to_bank` (per ADR-002 amendment): asserts paired transfers identify the Provincial leg as anchor.
+  - `test_rule_002_no_null_transfer_id` (per rule-002, deferred from EPIC-006): asserts `SELECT COUNT(*) FROM transactions WHERE kind='transfer' AND transfer_id IS NULL = 0` across the full post-pipeline DB. This is the CI invariant rule-002 mandates; EPIC-006 enforces it per-call via `create_transfer`, but the DB-wide assertion lives here.
   - `test_earn_position_sum_matches_subscriptions_minus_redemptions` (per ADR-003).
 - Mark all integration tests with `@pytest.mark.integration` and run them via `pytest -m integration` separately from unit tests; CI runs both.
 - Add `make integration` (or `uv run pytest -m integration`) helper.
