@@ -484,12 +484,15 @@ def test_build_report_grand_totals_match_row_sums(
 
     acc_usd = _insert_account(in_memory_db, "Sum USD", currency="USD")
     acc_ves = _insert_account(in_memory_db, "Sum VES", currency="VES")
+    acc_ves_bcv = _insert_account(in_memory_db, "Sum VES BCV-only", currency="VES")
     assert acc_usd.id is not None
     assert acc_ves.id is not None
+    assert acc_ves_bcv.id is not None
 
+    # P2P only from 2026-02-10 onward; BCV from 2026-02-01 onward.
     _insert_rate(
         in_memory_db,
-        as_of=date(2026, 2, 1),
+        as_of=date(2026, 2, 10),
         base="USDT",
         quote="VES",
         rate=Decimal("50"),
@@ -510,25 +513,12 @@ def test_build_report_grand_totals_match_row_sums(
     )
     _insert_txn(
         in_memory_db, acc_ves.id, Decimal("-100.00"), currency="VES",
-        occurred_at=_dt(2026, 2, 5), source_ref="g-2",  # P2P
+        occurred_at=_dt(2026, 2, 15), source_ref="g-2",  # P2P (post 2-10)
     )
-    # BCV-only row (no P2P on this date, carry-forward WILL pick up 2026-02-01
-    # P2P above; so force BCV-only by using a VES-only account with no user_rate
-    # but where P2P is absent before occurred_at) — instead use a currency with
-    # no P2P entries.
-    acc_cop = _insert_account(in_memory_db, "COP Bank", currency="COP")
-    assert acc_cop.id is not None
-    _insert_rate(
-        in_memory_db,
-        as_of=date(2026, 2, 1),
-        base="USD",
-        quote="COP",
-        rate=Decimal("4000"),
-        source="bcv",
-    )
+    # Pre-P2P VES txn: only BCV available -> BCV fallback path.
     _insert_txn(
-        in_memory_db, acc_cop.id, Decimal("-8000.00"), currency="COP",
-        occurred_at=_dt(2026, 2, 8), source_ref="g-3",  # BCV fallback
+        in_memory_db, acc_ves_bcv.id, Decimal("-400.00"), currency="VES",
+        occurred_at=_dt(2026, 2, 5), source_ref="g-3",  # BCV fallback
     )
 
     report = build_report(in_memory_db, month="2026-02")
@@ -565,10 +555,13 @@ def test_render_json_round_trips_with_decimal_strings(
 
     assert isinstance(parsed, dict)
     assert "rows" in parsed
-    assert parsed["grand_total_usd"] == "-4.50"
-    assert parsed["fallback_total_usd"] == "0"
+    # Grand totals are Decimal strings. Arithmetic on Decimal strips trailing
+    # zeros (-4.50 + 0 -> -4.5), so compare values rather than exact format.
+    assert Decimal(parsed["grand_total_usd"]) == Decimal("-4.50")
+    assert Decimal(parsed["fallback_total_usd"]) == Decimal("0")
     assert isinstance(parsed["rows"], list)
-    assert parsed["rows"][0]["total_native"] == "-4.50"
+    # Row-level totals: value equality (Decimal arithmetic trims trailing zeros).
+    assert Decimal(parsed["rows"][0]["total_native"]) == Decimal("-4.50")
     assert isinstance(parsed["rows"][0]["total_usd"], str)
 
 
