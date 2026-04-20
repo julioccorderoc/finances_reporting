@@ -83,6 +83,48 @@ def ingest_bcv() -> None:
     typer.echo(f"bcv: inserted {inserted} rate rows")
 
 
+@ingest_app.command("p2p-rates")
+def ingest_p2p_rates_cmd(
+    as_of: str | None = typer.Option(
+        None,
+        "--as-of",
+        help="Date to stamp on the rate rows in YYYY-MM-DD (Caracas TZ). Defaults to today.",
+    ),
+    asset: str = typer.Option("USDT", "--asset", help="Base asset code."),
+    fiat: str = typer.Option("VES", "--fiat", help="Quote fiat code."),
+    rows: int = typer.Option(10, "--rows", help="Top-N adverts per side."),
+) -> None:
+    """Fetch Binance P2P medians and upsert buy/sell/midpoint rate rows (EPIC-010)."""
+    from datetime import date as _date
+
+    from finances import config as _config
+    from finances.ingest.p2p_rates import ingest_p2p_rates
+
+    if as_of is None:
+        as_of_date = datetime.now(tz=_config.CARACAS_TZ).date()
+    else:
+        try:
+            as_of_date = _date.fromisoformat(as_of)
+        except ValueError as exc:
+            raise typer.BadParameter(f"--as-of must be YYYY-MM-DD: {as_of!r}") from exc
+
+    conn = get_connection(DB_PATH)
+    apply_migrations(conn)
+    try:
+        result = ingest_p2p_rates(
+            conn, as_of_date=as_of_date, asset=asset, fiat=fiat, rows=rows
+        )
+    finally:
+        conn.close()
+
+    typer.echo(
+        f"P2P {asset}/{fiat} @ {as_of_date.isoformat()}: "
+        f"buy={result['buy_median']} sell={result['sell_median']} "
+        f"midpoint={result['midpoint']} "
+        f"(n_buy={result['buy_adverts_used']}, n_sell={result['sell_adverts_used']})"
+    )
+
+
 def _parse_cash_amount(raw: str) -> Decimal:
     try:
         return Decimal(raw)
