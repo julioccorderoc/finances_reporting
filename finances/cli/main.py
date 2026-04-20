@@ -332,6 +332,52 @@ def backfill(
         raise typer.Exit(code=1)
 
 
+@app.command("cleanup-export")
+def cleanup_export(
+    to: Path = typer.Option(
+        Path("needs_review.csv"),
+        "--to",
+        help="CSV destination. Review + fill `category` column in Sheets, then cleanup-apply.",
+    ),
+) -> None:
+    """Dump every needs_review=1 row to a CSV for batch review (EPIC-012)."""
+    from finances.migration.interactive_cleanup import export_needs_review
+
+    conn = get_connection(DB_PATH)
+    apply_migrations(conn)
+    try:
+        count = export_needs_review(conn, to)
+    finally:
+        conn.close()
+    typer.echo(f"cleanup-export: wrote {count} rows to {to}")
+
+
+@app.command("cleanup-apply")
+def cleanup_apply(
+    from_csv: Path = typer.Option(
+        ...,
+        "--from",
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        help="CSV produced by `cleanup-export`, with the `category` column filled.",
+    ),
+) -> None:
+    """Apply a user-edited cleanup CSV back into the ledger (EPIC-012)."""
+    from finances.migration.interactive_cleanup import import_cleanup_csv
+
+    conn = get_connection(DB_PATH)
+    apply_migrations(conn)
+    try:
+        report = import_cleanup_csv(conn, from_csv)
+    finally:
+        conn.close()
+    typer.echo(
+        f"cleanup-apply: seen={report.rows_seen} "
+        f"resolved={report.rows_resolved} skipped={report.rows_skipped}"
+    )
+
+
 @app.command("cleanup")
 def cleanup(
     limit: int = typer.Option(

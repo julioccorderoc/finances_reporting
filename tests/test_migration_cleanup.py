@@ -10,6 +10,7 @@ import sqlite3
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 
@@ -161,3 +162,133 @@ def test_cleanup_unknown_category_raises(
 
     with pytest.raises(ValueError, match="category"):
         run_cleanup(db_with_review_rows, prompt=prompt)
+
+
+# ---------------------------------------------------------------------------
+# CSV round-trip (batch review workflow).
+# ---------------------------------------------------------------------------
+
+
+def test_export_needs_review_writes_csv(
+    db_with_review_rows: sqlite3.Connection, tmp_path: "Path",  # type: ignore[name-defined]
+) -> None:
+    import csv
+
+    from finances.migration.interactive_cleanup import export_needs_review
+
+    dest = tmp_path / "review.csv"
+    count = export_needs_review(db_with_review_rows, dest)
+    assert count == 2
+
+    with dest.open("r", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    assert len(rows) == 2
+    # Required columns so the user can edit in Sheets and hand back.
+    expected_cols = {
+        "id", "occurred_at", "source", "kind", "amount", "currency",
+        "description", "suggested_category", "category", "user_rate",
+    }
+    assert expected_cols <= set(rows[0].keys())
+    # Review-only: resolved rows stay out.
+    ids = {int(r["id"]) for r in rows}
+    resolved_id = db_with_review_rows.execute(
+        "SELECT id FROM transactions WHERE source_ref='hash:aaaa111100000003'"
+    ).fetchone()["id"]
+    assert resolved_id not in ids
+
+
+def test_import_cleanup_csv_applies_categories(
+    db_with_review_rows: sqlite3.Connection, tmp_path: "Path",  # type: ignore[name-defined]
+) -> None:
+    import csv
+    from decimal import Decimal
+
+    from finances.migration.interactive_cleanup import (
+        export_needs_review,
+        import_cleanup_csv,
+    )
+
+    dest = tmp_path / "review.csv"
+    export_needs_review(db_with_review_rows, dest)
+
+    # Fill the category column, leave the second row's user_rate filled.
+    with dest.open("r", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+        fieldnames = rows[0].keys()
+    rows[0]["category"] = "Food"
+    rows[1]["category"] = "Food"
+    rows[1]["user_rate"] = "225"
+    with dest.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    report = import_cleanup_csv(db_with_review_rows, dest)
+    assert report.rows_resolved == 2
+
+    remaining = db_with_review_rows.execute(
+        "SELECT COUNT(*) FROM transactions WHERE needs_review=1"
+    ).fetchone()[0]
+    assert remaining == 0
+
+    applied = db_with_review_rows.execute(
+        "SELECT user_rate FROM transactions WHERE source_ref=?",
+        ("hash:aaaa111100000002",),
+    ).fetchone()
+    assert Decimal(str(applied["user_rate"])) == Decimal("225")
+
+
+def test_import_cleanup_csv_skips_blank_category(
+    db_with_review_rows: sqlite3.Connection, tmp_path: "Path",  # type: ignore[name-defined]
+) -> None:
+    import csv
+
+    from finances.migration.interactive_cleanup import (
+        export_needs_review,
+        import_cleanup_csv,
+    )
+
+    dest = tmp_path / "review.csv"
+    export_needs_review(db_with_review_rows, dest)
+    with dest.open("r", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+        fieldnames = rows[0].keys()
+    rows[0]["category"] = ""         # skipped
+    rows[1]["category"] = "Food"     # applied
+    with dest.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    report = import_cleanup_csv(db_with_review_rows, dest)
+    assert report.rows_resolved == 1
+    assert report.rows_skipped == 1
+    remaining = db_with_review_rows.execute(
+        "SELECT COUNT(*) FROM transactions WHERE needs_review=1"
+    ).fetchone()[0]
+    assert remaining == 1
+
+
+def test_import_cleanup_csv_unknown_category_raises(
+    db_with_review_rows: sqlite3.Connection, tmp_path: "Path",  # type: ignore[name-defined]
+) -> None:
+    import csv
+
+    from finances.migration.interactive_cleanup import (
+        export_needs_review,
+        import_cleanup_csv,
+    )
+
+    dest = tmp_path / "review.csv"
+    export_needs_review(db_with_review_rows, dest)
+    with dest.open("r", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+        fieldnames = rows[0].keys()
+    rows[0]["category"] = "Definitely Not A Category"
+    with dest.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    with pytest.raises(ValueError, match="category"):
+        import_cleanup_csv(db_with_review_rows, dest)

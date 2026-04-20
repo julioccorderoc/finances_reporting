@@ -23,6 +23,10 @@ finances.db
 finances.db-*
 finances.db-journal
 
+# EPIC-012 cleanup workflow — user's personal batch-review CSV
+needs_review.csv
+needs_review_*.csv
+
 # Test artifacts
 .coverage
 .coverage.*
