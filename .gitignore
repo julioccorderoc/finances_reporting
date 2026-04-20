@@ -10,5 +10,15 @@ wheels/
 .venv
 .env
 
+# macOS
+.DS_Store
+
+# local files
 inputs/
 output/
+data/
+
+# SQLite database
+finances.db
+finances.db-*
+finances.db-journal
