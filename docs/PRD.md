@@ -139,7 +139,40 @@ The Sheets mirror exposes four tabs: `Transactions`, `Balances`, `Monthly`, `Nee
 | Categorization rules conflict | Rules use explicit `priority` column; lowest number wins; `needs_review=1` if no rule matches. |
 | SQLite contention with concurrent CLI + cron | WAL mode; readers don't block writers. |
 
-## 10. Open Questions
+## 10. Future Extension Points
+
+The v1 architecture is built so the following extensions can be added later **without breaking changes** — only forward migrations and additive code. They are deliberately not in v1, but the foundation must not preclude them.
+
+### 10.1 Receipt-First Categorization (planned, EPIC-017)
+
+A future mobile app captures receipts at point-of-sale and pushes structured entries (`amount`, `category`, `description`, `merchant`, `receipt_url`, `tax_relevant`). The receipt becomes the source of truth for category and description; later, ingested bank/Binance rows are reconciled against pending receipts.
+
+**Foundation hooks already in place:**
+
+- ADR-006 amendment defines categorization as an **open-ended priority chain** so a `receipt → user override → engine rules → needs_review` order can be added without touching existing rule code.
+- ADR-002 amendment + EPIC-006 generalize transfer pairing into a **reconciliation-passes pattern** (`run_reconciliation_pass(strategy)`); a `ReceiptToTransactionMatch` strategy plugs in alongside `BankAnchoredP2pPairing`.
+- `transactions.source` is `TEXT` (not an enum); accepts `'receipt_match'` or any new value with no migration.
+- ADR-009 (Pydantic at boundaries) means a future `Receipt` model and POST endpoint validate inputs identically to ingest paths.
+
+**Future schema additions (forward migration):** a `receipts` table and a nullable `transactions.receipt_id` FK. No v1 changes required.
+
+### 10.2 Cloud Receipt Storage (planned, EPIC-018)
+
+Receipt images need to live somewhere persistent for tax retention (multi-year). Recommended target: **Google Drive** (already in the user's Workspace stack, sits next to the Sheets mirror, single auth). Alternatives (S3, Supabase Storage) are open if circumstances change. Decision deferred until EPIC-018 lands.
+
+### 10.3 Receipt CLI Stop-Gap (planned, EPIC-019)
+
+Before the mobile app ships: a `finances receipt add <file> --amount ... --category ... --description "..."` command uploads to the chosen storage and inserts the `receipts` row. Same code path the future mobile API will call.
+
+### 10.4 Tax Export (planned, EPIC-020)
+
+A `finances report tax --year YYYY` view emits a deductible-receipts CSV (with cloud URLs) suitable for tax filing. Reads from the `receipts` table; no impact on the transactional ledger.
+
+### 10.5 Mobile Receipt API (planned, EPIC-016)
+
+Authenticated POST endpoint backing the mobile app. Prerequisites are pinned in EPIC-016's roadmap entry; all of them are v1 deliverables.
+
+## 11. Open Questions
 
 - Telegram bot UX (EPIC-015): commands vs. natural language?
 - Mobile receipt API (EPIC-016): auth model (single API token vs. proper OAuth)?
