@@ -354,7 +354,7 @@
 
 ### EPIC-010 — Binance P2P Rate Fetcher
 
-**Status:** Pending
+**Status:** In Review
 **Wave:** 2
 **Dependencies:** EPIC-002
 **ADRs:** ADR-005
