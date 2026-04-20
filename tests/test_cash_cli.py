@@ -66,19 +66,19 @@ def test_ensure_cash_usd_account_creates_when_missing(
 
 
 def test_ensure_cash_usd_account_returns_existing_without_duplicate(
-    seeded_db: sqlite3.Connection,
+    in_memory_db: sqlite3.Connection,
 ) -> None:
     from finances.ingest.cash_cli import (
         CASH_USD_ACCOUNT_NAME,
         ensure_cash_usd_account,
     )
 
-    first = ensure_cash_usd_account(seeded_db)
-    second = ensure_cash_usd_account(seeded_db)
+    first = ensure_cash_usd_account(in_memory_db)
+    second = ensure_cash_usd_account(in_memory_db)
     assert first.id == second.id
     matches = [
         a
-        for a in accounts_repo.list_all(seeded_db, include_inactive=True)
+        for a in accounts_repo.list_all(in_memory_db, include_inactive=True)
         if a.name == CASH_USD_ACCOUNT_NAME
     ]
     assert len(matches) == 1
@@ -130,65 +130,75 @@ def _insert_cash_expense(
     )
 
 
+def _require_expense_category(
+    conn: sqlite3.Connection, name: str
+) -> int:
+    from finances.domain.models import Category
+
+    found = categories_repo.get_by_name(conn, TransactionKind.EXPENSE, name)
+    if found is not None and found.id is not None:
+        return found.id
+    inserted = categories_repo.insert(
+        conn, Category(kind=TransactionKind.EXPENSE, name=name)
+    )
+    assert inserted.id is not None
+    return inserted.id
+
+
 def test_suggest_recent_categories_orders_by_most_recent_usage(
-    seeded_db: sqlite3.Connection,
+    in_memory_db: sqlite3.Connection,
 ) -> None:
     from finances.ingest.cash_cli import (
         ensure_cash_usd_account,
         suggest_recent_categories,
     )
 
-    cash = ensure_cash_usd_account(seeded_db)
+    cash = ensure_cash_usd_account(in_memory_db)
     assert cash.id is not None
-    food = categories_repo.get_by_name(seeded_db, TransactionKind.EXPENSE, "Food")
-    transport = categories_repo.get_by_name(
-        seeded_db, TransactionKind.EXPENSE, "Transport"
-    )
-    fees = categories_repo.get_by_name(seeded_db, TransactionKind.EXPENSE, "Fees")
-    assert food and food.id is not None
-    assert transport and transport.id is not None
-    assert fees and fees.id is not None
+    food_id = _require_expense_category(in_memory_db, "Food")
+    transport_id = _require_expense_category(in_memory_db, "Transport")
+    fees_id = _require_expense_category(in_memory_db, "Fees")
 
     _insert_cash_expense(
-        seeded_db,
+        in_memory_db,
         account_id=cash.id,
-        category_id=fees.id,
+        category_id=fees_id,
         occurred_at=datetime(2026, 1, 1, tzinfo=UTC),
         amount="-1",
         source_ref="ref-fees",
     )
     _insert_cash_expense(
-        seeded_db,
+        in_memory_db,
         account_id=cash.id,
-        category_id=transport.id,
+        category_id=transport_id,
         occurred_at=datetime(2026, 2, 1, tzinfo=UTC),
         amount="-2",
         source_ref="ref-transport",
     )
     _insert_cash_expense(
-        seeded_db,
+        in_memory_db,
         account_id=cash.id,
-        category_id=food.id,
+        category_id=food_id,
         occurred_at=datetime(2026, 3, 1, tzinfo=UTC),
         amount="-3",
         source_ref="ref-food",
     )
 
-    suggestions = suggest_recent_categories(seeded_db, cash.id, limit=2)
+    suggestions = suggest_recent_categories(in_memory_db, cash.id, limit=2)
     assert [c.name for c in suggestions] == ["Food", "Transport"]
 
 
 def test_suggest_recent_categories_returns_empty_when_no_usage(
-    seeded_db: sqlite3.Connection,
+    in_memory_db: sqlite3.Connection,
 ) -> None:
     from finances.ingest.cash_cli import (
         ensure_cash_usd_account,
         suggest_recent_categories,
     )
 
-    cash = ensure_cash_usd_account(seeded_db)
+    cash = ensure_cash_usd_account(in_memory_db)
     assert cash.id is not None
-    assert suggest_recent_categories(seeded_db, cash.id) == []
+    assert suggest_recent_categories(in_memory_db, cash.id) == []
 
 
 # ---------------------------------------------------------------------------
@@ -227,20 +237,19 @@ def test_add_cash_expense_writes_negative_transaction_with_uuid_source_ref(
 
 
 def test_add_cash_expense_records_category_when_provided(
-    seeded_db: sqlite3.Connection,
+    in_memory_db: sqlite3.Connection,
 ) -> None:
     from finances.ingest.cash_cli import add_cash_expense
 
-    food = categories_repo.get_by_name(seeded_db, TransactionKind.EXPENSE, "Food")
-    assert food and food.id is not None
+    food_id = _require_expense_category(in_memory_db, "Food")
     txn = add_cash_expense(
-        seeded_db,
+        in_memory_db,
         amount=Decimal("8.50"),
         description="arepas",
         occurred_at=datetime(2026, 4, 15, tzinfo=UTC),
-        category_id=food.id,
+        category_id=food_id,
     )
-    assert txn.category_id == food.id
+    assert txn.category_id == food_id
     assert txn.amount == Decimal("-8.50")
 
 
@@ -346,7 +355,13 @@ def test_cli_cash_add_uses_explicit_date_flag(cli_db: Path) -> None:
             "WHERE source = 'cash_cli' ORDER BY id DESC LIMIT 1"
         ).fetchone()
         assert row is not None
-        assert "2026-01-15" in row["occurred_at"]
+        occurred_at = row["occurred_at"]
+        rendered = (
+            occurred_at.isoformat()
+            if hasattr(occurred_at, "isoformat")
+            else str(occurred_at)
+        )
+        assert "2026-01-15" in rendered
     finally:
         conn.close()
 
