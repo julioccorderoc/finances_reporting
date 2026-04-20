@@ -8,6 +8,7 @@ end of the backfill.
 """
 from __future__ import annotations
 
+import csv as _csv
 import sqlite3
 from decimal import Decimal
 from pathlib import Path
@@ -15,6 +16,35 @@ from pathlib import Path
 import pytest
 
 FIXTURES = Path(__file__).parent / "fixtures" / "backfill"
+
+_PROVINCIAL_HEADERS = [
+    "Fecha", "Month", "Month-week", "Week", "Referencia", "Descripción",
+    "Sub-Category", "Monto", "Tipo", "Tasa del día", "Monto (BCV)",
+    "Tasa USDT", "Monto (USDT)", "Comentarios", "Category",
+]
+_BINANCE_HEADERS = [
+    "Fecha", "Cuenta", "Operación", "Coin", "Amount", "Remark",
+    "Month", "Week", "Sub-Category", "Category", "Type",
+]
+
+
+def _write_csv(path: Path, headers: list[str], rows: list[dict[str, str]]) -> None:
+    """Emit a legacy-shape CSV (3 empty prelude rows, then header, then data)."""
+    with path.open("w", encoding="utf-8", newline="") as fh:
+        writer = _csv.writer(fh)
+        for _ in range(3):
+            writer.writerow([""] * len(headers))
+        writer.writerow(headers)
+        for row in rows:
+            writer.writerow([row.get(h, "") for h in headers])
+
+
+def _write_provincial_csv(path: Path, rows: list[dict[str, str]]) -> None:
+    _write_csv(path, _PROVINCIAL_HEADERS, rows)
+
+
+def _write_binance_csv(path: Path, rows: list[dict[str, str]]) -> None:
+    _write_csv(path, _BINANCE_HEADERS, rows)
 
 
 @pytest.fixture
@@ -177,6 +207,177 @@ def test_run_backfill_force_bypasses_guard(
     # Must not raise. Returns a fresh report.
     second = run_backfill(in_memory_db, backfill_data_dir, force=True)
     assert second.binance_rows_inserted == 0
+
+
+def test_derive_p2p_rates_greedy_empty_when_rate_lookup_covers_all(
+    tmp_path: Path,
+) -> None:
+    """When the Provincial ``Tasa USDT`` column is populated, the date-keyed
+    lookup in ``build_rate_index_from_provincial`` already stamps
+    ``user_rate`` on the Binance side — there is nothing for the greedy
+    fallback to derive, so the returned map is empty."""
+    from finances.migration.backfill import (
+        build_rate_index_from_provincial,
+        derive_p2p_rates_greedy,
+    )
+
+    prov = tmp_path / "prov.csv"
+    bin_ = tmp_path / "bin.csv"
+    _write_provincial_csv(prov, [
+        {"Fecha": "05-Nov-2025", "Sub-Category": "Exchange",
+         "Monto": "Bs 32,000.00", "Tasa USDT": "Bs 320.00"},
+    ])
+    _write_binance_csv(bin_, [
+        {"Fecha": "05-Nov-2025", "Cuenta": "Funding", "Operación": "P2P-Sell",
+         "Coin": "USDT", "Amount": "-$100.00", "Remark": "P2P - 99900001"},
+    ])
+
+    rate_lookup = build_rate_index_from_provincial(prov)
+    derived = derive_p2p_rates_greedy(bin_, prov, rate_lookup=rate_lookup)
+
+    assert derived == {}
+
+
+def test_derive_p2p_rates_greedy_single_pair(tmp_path: Path) -> None:
+    """Binance orphan (no rate on that date) gets a rate derived from the
+    same-day Provincial ``Exchange`` row's Bs amount divided by the USDT
+    amount on the Binance leg."""
+    from finances.migration.backfill import derive_p2p_rates_greedy
+
+    prov = tmp_path / "prov.csv"
+    bin_ = tmp_path / "bin.csv"
+    _write_provincial_csv(prov, [
+        {"Fecha": "04-Apr-2026", "Sub-Category": "Exchange",
+         "Monto": "Bs 20,000.00", "Tasa USDT": ""},
+    ])
+    _write_binance_csv(bin_, [
+        {"Fecha": "04-Apr-2026", "Cuenta": "Funding", "Operación": "P2P-Sell",
+         "Coin": "USDT", "Amount": "-$31.85", "Remark": "P2P - hash:abc123"},
+    ])
+
+    derived = derive_p2p_rates_greedy(bin_, prov, rate_lookup={})
+
+    assert "p2p:hash:abc123" in derived
+    expected = Decimal("20000") / Decimal("31.85")
+    # Allow sub-cent difference from Decimal division rounding.
+    assert abs(derived["p2p:hash:abc123"] - expected) < Decimal("0.01")
+
+
+def test_derive_p2p_rates_greedy_pairs_by_descending_magnitude(
+    tmp_path: Path,
+) -> None:
+    """Greedy policy: sort both Provincial Bs amounts and Binance USDT
+    amounts by magnitude descending, then pair position-wise. Deterministic
+    regardless of CSV row order."""
+    from finances.migration.backfill import derive_p2p_rates_greedy
+
+    prov = tmp_path / "prov.csv"
+    bin_ = tmp_path / "bin.csv"
+    # Small row appears before large in CSV — greedy still pairs large↔large.
+    _write_provincial_csv(prov, [
+        {"Fecha": "04-Apr-2026", "Sub-Category": "Exchange",
+         "Monto": "Bs 10,000.00", "Tasa USDT": ""},
+        {"Fecha": "04-Apr-2026", "Sub-Category": "Exchange",
+         "Monto": "Bs 50,000.00", "Tasa USDT": ""},
+    ])
+    _write_binance_csv(bin_, [
+        {"Fecha": "04-Apr-2026", "Cuenta": "Funding", "Operación": "P2P-Sell",
+         "Coin": "USDT", "Amount": "-$20.00", "Remark": "P2P - SMALL"},
+        {"Fecha": "04-Apr-2026", "Cuenta": "Funding", "Operación": "P2P-Sell",
+         "Coin": "USDT", "Amount": "-$100.00", "Remark": "P2P - BIG"},
+    ])
+
+    derived = derive_p2p_rates_greedy(bin_, prov, rate_lookup={})
+
+    # 50000/100 = 500 (largest pair), 10000/20 = 500 (smaller pair).
+    assert derived["p2p:BIG"] == Decimal("500")
+    assert derived["p2p:SMALL"] == Decimal("500")
+
+
+def test_derive_p2p_rates_greedy_skips_date_without_provincial_exchange(
+    tmp_path: Path,
+) -> None:
+    """October 2025 orphans: Binance P2P-Sell with no Provincial Exchange
+    row on the same date stays orphan. The greedy pass must not invent a
+    rate from unrelated Provincial rows."""
+    from finances.migration.backfill import derive_p2p_rates_greedy
+
+    prov = tmp_path / "prov.csv"
+    bin_ = tmp_path / "bin.csv"
+    _write_provincial_csv(prov, [
+        # A non-Exchange provincial row on the same date must not be used.
+        {"Fecha": "30-Oct-2025", "Sub-Category": "Food",
+         "Monto": "-Bs 280.00", "Tasa USDT": "Bs 229.00"},
+    ])
+    _write_binance_csv(bin_, [
+        {"Fecha": "30-Oct-2025", "Cuenta": "Funding", "Operación": "P2P-Sell",
+         "Coin": "USDT", "Amount": "-$66.00",
+         "Remark": "P2P - 22817265469083672576"},
+    ])
+
+    derived = derive_p2p_rates_greedy(bin_, prov, rate_lookup={})
+    assert derived == {}
+
+
+def test_derive_p2p_rates_greedy_only_fills_orphans(tmp_path: Path) -> None:
+    """When the date-keyed rate_lookup already has a rate for a date,
+    greedy does not emit an entry for that date's orphans — ``user_rate``
+    is already stamped upstream. This avoids double-writing rates."""
+    from finances.migration.backfill import derive_p2p_rates_greedy
+
+    prov = tmp_path / "prov.csv"
+    bin_ = tmp_path / "bin.csv"
+    _write_provincial_csv(prov, [
+        {"Fecha": "05-Nov-2025", "Sub-Category": "Exchange",
+         "Monto": "Bs 32,000.00", "Tasa USDT": "Bs 320.00"},
+    ])
+    _write_binance_csv(bin_, [
+        {"Fecha": "05-Nov-2025", "Cuenta": "Funding", "Operación": "P2P-Sell",
+         "Coin": "USDT", "Amount": "-$100.00", "Remark": "P2P - 99900001"},
+    ])
+
+    # date-keyed lookup hit — greedy stays out.
+    derived = derive_p2p_rates_greedy(
+        bin_, prov, rate_lookup={__import__("datetime").date(2025, 11, 5): Decimal("320")}
+    )
+    assert derived == {}
+
+
+def test_run_backfill_stamps_derived_rate_on_orphan_p2p_sell(
+    in_memory_db: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """End-to-end: a Binance P2P-Sell with no Tasa USDT rate, paired with
+    a same-day Provincial Exchange row, ends up with a derived ``user_rate``
+    in the database and its transfer_id populated by the reconciliation
+    pass (pairing then works as if the rate had been in the CSV)."""
+    from finances.migration.backfill import run_backfill
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    _write_provincial_csv(data_dir / "Finanzas - Provincial.csv", [
+        {"Fecha": "04-Apr-2026", "Sub-Category": "Exchange",
+         "Descripción": "Venta USDT",
+         "Monto": "Bs 20,000.00", "Tipo": "Transfer",
+         "Tasa USDT": ""},
+    ])
+    _write_binance_csv(data_dir / "Finanzas - Binance.csv", [
+        {"Fecha": "04-Apr-2026", "Cuenta": "Funding", "Operación": "P2P-Sell",
+         "Coin": "USDT", "Amount": "-$31.85",
+         "Remark": "P2P - hash:abc123"},
+    ])
+    # BCV CSV is optional-ish but run_backfill checks for its existence path.
+    _write_csv(data_dir / "Finanzas - BCV.csv", ["Dia", "USD", "EURO"], [])
+
+    run_backfill(in_memory_db, data_dir)
+
+    bin_rate = in_memory_db.execute(
+        "SELECT user_rate FROM transactions "
+        "WHERE source='binance' AND description LIKE 'P2P SELL%'"
+    ).fetchone()
+    assert bin_rate is not None
+    rate = Decimal(str(bin_rate["user_rate"]))
+    # 20,000 / 31.85 ≈ 627.94
+    assert Decimal("627") < rate < Decimal("629")
 
 
 def test_provincial_rows_carry_user_rate_from_tasa_usdt(
