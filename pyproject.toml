@@ -31,3 +31,58 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["finances"]
+
+[dependency-groups]
+dev = [
+    "hypothesis>=6.152.1",
+    "polyfactory>=3.3.0",
+    "pytest-cov>=7.1.0",
+    "pytest-mock>=3.15.1",
+    "responses>=0.26.0",
+]
+
+# -----------------------------------------------------------------------------
+# Pytest configuration (EPIC-002b / ADR-011 / rule-011).
+# -----------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+markers = [
+    "snapshot: golden-file snapshot tests (test-after by nature; exempt from TDD-evidence audit per rule-011).",
+    "smoke: fast smoke tests that exercise wiring rather than logic.",
+]
+
+# -----------------------------------------------------------------------------
+# Coverage configuration (EPIC-002b / rule-011).
+#
+# Default floor is 85% for the `finances` package. `finances/cli/**` and
+# `finances/reports/**` are excluded from the v1 gate (revisit after EPIC-021).
+# `finances/ingest/**` is nominally held to 70% once EPIC-004..011 land; until
+# those modules exist, the default 85% floor applies to whatever is imported.
+# Downstream epics should lower per-file floors via `# pragma: no cover` on
+# documented-unreachable branches rather than editing this config.
+# TODO(EPIC-004..011): bump `finances/ingest/**` coverage to 70% via per-file
+# pragmas once the ingest adapters ship; until then the default 85% floor runs.
+# -----------------------------------------------------------------------------
+[tool.coverage.run]
+source = ["finances"]
+branch = true
+omit = [
+    "finances/cli/*",
+    "finances/cli/**/*",
+    "finances/reports/*",
+    "finances/reports/**/*",
+    "finances/migration/*",
+    "finances/migration/**/*",
+]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+skip_covered = false
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "pragma: no cover",
+    "raise NotImplementedError",
+]

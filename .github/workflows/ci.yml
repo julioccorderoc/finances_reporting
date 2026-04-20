@@ -1,0 +1,53 @@
+# CI pipeline for finances-reporting.
+#
+# coverage-gate: enforces the 85% floor defined by rule-011
+#   (docs/architecture/rules/rule-011-tdd-discipline.md). If this job fails
+#   on coverage, the PR is blocked from merging. Downstream epics lower
+#   per-file floors via `# pragma: no cover` rather than editing this file.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: pytest + coverage (rule-011 gate)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Set up Python 3.13
+        run: uv python install 3.13
+
+      - name: Install project + dev dependencies
+        run: uv sync --dev
+
+      # coverage-gate: --cov-fail-under is redundant with
+      # [tool.coverage.report] fail_under = 85 in pyproject.toml, but keeping
+      # it explicit here makes the CI output self-documenting.
+      - name: Run tests with coverage
+        run: |
+          uv run pytest \
+            --cov=finances \
+            --cov-report=xml \
+            --cov-report=term \
+            --cov-fail-under=85
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          if-no-files-found: ignore
