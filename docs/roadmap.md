@@ -384,7 +384,7 @@
 
 ### EPIC-011 — Cash CLI Tool
 
-**Status:** Pending
+**Status:** In Review — implementation + tests green on `main` (RED `4ad7dea`, GREEN bundled into `1d6b154`); awaiting user verification per criteria below.
 **Wave:** 2
 **Dependencies:** EPIC-002 (benefits from EPIC-004)
 **ADRs:** ADR-008
