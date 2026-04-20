@@ -1,0 +1,36 @@
+{
+  "buy": {
+    "code": "000000",
+    "success": true,
+    "data": [
+      {"adv": {"advNo": "BUY-1", "price": "149.50", "asset": "USDT", "fiatUnit": "VES"}},
+      {"adv": {"advNo": "BUY-2", "price": "149.75", "asset": "USDT", "fiatUnit": "VES"}},
+      {"adv": {"advNo": "BUY-3", "price": "149.80", "asset": "USDT", "fiatUnit": "VES"}},
+      {"adv": {"advNo": "BUY-4", "price": "149.90", "asset": "USDT", "fiatUnit": "VES"}},
+      {"adv": {"advNo": "BUY-5", "price": "149.95", "asset": "USDT", "fiatUnit": "VES"}},
+      {"adv": {"advNo": "BUY-6", "price": "150.05", "asset": "USDT", "fiatUnit": "VES"}},
+      {"adv": {"advNo": "BUY-7", "price": "150.10", "asset": "USDT", "fiatUnit": "VES"}},
+      {"adv": {"advNo": "BUY-8", "price": "150.20", "asset": "USDT", "fiatUnit": "VES"}},
+      {"adv": {"advNo": "BUY-9", "price": "150.25", "asset": "USDT", "fiatUnit": "VES"}},
+      {"adv": {"advNo": "BUY-10", "price": "150.50", "asset": "USDT", "fiatUnit": "VES"}}
+    ],
+    "total": 10
+  },
+  "sell": {
+    "code": "000000",
+    "success": true,
+    "data": [
+      {"adv": {"advNo": "SELL-1", "price": "150.10", "asset": "USDT", "fiatUnit": "VES"}},
+      {"adv": {"advNo": "SELL-2", "price": "150.25", "asset": "USDT", "fiatUnit": "VES"}},
+      {"adv": {"advNo": "SELL-3", "price": "150.40", "asset": "USDT", "fiatUnit": "VES"}},
+      {"adv": {"advNo": "SELL-4", "price": "150.55", "asset": "USDT", "fiatUnit": "VES"}},
+      {"adv": {"advNo": "SELL-5", "price": "150.65", "asset": "USDT", "fiatUnit": "VES"}},
+      {"adv": {"advNo": "SELL-6", "price": "150.75", "asset": "USDT", "fiatUnit": "VES"}},
+      {"adv": {"advNo": "SELL-7", "price": "150.85", "asset": "USDT", "fiatUnit": "VES"}},
+      {"adv": {"advNo": "SELL-8", "price": "151.00", "asset": "USDT", "fiatUnit": "VES"}},
+      {"adv": {"advNo": "SELL-9", "price": "151.15", "asset": "USDT", "fiatUnit": "VES"}},
+      {"adv": {"advNo": "SELL-10", "price": "151.40", "asset": "USDT", "fiatUnit": "VES"}}
+    ],
+    "total": 10
+  }
+}
