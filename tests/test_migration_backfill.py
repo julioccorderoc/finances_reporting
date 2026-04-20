@@ -380,6 +380,58 @@ def test_run_backfill_stamps_derived_rate_on_orphan_p2p_sell(
     assert Decimal("627") < rate < Decimal("629")
 
 
+def test_run_backfill_auto_categorizes_matching_rows(
+    in_memory_db: sqlite3.Connection, backfill_data_dir: Path
+) -> None:
+    """Per ADR-006 / rule-006, the categorization engine runs as part of
+    the backfill. Rows whose description hits a seeded rule must come out
+    with ``category_id`` set and ``needs_review=0``; unmatched rows stay
+    ``needs_review=1`` with ``category_id IS NULL``."""
+    from finances.migration.backfill import run_backfill
+
+    report = run_backfill(in_memory_db, backfill_data_dir)
+
+    # "PANADERIA LUISANA 2004" matches the seeded ``PANADERIA|PANADERÍA``
+    # rule. After backfill it must be categorized and cleared for review.
+    matched = in_memory_db.execute(
+        "SELECT category_id, needs_review FROM transactions "
+        "WHERE description LIKE '%PANADERIA%'"
+    ).fetchone()
+    assert matched is not None
+    assert matched["category_id"] is not None
+    assert matched["needs_review"] == 0
+
+    # "COM. PAGO MOVIL" matches the bank-commission rule.
+    commission = in_memory_db.execute(
+        "SELECT category_id, needs_review FROM transactions "
+        "WHERE description LIKE 'COM. PAGO MOVIL%'"
+    ).fetchone()
+    assert commission is not None
+    assert commission["category_id"] is not None
+    assert commission["needs_review"] == 0
+
+    # Report surfaces the count so the orchestrator can log it.
+    assert report.rows_categorized >= 2
+
+
+def test_run_backfill_leaves_unmatched_rows_needing_review(
+    in_memory_db: sqlite3.Connection, backfill_data_dir: Path
+) -> None:
+    """The Binance deposit ``Test paycheck`` description does not match any
+    seeded rule — it must stay ``needs_review=1``, ``category_id`` NULL."""
+    from finances.migration.backfill import run_backfill
+
+    run_backfill(in_memory_db, backfill_data_dir)
+
+    row = in_memory_db.execute(
+        "SELECT category_id, needs_review FROM transactions "
+        "WHERE description LIKE '%Test paycheck%'"
+    ).fetchone()
+    assert row is not None
+    assert row["category_id"] is None
+    assert row["needs_review"] == 1
+
+
 def test_provincial_rows_carry_user_rate_from_tasa_usdt(
     in_memory_db: sqlite3.Connection, backfill_data_dir: Path
 ) -> None:
