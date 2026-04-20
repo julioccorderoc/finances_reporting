@@ -140,25 +140,6 @@ def in_memory_db() -> Iterator[sqlite3.Connection]:
 # ---------------------------------------------------------------------------
 
 
-# NOTE: This inline seed mirrors the v1 taxonomy described in EPIC-004's planning
-# doc (income / expense / transfer / adjustment). Once EPIC-004 ships a real
-# seed file under `finances/db/seeds/` (or similar), replace the inline calls
-# below with a loader that reads that file. Keeping the seed inline avoids
-# cross-epic coupling — a seed schema change in EPIC-004 should not break this
-# fixture's contract.
-_V1_CATEGORIES: tuple[tuple[TransactionKind, str], ...] = (
-    (TransactionKind.INCOME, "Salary"),
-    (TransactionKind.INCOME, "Interest"),
-    (TransactionKind.INCOME, "Other Income"),
-    (TransactionKind.EXPENSE, "Food"),
-    (TransactionKind.EXPENSE, "Transport"),
-    (TransactionKind.EXPENSE, "Utilities"),
-    (TransactionKind.EXPENSE, "Fees"),
-    (TransactionKind.EXPENSE, "Other Expense"),
-    (TransactionKind.TRANSFER, "Internal Transfer"),
-    (TransactionKind.ADJUSTMENT, "Manual Adjustment"),
-)
-
 _V1_ACCOUNTS: tuple[tuple[str, AccountKind, str, str | None], ...] = (
     ("Provincial Bolivares", AccountKind.BANK, "VES", "Provincial"),
     ("Binance Spot", AccountKind.CRYPTO_SPOT, "USDT", "Binance"),
@@ -170,26 +151,19 @@ _V1_ACCOUNTS: tuple[tuple[str, AccountKind, str, str | None], ...] = (
 
 @pytest.fixture
 def seeded_db(in_memory_db: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
-    """``in_memory_db`` + v1 taxonomy and minimal accounts.
+    """``in_memory_db`` + minimal v1 accounts.
 
-    Builds on the ``in_memory_db`` fixture so future migrations and pragmas
-    stay in one place. Yields the same connection — downstream tests can query
-    the seeded data directly or insert additional fixtures through the repo
-    layer.
-
-    TODO(EPIC-004): replace this inline seed with the canonical categories +
-    rules seed file once EPIC-004 merges.
+    The v1 category taxonomy is seeded by migration ``002_seed_categories.sql``
+    (EPIC-004) and is therefore already present in ``in_memory_db``; this
+    fixture only adds the accounts test fixtures rely on.
     """
     from finances.db.repos import accounts as accounts_repo
-    from finances.db.repos import categories as categories_repo
 
     for name, kind, currency, institution in _V1_ACCOUNTS:
         accounts_repo.insert(
             in_memory_db,
             Account(name=name, kind=kind, currency=currency, institution=institution),
         )
-    for kind, name in _V1_CATEGORIES:
-        categories_repo.insert(in_memory_db, Category(kind=kind, name=name))
 
     yield in_memory_db
 

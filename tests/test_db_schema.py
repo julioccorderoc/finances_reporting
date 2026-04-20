@@ -54,12 +54,16 @@ def seeded(db_conn: sqlite3.Connection) -> dict[str, int]:
         db_conn,
         Account(name="Binance Earn", kind=AccountKind.CRYPTO_EARN, currency="USDT"),
     )
-    cat_salary = categories_repo.insert(
-        db_conn, Category(kind=TransactionKind.INCOME, name="Salary")
+    # Reuse the v1-taxonomy rows seeded by 002_seed_categories.sql instead of
+    # re-inserting (the UNIQUE(kind, name) constraint rejects the duplicate).
+    cat_salary = categories_repo.get_by_name(
+        db_conn, TransactionKind.INCOME, "Salary"
     )
-    cat_food = categories_repo.insert(
-        db_conn, Category(kind=TransactionKind.EXPENSE, name="Food")
+    assert cat_salary is not None
+    cat_food = categories_repo.get_by_name(
+        db_conn, TransactionKind.EXPENSE, "Food"
     )
+    assert cat_food is not None
 
     now = datetime(2026, 4, 1, 12, 0, tzinfo=UTC)
     transactions_repo.upsert_by_source_ref(
@@ -169,25 +173,28 @@ def test_accounts_insertable_and_queryable(db_conn: sqlite3.Connection) -> None:
 
 
 def test_categories_insertable_and_queryable(db_conn: sqlite3.Connection) -> None:
+    # Use a name not present in the v1 taxonomy seeded by 002_seed_categories.sql.
     cat = categories_repo.insert(
-        db_conn, Category(kind=TransactionKind.EXPENSE, name="Transport")
+        db_conn, Category(kind=TransactionKind.EXPENSE, name="SchemaProbe")
     )
     assert cat.id is not None
-    fetched = categories_repo.get_by_name(db_conn, TransactionKind.EXPENSE, "Transport")
+    fetched = categories_repo.get_by_name(db_conn, TransactionKind.EXPENSE, "SchemaProbe")
     assert fetched is not None
     assert fetched.id == cat.id
 
 
 def test_category_rules_insertable(db_conn: sqlite3.Connection) -> None:
     cat = categories_repo.insert(
-        db_conn, Category(kind=TransactionKind.EXPENSE, name="Fees")
+        db_conn, Category(kind=TransactionKind.EXPENSE, name="RulesSchemaProbe")
     )
     db_conn.execute(
         "INSERT INTO category_rules (pattern, category_id, source, priority) VALUES (?, ?, ?, ?)",
-        ("(?i)fee", cat.id, "provincial", 10),
+        ("(?i)probe", cat.id, "schema_test", 10),
     )
-    row = db_conn.execute("SELECT pattern, priority FROM category_rules").fetchone()
-    assert row["pattern"] == "(?i)fee"
+    row = db_conn.execute(
+        "SELECT pattern, priority FROM category_rules WHERE source = 'schema_test'"
+    ).fetchone()
+    assert row["pattern"] == "(?i)probe"
     assert row["priority"] == 10
 
 
@@ -403,9 +410,13 @@ def test_migrate_is_idempotent(tmp_path: Path) -> None:
     first = apply_migrations(conn)
     second = apply_migrations(conn)
     assert "001_initial.sql" in first
+    assert "002_seed_categories.sql" in first
     assert second == []
     rows = conn.execute("SELECT filename FROM _migrations").fetchall()
-    assert {r["filename"] for r in rows} == {"001_initial.sql"}
+    assert {r["filename"] for r in rows} == {
+        "001_initial.sql",
+        "002_seed_categories.sql",
+    }
     conn.close()
 
 
