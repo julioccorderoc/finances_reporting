@@ -1,0 +1,12 @@
+{
+  "total": 1,
+  "rows": [
+    {
+      "asset": "USDT",
+      "rewards": "0.25",
+      "time": 1773338400000,
+      "type": "BONUS",
+      "projectId": "INT-EARN-USDT-001"
+    }
+  ]
+}

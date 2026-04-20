@@ -1,0 +1,11 @@
+{
+  "total": 1,
+  "rows": [
+    {
+      "productId": "INT-PROD-USDT-001",
+      "asset": "USDT",
+      "totalAmount": "1500.00",
+      "apr": "0.0475"
+    }
+  ]
+}

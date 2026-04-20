@@ -1,0 +1,13 @@
+{
+  "total": 1,
+  "rows": [
+    {
+      "tranId": 88881,
+      "type": "MAIN_FUNDING",
+      "asset": "USDT",
+      "amount": "30.00",
+      "timestamp": 1773050400000,
+      "status": "CONFIRMED"
+    }
+  ]
+}

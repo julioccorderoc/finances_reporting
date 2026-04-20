@@ -1,0 +1,17 @@
+{
+  "code": "000000",
+  "success": true,
+  "data": [
+    {"adv": {"advNo": "SELL-1", "price": "150.10", "asset": "USDT", "fiatUnit": "VES"}},
+    {"adv": {"advNo": "SELL-2", "price": "150.25", "asset": "USDT", "fiatUnit": "VES"}},
+    {"adv": {"advNo": "SELL-3", "price": "150.40", "asset": "USDT", "fiatUnit": "VES"}},
+    {"adv": {"advNo": "SELL-4", "price": "150.55", "asset": "USDT", "fiatUnit": "VES"}},
+    {"adv": {"advNo": "SELL-5", "price": "150.65", "asset": "USDT", "fiatUnit": "VES"}},
+    {"adv": {"advNo": "SELL-6", "price": "150.75", "asset": "USDT", "fiatUnit": "VES"}},
+    {"adv": {"advNo": "SELL-7", "price": "150.85", "asset": "USDT", "fiatUnit": "VES"}},
+    {"adv": {"advNo": "SELL-8", "price": "151.00", "asset": "USDT", "fiatUnit": "VES"}},
+    {"adv": {"advNo": "SELL-9", "price": "151.15", "asset": "USDT", "fiatUnit": "VES"}},
+    {"adv": {"advNo": "SELL-10", "price": "151.40", "asset": "USDT", "fiatUnit": "VES"}}
+  ],
+  "total": 10
+}

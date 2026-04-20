@@ -1,0 +1,25 @@
+{
+  "data": [
+    {
+      "orderNumber": "P2P-INT-001",
+      "tradeType": "SELL",
+      "asset": "USDT",
+      "amount": "50.00",
+      "unitPrice": "150.00",
+      "fiat": "VES",
+      "createTime": 1773489600000,
+      "orderStatus": "COMPLETED"
+    },
+    {
+      "orderNumber": "P2P-INT-002",
+      "tradeType": "SELL",
+      "asset": "USDT",
+      "amount": "100.00",
+      "unitPrice": "150.00",
+      "fiat": "VES",
+      "createTime": 1773403200000,
+      "orderStatus": "COMPLETED"
+    }
+  ],
+  "total": 2
+}
