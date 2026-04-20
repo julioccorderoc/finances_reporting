@@ -1,0 +1,20 @@
+<!doctype html>
+<html>
+<head><title>BCV — mangled</title></head>
+<body>
+<!--
+  Simulated BCV page where the exchange-rate table has been re-laid-out
+  upstream (tbody removed / renamed / emptied). Used by EPIC-009 tests to
+  verify the scraper aborts cleanly on layout drift (rule-007):
+    - non-zero signal (BcvParseError raised),
+    - import_runs row flagged status='error',
+    - no rates rows written.
+-->
+<div class="page">
+  <h1>Tipo de cambio de referencia</h1>
+  <section>
+    <p>Content moved. Visit the new page.</p>
+  </section>
+</div>
+</body>
+</html>
