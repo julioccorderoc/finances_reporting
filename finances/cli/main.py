@@ -277,6 +277,106 @@ def cash_add(
         typer.echo(f"Recent categories on this account: {hints}")
 
 
+@app.command("backfill")
+def backfill(
+    from_dir: Path = typer.Option(
+        ...,
+        "--from",
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        readable=True,
+        help="Directory holding the legacy CSVs (Finanzas - *.csv).",
+    ),
+    pairing_window_days: int = typer.Option(
+        2,
+        "--pairing-window-days",
+        help="±Day window used for bank-anchored P2P pairing (default 2).",
+    ),
+) -> None:
+    """One-time backfill of historical CSVs through production ingest (EPIC-012)."""
+    from finances.migration.backfill import run_backfill
+
+    conn = get_connection(DB_PATH)
+    apply_migrations(conn)
+    try:
+        report = run_backfill(
+            conn, from_dir, pairing_window_days=pairing_window_days
+        )
+    finally:
+        conn.close()
+
+    typer.echo(
+        f"backfill: binance={report.binance_rows_inserted}/{report.binance_rows_seen} "
+        f"provincial={report.provincial_rows_inserted}/{report.provincial_rows_seen} "
+        f"bcv_rates={report.bcv_rates_inserted}/{report.bcv_rows_seen} "
+        f"errors={len(report.errors)}"
+    )
+    if report.reconciliation is not None:
+        rec = report.reconciliation
+        typer.echo(
+            f"  pairing ({rec.strategy}): "
+            f"found={rec.proposals_found} applied={rec.proposals_applied}"
+        )
+    for err in report.errors:
+        typer.echo(f"  err: {err}", err=True)
+    if report.errors:
+        raise typer.Exit(code=1)
+
+
+@app.command("cleanup")
+def cleanup(
+    limit: int = typer.Option(
+        0,
+        "--limit",
+        help="Stop after N rows (0 = walk every needs_review row).",
+    ),
+) -> None:
+    """Interactive pass that resolves `needs_review=1` rows (EPIC-012)."""
+    from finances.migration.interactive_cleanup import run_cleanup
+
+    conn = get_connection(DB_PATH)
+    apply_migrations(conn)
+    processed = {"n": 0}
+
+    def _prompt(row: Any) -> tuple[str | None, str | None]:
+        processed["n"] += 1
+        typer.echo("")
+        typer.echo(
+            f"[{processed['n']}] {row['occurred_at']}  "
+            f"{row['source']}  {row['kind']}  "
+            f"{row['amount']} {row['currency']}  — {row['description']}"
+        )
+        category = typer.prompt(
+            "  category (blank to skip)", default="", show_default=False
+        )
+        if not category.strip():
+            return (None, None)
+        rate = typer.prompt(
+            "  user_rate (blank to leave unset)",
+            default="",
+            show_default=False,
+        )
+        return (category.strip(), rate.strip() or None)
+
+    def _bounded_prompt(row: Any) -> tuple[str | None, str | None]:
+        if limit and processed["n"] >= limit:
+            return (None, None)
+        return _prompt(row)
+
+    try:
+        report = run_cleanup(conn, prompt=_bounded_prompt)
+    finally:
+        conn.close()
+
+    typer.echo(
+        f"cleanup: seen={report.rows_seen} resolved={report.rows_resolved} "
+        f"skipped={report.rows_skipped} errors={len(report.errors)}"
+    )
+    for err in report.errors:
+        typer.echo(f"  err: {err}", err=True)
+
+
 @app.command("categorize")
 def categorize(
     dry_run: bool = typer.Option(

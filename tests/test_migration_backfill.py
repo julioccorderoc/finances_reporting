@@ -81,18 +81,25 @@ def test_run_backfill_pairs_bank_anchored_p2p(
     assert report.reconciliation.proposals_found == 1
     assert report.reconciliation.proposals_applied == 1
 
-    # Both legs of the paired transfer carry the same transfer_id.
-    paired = in_memory_db.execute(
+    # The P2P pair (one provincial leg + one binance leg) shares a
+    # transfer_id. The separate internal-transfer pair (both binance) has
+    # its own id; filter to the row sets that cross the source boundary.
+    cross_source_pairs = in_memory_db.execute(
         """
-        SELECT source, transfer_id FROM transactions
+        SELECT transfer_id
+        FROM transactions
         WHERE transfer_id IS NOT NULL
-          AND source IN ('provincial','binance')
-        ORDER BY source
+        GROUP BY transfer_id
+        HAVING COUNT(DISTINCT source) = 2
         """
     ).fetchall()
-    assert len(paired) == 2
-    transfer_ids = {row["transfer_id"] for row in paired}
-    assert len(transfer_ids) == 1  # same uuid on both legs
+    assert len(cross_source_pairs) == 1
+    pair_tid = cross_source_pairs[0]["transfer_id"]
+    legs = in_memory_db.execute(
+        "SELECT source FROM transactions WHERE transfer_id = ? ORDER BY source",
+        (pair_tid,),
+    ).fetchall()
+    assert [row["source"] for row in legs] == ["binance", "provincial"]
 
 
 def test_run_backfill_is_idempotent(
