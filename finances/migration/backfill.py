@@ -962,17 +962,17 @@ def _iter_binance_annotations(
         op = operation.lower()
         occ_iso = occurred.isoformat()
         if op == "deposit":
-            ref = f"deposit:{_hash_ref('legacy-deposit', occ_iso, coin, abs(amount), remark)}"
+            ref = f"deposit:{_hash_ref('legacy-deposit', occ_iso, coin, amount, remark)}"
             yield (BINANCE_SOURCE, ref, sub_cat, category)
         elif op == "send":
-            ref = f"withdraw:{_hash_ref('legacy-send', occ_iso, coin, abs(amount), remark)}"
+            ref = f"withdraw:{_hash_ref('legacy-send', occ_iso, coin, amount, remark)}"
             yield (BINANCE_SOURCE, ref, sub_cat, category)
         elif op == "p2p-sell":
             match = _P2P_ORDER_RE.search(remark)
             order_number = (
                 match.group(1)
                 if match is not None
-                else _hash_ref("legacy-p2p", occ_iso, coin, abs(amount))
+                else _hash_ref("legacy-p2p", occ_iso, coin, amount)
             )
             yield (BINANCE_SOURCE, f"p2p:{order_number}", sub_cat, category)
         elif op == "internal transfer":
