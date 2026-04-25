@@ -586,39 +586,51 @@ def test_earn_position_sum_matches_subscriptions_minus_redemptions(
 def test_deliberate_regression_orphan_leg_is_flagged(mocker: Any) -> None:
     """EPIC-021 criterion 3: a deliberate regression must be caught.
 
-    Mutates a paired transfer leg's transfer_id to NULL and asserts
-    v_unreconciled_transfers surfaces the orphan. Positive detection
-    test: it stays green forever and proves the suite would catch a
-    real-world transfer break.
+    Canary for ``v_unreconciled_transfers`` itself. NULLs one leg of a
+    paired transfer and asserts the view surfaces BOTH the surviving
+    leg (via the ``COUNT(*) <> 2`` arm of the HAVING clause) and the
+    NULL-transfer_id orphan (via the ``transfer_id IS NULL`` arm). A
+    failure here means the integration suite has lost its ability to
+    catch real-world transfer breaks.
     """
     conn = _open_fresh_db()
     try:
         _run_full_pipeline(conn, mocker)
 
-        pair = conn.execute(
+        leg = conn.execute(
             "SELECT id, transfer_id FROM transactions "
-            "WHERE transfer_id IS NOT NULL ORDER BY id LIMIT 2"
-        ).fetchall()
-        assert len(pair) == 2, "fixture must contain at least one paired transfer"
-        leg_id, transfer_id = pair[0]["id"], pair[0]["transfer_id"]
+            "WHERE transfer_id IS NOT NULL ORDER BY id LIMIT 1"
+        ).fetchone()
+        assert leg is not None, "fixture must contain at least one paired transfer"
+        leg_id, transfer_id = leg["id"], leg["transfer_id"]
 
         conn.execute(
             "UPDATE transactions SET transfer_id = NULL WHERE id = ?", (leg_id,)
         )
-        conn.commit()
 
-        orphans = conn.execute(
-            "SELECT * FROM v_unreconciled_transfers WHERE transfer_id = ?",
+        rows = conn.execute(
+            "SELECT transfer_id, leg_count FROM v_unreconciled_transfers "
+            "WHERE transfer_id = ? OR transfer_id IS NULL",
             (transfer_id,),
         ).fetchall()
-        assert orphans, (
-            f"v_unreconciled_transfers failed to flag orphan after "
-            f"NULLing transfer_id on transaction {leg_id}; the suite "
-            f"would silently miss a real-world transfer break"
+
+        flagged = {row["transfer_id"]: row["leg_count"] for row in rows}
+
+        assert transfer_id in flagged, (
+            f"v_unreconciled_transfers failed to surface the surviving "
+            f"leg of transfer {transfer_id} after NULLing transaction "
+            f"{leg_id}; the COUNT(*) <> 2 arm of the HAVING clause is "
+            f"silently broken. Flagged groups: {flagged}"
         )
-        assert len(orphans) == 1, (
-            f"expected 1 orphan group for transfer {transfer_id}; got "
-            f"{len(orphans)}: {[dict(r) for r in orphans]}"
+        assert flagged[transfer_id] == 1, (
+            f"expected surviving-leg group to have leg_count=1; got "
+            f"{flagged[transfer_id]}"
+        )
+        assert None in flagged, (
+            f"v_unreconciled_transfers failed to surface the NULL-side "
+            f"orphan after NULLing transaction {leg_id}; the "
+            f"transfer_id IS NULL arm of the HAVING clause is silently "
+            f"broken. Flagged groups: {flagged}"
         )
     finally:
         conn.close()
