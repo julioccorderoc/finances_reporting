@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from finances.db.connection import get_connection
-from finances.db.migrate import apply_migrations
+from finances.db.migrate import MIGRATIONS_DIR, _FILENAME_RE, apply_migrations
 from finances.db.repos import (
     accounts as accounts_repo,
     categories as categories_repo,
@@ -60,8 +60,9 @@ def seeded(db_conn: sqlite3.Connection) -> dict[str, int]:
         db_conn, TransactionKind.INCOME, "Salary"
     )
     assert cat_salary is not None
+    # Migration 004_taxonomy_v1_1.sql renamed expense `Food` -> `Groceries`.
     cat_food = categories_repo.get_by_name(
-        db_conn, TransactionKind.EXPENSE, "Food"
+        db_conn, TransactionKind.EXPENSE, "Groceries"
     )
     assert cat_food is not None
 
@@ -412,12 +413,72 @@ def test_migrate_is_idempotent(tmp_path: Path) -> None:
     assert "001_initial.sql" in first
     assert "002_seed_categories.sql" in first
     assert second == []
-    rows = conn.execute("SELECT filename FROM _migrations").fetchall()
-    assert {r["filename"] for r in rows} == {
-        "001_initial.sql",
-        "002_seed_categories.sql",
+    # _migrations should reflect every numbered SQL file under the migrations
+    # directory — not a hard-coded subset. As future migrations land, this
+    # assertion picks them up automatically while still pinning the runner's
+    # contract: every file under MIGRATIONS_DIR is recorded exactly once.
+    expected = {
+        p.name
+        for p in MIGRATIONS_DIR.glob("*.sql")
+        if _FILENAME_RE.match(p.name)
     }
+    rows = conn.execute("SELECT filename FROM _migrations").fetchall()
+    assert {r["filename"] for r in rows} == expected
+    assert set(first) == expected
     conn.close()
+
+
+def test_migrate_helper_uses_explicit_path(tmp_path: Path) -> None:
+    """``migrate(db_path)`` opens its own connection, applies, and closes."""
+    from finances.db.migrate import migrate
+
+    path = tmp_path / "explicit.db"
+    applied = migrate(path)
+    assert "001_initial.sql" in applied
+    # Re-running on the same file is a no-op.
+    assert migrate(path) == []
+    # The helper closed its connection — re-open and verify _migrations rows.
+    conn = get_connection(path)
+    try:
+        rows = conn.execute("SELECT COUNT(*) AS n FROM _migrations").fetchone()
+        assert rows["n"] == len(applied)
+    finally:
+        conn.close()
+
+
+def test_migrate_helper_defaults_to_config_db_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``migrate()`` with no argument falls back to ``finances.config.DB_PATH``."""
+    import finances.db.migrate as migrate_module
+
+    target = tmp_path / "default.db"
+    monkeypatch.setattr(migrate_module, "DB_PATH", target)
+    applied = migrate_module.migrate()
+    assert target.exists()
+    assert "001_initial.sql" in applied
+
+
+def test_migrate_main_prints_applied_then_noop(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``main()`` prints applied filenames on first run, 'no pending' on second."""
+    import finances.db.migrate as migrate_module
+
+    target = tmp_path / "main.db"
+    monkeypatch.setattr(migrate_module, "DB_PATH", target)
+
+    rc = migrate_module.main()
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "applied: 001_initial.sql" in out
+
+    rc = migrate_module.main()
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "no pending migrations" in out
 
 
 # ---------------------------------------------------------------------------

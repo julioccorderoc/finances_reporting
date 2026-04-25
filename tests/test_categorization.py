@@ -144,12 +144,18 @@ def test_no_id_is_not_seeded_as_destination(in_memory_db: sqlite3.Connection) ->
 def test_seed_includes_at_least_one_rule_per_common_pattern(
     in_memory_db: sqlite3.Connection,
 ) -> None:
-    """DoD: category_rules seeded with at least one rule per common description
-    pattern observed in Provincial + Binance CSVs."""
+    """DoD: category_rules seeded with at least one rule per *unambiguous*
+    common description pattern. Migration 006_prune_ambiguous_rules.sql
+    deactivated 14 merchant-name rules (PANADERIA, LUNCHERIA, DIGITEL, etc.)
+    that the user deems context-dependent — a bakery visit might be Dating,
+    a phone-bill keyword might be a prepaid recharge. The remaining active
+    seed covers only context-free markers: bank commissions (COM\\.),
+    platform-internal Binance transfers/earn rewards, and definitional
+    subscriptions (Netflix/Spotify)."""
     (count,) = in_memory_db.execute(
         "SELECT COUNT(*) FROM category_rules WHERE active = 1"
     ).fetchone()
-    assert count >= 10, f"expected ≥10 seeded rules, got {count}"
+    assert count >= 5, f"expected ≥5 active seeded rules, got {count}"
 
 
 # ---------------------------------------------------------------------------
@@ -545,11 +551,11 @@ def test_load_rules_include_inactive(in_memory_db: sqlite3.Connection) -> None:
 @pytest.mark.parametrize(
     "description, source, expected_kind",
     [
+        # Bank-written commission marker (kept active by migration 006).
         ("COM. PAGO MOVIL", "provincial", TransactionKind.EXPENSE),
-        ("PANADERIA LUISANA 2004", "provincial", TransactionKind.EXPENSE),
-        ("LUNCHERIA MILY GOURMET", "provincial", TransactionKind.EXPENSE),
-        ("DIGITEL", "provincial", TransactionKind.EXPENSE),
+        # Definitional subscription keywords (kept active by migration 006).
         ("Netflix Subscription", "binance", TransactionKind.EXPENSE),
+        # Platform-internal Binance Earn marker (kept active by migration 006).
         ("Earn reward flexible", "binance", TransactionKind.INCOME),
     ],
 )
@@ -560,7 +566,16 @@ def test_seeded_rules_fire_on_real_shapes(
     expected_kind: TransactionKind,
 ) -> None:
     """Smoke test: the migration-seeded rules actually match representative
-    descriptions from the CSVs."""
+    descriptions from the CSVs.
+
+    Note: merchant-name patterns (PANADERIA, LUNCHERIA, DIGITEL, SUPERMERCADO,
+    CAR.DRV###, DR OB, cashea, préstamo, ortodoncia, uber/didi, paycheck,
+    bonus, P2P) were deliberately deactivated by migration
+    006_prune_ambiguous_rules.sql because they are context-dependent. They
+    are intentionally absent from this parametrize list — auto-classifying
+    them would collapse legacy category distinctions the user wants to
+    preserve (a bakery could be Groceries or Dating; DIGITEL could be a
+    Subscription or a prepaid top-up gift)."""
     match = suggest(
         in_memory_db,
         CategorizationRequest(description=description, source=source),

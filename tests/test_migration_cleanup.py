@@ -294,6 +294,15 @@ def test_export_includes_legacy_annotations(
 
     run_backfill(in_memory_db, legacy_dir)
 
+    # The backfill's legacy-annotation pass auto-resolves every row whose
+    # Sub-Category maps cleanly into the v1 taxonomy, leaving the export's
+    # ``WHERE needs_review=1`` filter empty. Re-flag every row so the
+    # export has rows to surface — the assertion below is about the
+    # legacy-annotation columns the export attaches, not the cleanup
+    # state machine.
+    in_memory_db.execute("UPDATE transactions SET needs_review = 1")
+    in_memory_db.commit()
+
     dest = tmp_path / "review.csv"
     export_needs_review(in_memory_db, dest, legacy_dir=legacy_dir)
 
