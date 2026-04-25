@@ -586,51 +586,71 @@ def test_earn_position_sum_matches_subscriptions_minus_redemptions(
 def test_deliberate_regression_orphan_leg_is_flagged(mocker: Any) -> None:
     """EPIC-021 criterion 3: a deliberate regression must be caught.
 
-    Canary for ``v_unreconciled_transfers`` itself. NULLs one leg of a
-    paired transfer and asserts the view surfaces BOTH the surviving
-    leg (via the ``COUNT(*) <> 2`` arm of the HAVING clause) and the
-    NULL-transfer_id orphan (via the ``transfer_id IS NULL`` arm). A
-    failure here means the integration suite has lost its ability to
-    catch real-world transfer breaks.
+    Canary for ``v_unreconciled_transfers`` itself. NULLs one leg from
+    two distinct paired transfers, producing a state in which:
+
+    * each surviving leg sits alone in its transfer-id group
+      (``COUNT(*) = 1``) — only the ``COUNT(*) <> 2`` arm of the view's
+      HAVING clause flags it;
+    * the two NULL'd legs share the ``transfer_id IS NULL`` group
+      (``COUNT(*) = 2``) — only the ``transfer_id IS NULL`` arm flags
+      it.
+
+    A failure on either assertion means the integration suite has lost
+    its ability to catch real-world transfer breaks of that shape.
     """
     conn = _open_fresh_db()
     try:
         _run_full_pipeline(conn, mocker)
 
-        leg = conn.execute(
+        legs = conn.execute(
             "SELECT id, transfer_id FROM transactions "
-            "WHERE transfer_id IS NOT NULL ORDER BY id LIMIT 1"
-        ).fetchone()
-        assert leg is not None, "fixture must contain at least one paired transfer"
-        leg_id, transfer_id = leg["id"], leg["transfer_id"]
+            "WHERE transfer_id IS NOT NULL "
+            "GROUP BY transfer_id "
+            "HAVING COUNT(*) = 2 "
+            "ORDER BY MIN(id) "
+            "LIMIT 2"
+        ).fetchall()
+        assert len(legs) == 2, (
+            f"fixture must contain at least two paired transfers; got "
+            f"{len(legs)}"
+        )
+        leg_ids = [row["id"] for row in legs]
+        transfer_ids = [row["transfer_id"] for row in legs]
 
-        conn.execute(
-            "UPDATE transactions SET transfer_id = NULL WHERE id = ?", (leg_id,)
+        conn.executemany(
+            "UPDATE transactions SET transfer_id = NULL WHERE id = ?",
+            [(leg_id,) for leg_id in leg_ids],
         )
 
         rows = conn.execute(
             "SELECT transfer_id, leg_count FROM v_unreconciled_transfers "
-            "WHERE transfer_id = ? OR transfer_id IS NULL",
-            (transfer_id,),
+            "WHERE transfer_id IS NULL OR transfer_id IN (?, ?)",
+            (transfer_ids[0], transfer_ids[1]),
         ).fetchall()
-
         flagged = {row["transfer_id"]: row["leg_count"] for row in rows}
 
-        assert transfer_id in flagged, (
-            f"v_unreconciled_transfers failed to surface the surviving "
-            f"leg of transfer {transfer_id} after NULLing transaction "
-            f"{leg_id}; the COUNT(*) <> 2 arm of the HAVING clause is "
-            f"silently broken. Flagged groups: {flagged}"
-        )
-        assert flagged[transfer_id] == 1, (
-            f"expected surviving-leg group to have leg_count=1; got "
-            f"{flagged[transfer_id]}"
-        )
+        for transfer_id in transfer_ids:
+            assert transfer_id in flagged, (
+                f"v_unreconciled_transfers failed to surface the "
+                f"surviving leg of transfer {transfer_id} after NULLing "
+                f"transactions {leg_ids}; the COUNT(*) <> 2 arm of the "
+                f"HAVING clause is silently broken. Flagged: {flagged}"
+            )
+            assert flagged[transfer_id] == 1, (
+                f"expected surviving-leg group for {transfer_id} to "
+                f"have leg_count=1; got {flagged[transfer_id]}"
+            )
+
         assert None in flagged, (
             f"v_unreconciled_transfers failed to surface the NULL-side "
-            f"orphan after NULLing transaction {leg_id}; the "
-            f"transfer_id IS NULL arm of the HAVING clause is silently "
-            f"broken. Flagged groups: {flagged}"
+            f"orphan group (count=2) after NULLing transactions "
+            f"{leg_ids}; the transfer_id IS NULL arm of the HAVING "
+            f"clause is silently broken. Flagged: {flagged}"
+        )
+        assert flagged[None] == 2, (
+            f"expected NULL group to have leg_count=2 (one orphan from "
+            f"each NULL'd transfer); got {flagged[None]}"
         )
     finally:
         conn.close()
