@@ -38,6 +38,7 @@ from pydantic import BaseModel, ConfigDict, field_validator
 
 from finances.config import CARACAS_TZ
 from finances.db.repos import accounts as accounts_repo
+from finances.db.repos import import_state
 from finances.db.repos import transactions as txn_repo
 from finances.domain.models import Transaction, TransactionKind
 from finances.domain.reconciliation import (
@@ -281,52 +282,71 @@ def ingest_csv(
     rows inserted without the pairing side-effect (e.g. the one-time
     backfill that orders runs across sources) can pass
     ``run_pairing=False``.
+
+    Per rule-007 / ADR-007, every run records one row in ``import_runs``:
+    ``status='success'`` with row counts on the happy path, or
+    ``status='error'`` with an exception summary and re-raise on failure.
     """
-    resolved_account_id, currency = _resolve_account(conn, account_id)
+    run_id = import_state.start_run(conn, SOURCE)
+    try:
+        resolved_account_id, currency = _resolve_account(conn, account_id)
 
-    report = IngestReport()
+        report = IngestReport()
 
-    for raw in iter_raw_rows(csv_path):
-        report.rows_seen += 1
+        for raw in iter_raw_rows(csv_path):
+            report.rows_seen += 1
 
-        occurred_at = raw.to_datetime()
-        category_id: int | None = None
-        if categorizer is not None:
-            category_id = categorizer(raw.descripcion)
-        needs_review = category_id is None
+            occurred_at = raw.to_datetime()
+            category_id: int | None = None
+            if categorizer is not None:
+                category_id = categorizer(raw.descripcion)
+            needs_review = category_id is None
 
-        source_ref = compute_source_ref(
-            occurred_at=occurred_at,
-            amount=raw.monto,
-            description=raw.descripcion,
-        )
+            source_ref = compute_source_ref(
+                occurred_at=occurred_at,
+                amount=raw.monto,
+                description=raw.descripcion,
+            )
 
-        txn = Transaction(
-            account_id=resolved_account_id,
-            occurred_at=occurred_at,
-            kind=raw.kind,
-            amount=raw.monto,
-            currency=currency,
-            description=raw.descripcion,
-            category_id=category_id,
-            source=SOURCE,
-            source_ref=source_ref,
-            needs_review=needs_review,
-        )
+            txn = Transaction(
+                account_id=resolved_account_id,
+                occurred_at=occurred_at,
+                kind=raw.kind,
+                amount=raw.monto,
+                currency=currency,
+                description=raw.descripcion,
+                category_id=category_id,
+                source=SOURCE,
+                source_ref=source_ref,
+                needs_review=needs_review,
+            )
 
-        result = txn_repo.upsert_by_source_ref(conn, txn)
-        report.rows_inserted += result["rows_inserted"]
-        report.rows_updated += result["rows_updated"]
+            result = txn_repo.upsert_by_source_ref(conn, txn)
+            report.rows_inserted += result["rows_inserted"]
+            report.rows_updated += result["rows_updated"]
 
-    if run_pairing:
-        strategy = BankAnchoredP2pPairing(
+        if run_pairing:
+            strategy = BankAnchoredP2pPairing(
+                conn,
+                window_days=pairing_window_days,
+                bank_source=SOURCE,
+            )
+            report.reconciliation = run_reconciliation_pass(strategy)
+
+        import_state.finish_run(
             conn,
-            window_days=pairing_window_days,
-            bank_source=SOURCE,
+            run_id,
+            status="success",
+            rows_inserted=report.rows_inserted,
+            rows_updated=report.rows_updated,
         )
-        report.reconciliation = run_reconciliation_pass(strategy)
-
-    return report
+        return report
+    except Exception as exc:
+        error_msg = f"{type(exc).__name__}: {exc}"[:4000]
+        import_state.finish_run(
+            conn, run_id, status="error", error=error_msg
+        )
+        raise
 
 
 def _resolve_account(
