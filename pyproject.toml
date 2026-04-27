@@ -63,8 +63,6 @@ markers = [
 # those modules exist, the default 85% floor applies to whatever is imported.
 # Downstream epics should lower per-file floors via `# pragma: no cover` on
 # documented-unreachable branches rather than editing this config.
-# TODO(EPIC-004..011): bump `finances/ingest/**` coverage to 70% via per-file
-# pragmas once the ingest adapters ship; until then the default 85% floor runs.
 # -----------------------------------------------------------------------------
 [tool.coverage.run]
 source = ["finances"]
