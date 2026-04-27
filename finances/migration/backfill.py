@@ -30,6 +30,7 @@ from typing import Any, Iterator
 
 from finances.config import CARACAS_TZ
 from finances.db.repos import accounts as accounts_repo
+from finances.db.repos import import_state
 from finances.db.repos import rates as rates_repo
 from finances.db.repos import transactions as transactions_repo
 from finances.domain.models import Account, AccountKind, Rate, Transaction, TransactionKind
@@ -58,6 +59,7 @@ BCV_CSV_NAME = "Finanzas - BCV.csv"
 
 BINANCE_SOURCE = "binance"
 PROVINCIAL_SOURCE = "provincial"
+BACKFILL_SOURCE = "backfill"
 
 # Legacy accounts that historical CSVs assume exist.
 _BACKFILL_ACCOUNTS: tuple[tuple[str, AccountKind, str, str | None], ...] = (
@@ -795,58 +797,84 @@ def run_backfill(
     Once the interactive cleanup pass has started writing categories,
     a second backfill would wipe that work. Guard against it by refusing
     to run on a non-empty ``transactions`` table unless ``force=True``.
+
+    Per rule-007 / ADR-007, every backfill records an umbrella row in
+    ``import_runs`` under source='backfill'. The inner ingesters
+    (bcv, provincial, binance) still write their own per-source rows
+    via the production ingest path — the backfill row exists in
+    addition, as the audit anchor for the operation as a whole.
     """
-    binance_path = data_dir / BINANCE_CSV_NAME
-    provincial_path = data_dir / PROVINCIAL_CSV_NAME
-    bcv_path = data_dir / BCV_CSV_NAME
+    run_id = import_state.start_run(conn, BACKFILL_SOURCE)
+    try:
+        binance_path = data_dir / BINANCE_CSV_NAME
+        provincial_path = data_dir / PROVINCIAL_CSV_NAME
+        bcv_path = data_dir / BCV_CSV_NAME
 
-    for required in (binance_path, provincial_path):
-        if not required.exists():
-            raise FileNotFoundError(required)
+        for required in (binance_path, provincial_path):
+            if not required.exists():
+                raise FileNotFoundError(required)
 
-    if not force:
-        existing = conn.execute(
-            "SELECT COUNT(*) FROM transactions"
-        ).fetchone()[0]
-        if existing:
-            raise RuntimeError(
-                f"transactions table already contains {existing} rows; "
-                "re-running backfill would reset needs_review/category_id "
-                "on every row. Pass force=True (CLI: --force) to override."
-            )
+        if not force:
+            existing = conn.execute(
+                "SELECT COUNT(*) FROM transactions"
+            ).fetchone()[0]
+            if existing:
+                raise RuntimeError(
+                    f"transactions table already contains {existing} rows; "
+                    "re-running backfill would reset needs_review/category_id "
+                    "on every row. Pass force=True (CLI: --force) to override."
+                )
 
-    report = BackfillReport()
-    account_ids = ensure_accounts(conn)
-    rate_lookup = build_rate_index_from_provincial(provincial_path)
-    derived_rates = derive_p2p_rates_greedy(
-        binance_path, provincial_path, rate_lookup=rate_lookup
-    )
+        report = BackfillReport()
+        account_ids = ensure_accounts(conn)
+        rate_lookup = build_rate_index_from_provincial(provincial_path)
+        derived_rates = derive_p2p_rates_greedy(
+            binance_path, provincial_path, rate_lookup=rate_lookup
+        )
 
-    if bcv_path.exists():
-        backfill_bcv(conn, bcv_path, report=report)
-    backfill_provincial(
-        conn, provincial_path, account_ids=account_ids, report=report
-    )
-    backfill_binance(
-        conn,
-        binance_path,
-        account_ids=account_ids,
-        rate_lookup=rate_lookup,
-        derived_rates=derived_rates,
-        report=report,
-    )
+        if bcv_path.exists():
+            backfill_bcv(conn, bcv_path, report=report)
+        backfill_provincial(
+            conn, provincial_path, account_ids=account_ids, report=report
+        )
+        backfill_binance(
+            conn,
+            binance_path,
+            account_ids=account_ids,
+            rate_lookup=rate_lookup,
+            derived_rates=derived_rates,
+            report=report,
+        )
 
-    strategy = BankAnchoredP2pPairing(
-        conn,
-        window_days=pairing_window_days,
-        bank_source=PROVINCIAL_SOURCE,
-        binance_source=BINANCE_SOURCE,
-    )
-    report.reconciliation = run_reconciliation_pass(strategy)
+        strategy = BankAnchoredP2pPairing(
+            conn,
+            window_days=pairing_window_days,
+            bank_source=PROVINCIAL_SOURCE,
+            binance_source=BINANCE_SOURCE,
+        )
+        report.reconciliation = run_reconciliation_pass(strategy)
 
-    report.rows_legacy_mapped = apply_legacy_category_annotations(conn, data_dir)
-    report.rows_categorized = apply_category_rules(conn)
-    return report
+        report.rows_legacy_mapped = apply_legacy_category_annotations(conn, data_dir)
+        report.rows_categorized = apply_category_rules(conn)
+
+        rows_inserted_total = (
+            report.binance_rows_inserted
+            + report.provincial_rows_inserted
+            + report.bcv_rates_inserted
+        )
+        import_state.finish_run(
+            conn,
+            run_id,
+            status="success",
+            rows_inserted=rows_inserted_total,
+        )
+        return report
+    except Exception as exc:
+        error_msg = f"{type(exc).__name__}: {exc}"[:4000]
+        import_state.finish_run(
+            conn, run_id, status="error", error=error_msg
+        )
+        raise
 
 
 def apply_legacy_category_annotations(
