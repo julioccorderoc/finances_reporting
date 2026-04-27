@@ -107,7 +107,37 @@ def test_p2p_rates_ingest_writes_import_runs_row(
 
 
 # === BEGIN backfill ===========================================================
-# Owned by Task 5. Asserts ``finances.migration.backfill.run_backfill``
-# writes one row to ``import_runs`` with source='backfill' and
-# status='success' on an empty input directory.
+def test_backfill_writes_import_runs_row(tmp_path, db_conn) -> None:
+    """``backfill.run_backfill`` records an umbrella row in ``import_runs``.
+
+    Per the plan's intent: even a no-op backfill (header-only CSVs)
+    must still leave an audit trail under source='backfill'. Inner
+    per-source rows (bcv/provincial/binance) are orthogonal — this
+    test only asserts the umbrella row.
+    """
+    from finances.migration import backfill
+
+    data_dir = tmp_path / "legacy"
+    data_dir.mkdir()
+    # Header-only CSVs satisfy the FileNotFoundError gate AND yield zero
+    # data rows from _iter_legacy_csv_rows (which keys off the "Fecha"
+    # token in _HEADER_TOKENS).
+    (data_dir / backfill.BINANCE_CSV_NAME).write_text(
+        "Fecha\n", encoding="utf-8"
+    )
+    (data_dir / backfill.PROVINCIAL_CSV_NAME).write_text(
+        "Fecha\n", encoding="utf-8"
+    )
+
+    backfill.run_backfill(db_conn, data_dir)
+
+    rows = db_conn.execute(
+        "SELECT source, status, error, finished_at "
+        "FROM import_runs WHERE source = 'backfill'"
+    ).fetchall()
+    assert len(rows) == 1, f"expected exactly 1 backfill run row, got {len(rows)}"
+    row = rows[0]
+    assert row["status"] == "success"
+    assert row["error"] is None
+    assert row["finished_at"] is not None
 # === END backfill =============================================================

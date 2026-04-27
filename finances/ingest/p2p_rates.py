@@ -24,10 +24,12 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from finances.db.repos import import_state
 from finances.db.repos import rates as rates_repo
 from finances.domain.models import Rate
 
 BINANCE_P2P_SEARCH_URL = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search"
+SOURCE = "binance_p2p_median"
 DEFAULT_TOP_N = 10
 REQUEST_TIMEOUT_SECONDS = 15.0
 
@@ -188,49 +190,69 @@ def ingest_p2p_rates(
 
     Raises:
         RuntimeError: either BUY or SELL side returned zero adverts.
+
+    Per rule-007 / ADR-007, every run records one row in ``import_runs``
+    under source='binance_p2p_median' (the headline source consumed by
+    ``v_consolidated_usd``): ``status='success'`` with the row count on
+    the happy path, or ``status='error'`` with an exception summary and
+    re-raise on failure.
     """
-    if as_of_date is None:
-        as_of_date = datetime.now(tz=timezone.utc).date()
+    run_id = import_state.start_run(conn, SOURCE)
+    try:
+        if as_of_date is None:
+            as_of_date = datetime.now(tz=timezone.utc).date()
 
-    buy_adverts = fetch_p2p_adverts(asset, fiat, "BUY", rows=rows, client=client)
-    sell_adverts = fetch_p2p_adverts(asset, fiat, "SELL", rows=rows, client=client)
+        buy_adverts = fetch_p2p_adverts(asset, fiat, "BUY", rows=rows, client=client)
+        sell_adverts = fetch_p2p_adverts(asset, fiat, "SELL", rows=rows, client=client)
 
-    if not buy_adverts or not sell_adverts:
-        raise RuntimeError(
-            f"insufficient P2P adverts: buy={len(buy_adverts)}, sell={len(sell_adverts)}"
+        if not buy_adverts or not sell_adverts:
+            raise RuntimeError(
+                f"insufficient P2P adverts: buy={len(buy_adverts)}, sell={len(sell_adverts)}"
+            )
+
+        buy_median = compute_median_price(buy_adverts)
+        sell_median = compute_median_price(sell_adverts)
+        midpoint = (buy_median + sell_median) / Decimal(2)
+
+        base_code = asset.upper()
+        quote_code = fiat.upper()
+
+        rows_written: list[Rate] = []
+        for src, value in (
+            ("binance_p2p_median_buy", buy_median),
+            ("binance_p2p_median_sell", sell_median),
+            ("binance_p2p_median", midpoint),
+        ):
+            rate = Rate(
+                as_of_date=as_of_date,
+                base=base_code,
+                quote=quote_code,
+                rate=value,
+                source=src,
+            )
+            rows_written.append(rates_repo.upsert(conn, rate))
+
+        import_state.finish_run(
+            conn,
+            run_id,
+            status="success",
+            rows_inserted=len(rows_written),
         )
-
-    buy_median = compute_median_price(buy_adverts)
-    sell_median = compute_median_price(sell_adverts)
-    midpoint = (buy_median + sell_median) / Decimal(2)
-
-    base_code = asset.upper()
-    quote_code = fiat.upper()
-
-    rows_written: list[Rate] = []
-    for src, value in (
-        ("binance_p2p_median_buy", buy_median),
-        ("binance_p2p_median_sell", sell_median),
-        ("binance_p2p_median", midpoint),
-    ):
-        rate = Rate(
-            as_of_date=as_of_date,
-            base=base_code,
-            quote=quote_code,
-            rate=value,
-            source=src,
+        return {
+            "as_of_date": as_of_date,
+            "buy_median": buy_median,
+            "sell_median": sell_median,
+            "midpoint": midpoint,
+            "buy_adverts_used": len(buy_adverts),
+            "sell_adverts_used": len(sell_adverts),
+            "rows_written": rows_written,
+        }
+    except Exception as exc:
+        error_msg = f"{type(exc).__name__}: {exc}"[:4000]
+        import_state.finish_run(
+            conn, run_id, status="error", error=error_msg
         )
-        rows_written.append(rates_repo.upsert(conn, rate))
-
-    return {
-        "as_of_date": as_of_date,
-        "buy_median": buy_median,
-        "sell_median": sell_median,
-        "midpoint": midpoint,
-        "buy_adverts_used": len(buy_adverts),
-        "sell_adverts_used": len(sell_adverts),
-        "rows_written": rows_written,
-    }
+        raise
 
 
 __all__ = [
