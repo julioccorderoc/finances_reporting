@@ -510,7 +510,7 @@
 
 ### EPIC-021 — Integration Test Suite (End-to-End Pipeline)
 
-**Status:** Pending
+**Status:** Complete
 **Wave:** 3
 **Dependencies:** EPIC-002, EPIC-002b, EPIC-004 through EPIC-012, EPIC-013
 **ADRs:** ADR-011
