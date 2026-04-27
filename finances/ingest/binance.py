@@ -642,65 +642,86 @@ def sync_binance(
 
     Idempotent by construction: stable SDK IDs in ``source_ref`` mean a second
     run on identical mock data inserts 0 rows (ADR-010).
+
+    Per rule-007 / ADR-007, every run records one row in ``import_runs``:
+    a ``status='success'`` row on the happy path (with ``rows_inserted`` /
+    ``rows_updated`` counts), or a ``status='error'`` row carrying a brief
+    error summary and re-raising the exception on failure.
     """
-    account_ids = _resolve_accounts(conn)
-    interest_id = _interest_category_id(conn)
-    compute_server_offset_ms(client)
-    start_ms, end_ms = _resolve_time_window(
-        conn, since=since, lookback_days=lookback_days
-    )
+    run_id = import_state_repo.start_run(conn, SOURCE)
+    try:
+        account_ids = _resolve_accounts(conn)
+        interest_id = _interest_category_id(conn)
+        compute_server_offset_ms(client)
+        start_ms, end_ms = _resolve_time_window(
+            conn, since=since, lookback_days=lookback_days
+        )
 
-    stats = {"rows_inserted": 0, "rows_updated": 0}
-    errors: list[str] = []
+        stats = {"rows_inserted": 0, "rows_updated": 0}
+        errors: list[str] = []
 
-    spot_id = account_ids[_SPOT_ACCOUNT_NAME]
-    earn_id = account_ids[_EARN_ACCOUNT_NAME]
+        spot_id = account_ids[_SPOT_ACCOUNT_NAME]
+        earn_id = account_ids[_EARN_ACCOUNT_NAME]
 
-    _ingest_deposits(
-        conn, client, start_ms=start_ms, end_ms=end_ms, spot_id=spot_id,
-        stats=stats, errors=errors,
-    )
-    _ingest_withdrawals(
-        conn, client, start_ms=start_ms, end_ms=end_ms, spot_id=spot_id,
-        stats=stats, errors=errors,
-    )
-    _ingest_p2p(
-        conn, client, start_ms=start_ms, end_ms=end_ms, spot_id=spot_id,
-        stats=stats, errors=errors,
-    )
-    _ingest_converts(
-        conn, client, start_ms=start_ms, end_ms=end_ms, spot_id=spot_id,
-        stats=stats, errors=errors,
-    )
-    _ingest_internal_transfers(
-        conn, client, start_ms=start_ms, end_ms=end_ms, account_ids=account_ids,
-        stats=stats, errors=errors,
-    )
-    _ingest_earn_rewards(
-        conn, client, start_ms=start_ms, end_ms=end_ms, earn_id=earn_id,
-        interest_id=interest_id, stats=stats, errors=errors,
-    )
-    _ingest_pay(
-        conn, client, start_ms=start_ms, end_ms=end_ms, spot_id=spot_id,
-        stats=stats, errors=errors,
-    )
+        _ingest_deposits(
+            conn, client, start_ms=start_ms, end_ms=end_ms, spot_id=spot_id,
+            stats=stats, errors=errors,
+        )
+        _ingest_withdrawals(
+            conn, client, start_ms=start_ms, end_ms=end_ms, spot_id=spot_id,
+            stats=stats, errors=errors,
+        )
+        _ingest_p2p(
+            conn, client, start_ms=start_ms, end_ms=end_ms, spot_id=spot_id,
+            stats=stats, errors=errors,
+        )
+        _ingest_converts(
+            conn, client, start_ms=start_ms, end_ms=end_ms, spot_id=spot_id,
+            stats=stats, errors=errors,
+        )
+        _ingest_internal_transfers(
+            conn, client, start_ms=start_ms, end_ms=end_ms, account_ids=account_ids,
+            stats=stats, errors=errors,
+        )
+        _ingest_earn_rewards(
+            conn, client, start_ms=start_ms, end_ms=end_ms, earn_id=earn_id,
+            interest_id=interest_id, stats=stats, errors=errors,
+        )
+        _ingest_pay(
+            conn, client, start_ms=start_ms, end_ms=end_ms, spot_id=spot_id,
+            stats=stats, errors=errors,
+        )
 
-    snapshot_at = datetime.now(tz=UTC)
-    earn_stats = _ingest_earn_positions(
-        conn, client, earn_id=earn_id, snapshot_at=snapshot_at, errors=errors,
-    )
+        snapshot_at = datetime.now(tz=UTC)
+        earn_stats = _ingest_earn_positions(
+            conn, client, earn_id=earn_id, snapshot_at=snapshot_at, errors=errors,
+        )
 
-    import_state_repo.upsert_state(
-        conn, source=SOURCE, last_synced_at=snapshot_at
-    )
+        import_state_repo.upsert_state(
+            conn, source=SOURCE, last_synced_at=snapshot_at
+        )
 
-    return {
-        **stats,
-        "earn_positions": earn_stats,
-        "errors": errors,
-        "start_ms": start_ms,
-        "end_ms": end_ms,
-    }
+        import_state_repo.finish_run(
+            conn,
+            run_id,
+            status="success",
+            rows_inserted=stats["rows_inserted"],
+            rows_updated=stats["rows_updated"],
+        )
+
+        return {
+            **stats,
+            "earn_positions": earn_stats,
+            "errors": errors,
+            "start_ms": start_ms,
+            "end_ms": end_ms,
+        }
+    except Exception as exc:
+        error_msg = f"{type(exc).__name__}: {exc}"[:4000]
+        import_state_repo.finish_run(
+            conn, run_id, status="error", error=error_msg
+        )
+        raise
 
 
 __all__ = [
