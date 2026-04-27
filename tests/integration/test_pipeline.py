@@ -333,6 +333,19 @@ def test_full_pipeline_idempotent(mocker: Any) -> None:
             f"integration pipeline exceeded {_PIPELINE_BUDGET_SECONDS:.0f}s "
             f"budget: {elapsed:.2f}s"
         )
+        sources_with_runs = {
+            row["source"]
+            for row in conn.execute(
+                "SELECT DISTINCT source FROM import_runs"
+            ).fetchall()
+        }
+        expected_sources = {"binance", "provincial", "bcv", "binance_p2p_median"}
+        assert expected_sources.issubset(sources_with_runs), (
+            f"rule-007 / ADR-007: every pipeline ingest must write an "
+            f"import_runs row. Missing: "
+            f"{expected_sources - sources_with_runs}; observed: "
+            f"{sorted(sources_with_runs)}"
+        )
     finally:
         conn.close()
 

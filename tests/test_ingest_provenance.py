@@ -14,8 +14,6 @@ are intentionally short and isolated so the contract is obvious.
 """
 from __future__ import annotations
 
-import pytest
-
 
 # === BEGIN binance ============================================================
 def test_binance_sync_writes_import_runs_row(

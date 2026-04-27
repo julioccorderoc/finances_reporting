@@ -175,6 +175,12 @@ def ingest_p2p_rates(
     * ``source='binance_p2p_median_sell'``
     * ``source='binance_p2p_median'`` — midpoint (headline)
 
+    Per rule-007 / ADR-007, every run records one row in ``import_runs``
+    under source='binance_p2p_median' (the headline source consumed by
+    ``v_consolidated_usd``): ``status='success'`` with the row count on
+    the happy path, or ``status='error'`` with an exception summary and
+    re-raise on failure.
+
     Args:
         conn: Open sqlite3 connection with the schema migrations applied.
         as_of_date: Date to stamp on the rate rows. Defaults to today (UTC).
@@ -190,12 +196,6 @@ def ingest_p2p_rates(
 
     Raises:
         RuntimeError: either BUY or SELL side returned zero adverts.
-
-    Per rule-007 / ADR-007, every run records one row in ``import_runs``
-    under source='binance_p2p_median' (the headline source consumed by
-    ``v_consolidated_usd``): ``status='success'`` with the row count on
-    the happy path, or ``status='error'`` with an exception summary and
-    re-raise on failure.
     """
     run_id = import_state.start_run(conn, SOURCE)
     try:
