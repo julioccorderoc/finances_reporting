@@ -1,0 +1,90 @@
+{# Body of the transactions list — included from the full page render
+   AND served standalone via /_partial/transactions/list for HTMX swaps.
+#}
+{% from "_macros.html" import format_amount %}
+
+<div id="tx-list" class="space-y-3">
+  {# Sort header chips. Clicking re-issues the request with HTMX. #}
+  <div class="flex flex-wrap items-center gap-2 text-xs">
+    <span class="text-slate-500">Sort:</span>
+    {% set sort_options = [
+        ('occurred_at', 'Date'),
+        ('amount_native', 'Amount'),
+    ] %}
+    {% for value, label in sort_options %}
+      {% set active = page.filter.sort == value %}
+      {% set next_dir = 'asc' if (active and page.filter.direction == 'desc') else ('desc' if active else page.filter.direction) %}
+      <button
+        type="button"
+        class="px-2 py-1 border rounded {% if active %}bg-slate-900 text-white border-slate-900{% else %}bg-white text-slate-700 border-slate-300{% endif %}"
+        hx-get="/_partial/transactions/list"
+        hx-target="#tx-list"
+        hx-include="#tx-filters"
+        hx-push-url="true"
+        hx-vals='{"sort": "{{ value }}", "direction": "{{ next_dir }}", "page": "1"}'
+      >
+        {{ label }}{% if active %} ({{ page.filter.direction }}){% endif %}
+      </button>
+    {% endfor %}
+    <span class="ml-auto text-slate-500">
+      {{ page.total }} match{{ '' if page.total == 1 else 'es' }}
+    </span>
+  </div>
+
+  {# Column header (hidden on mobile via CSS). #}
+  <div class="cards">
+    <div class="hidden sm:grid grid-cols-subgrid col-span-full text-[10px] uppercase tracking-wide text-slate-400 px-3">
+      <span>Date</span>
+      <span>Account</span>
+      <span>Description</span>
+      <span class="text-right">Amount</span>
+      <span>Category</span>
+      <span class="text-right">Flags</span>
+    </div>
+
+    {% if page.rows %}
+      {% for card in page.rows %}
+        {% include "partials/card_transaction.html" %}
+      {% endfor %}
+    {% else %}
+      <div class="col-span-full p-6 text-center text-slate-500 text-sm border border-dashed border-slate-300 rounded">
+        No transactions match these filters.
+      </div>
+    {% endif %}
+  </div>
+
+  {# Pagination footer. #}
+  {% if page.total_pages > 1 %}
+    <nav class="flex items-center justify-between text-sm">
+      {% set prev_page = page.page - 1 if page.page > 1 else 1 %}
+      {% set next_page = page.page + 1 if page.page < page.total_pages else page.total_pages %}
+      <button
+        type="button"
+        class="px-3 py-1 border rounded {% if page.page == 1 %}text-slate-300 border-slate-200{% else %}text-slate-700 border-slate-300 hover:bg-slate-50{% endif %}"
+        {% if page.page == 1 %}disabled{% endif %}
+        hx-get="/_partial/transactions/list"
+        hx-target="#tx-list"
+        hx-include="#tx-filters"
+        hx-push-url="true"
+        hx-vals='{"page": "{{ prev_page }}"}'
+      >
+        ← Prev
+      </button>
+      <span class="text-slate-500">
+        Page {{ page.page }} of {{ page.total_pages }}
+      </span>
+      <button
+        type="button"
+        class="px-3 py-1 border rounded {% if page.page == page.total_pages %}text-slate-300 border-slate-200{% else %}text-slate-700 border-slate-300 hover:bg-slate-50{% endif %}"
+        {% if page.page == page.total_pages %}disabled{% endif %}
+        hx-get="/_partial/transactions/list"
+        hx-target="#tx-list"
+        hx-include="#tx-filters"
+        hx-push-url="true"
+        hx-vals='{"page": "{{ next_page }}"}'
+      >
+        Next →
+      </button>
+    </nav>
+  {% endif %}
+</div>

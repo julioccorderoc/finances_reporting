@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Transactions{% endblock %}
+{% block content %}
+  <header class="mb-4">
+    <h1 class="text-2xl font-semibold">Transactions</h1>
+    <p class="mt-1 text-sm text-slate-600">
+      Browse, filter, and drill into the ledger. Default range is the last 30 days.
+    </p>
+  </header>
+
+  {# Filters (top of page). #}
+  {% include "partials/transactions_filters.html" %}
+
+  {# List body. Initial server render; HTMX swaps subsequent updates. #}
+  <section class="mt-4">
+    {% include "partials/transactions_list.html" %}
+  </section>
+{% endblock %}

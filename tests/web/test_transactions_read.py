@@ -17,7 +17,7 @@ Per rule-011 these land before the implementation. They cover:
 from __future__ import annotations
 
 import sqlite3
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from fastapi.testclient import TestClient
@@ -195,7 +195,7 @@ def test_htmx_partial_endpoint_returns_fragment_only(
     resp = client.get(
         "/_partial/transactions/list",
         headers={"HX-Request": "true"},
-        params={"page_size": 5, "date_from": "2000-01-01"},
+        params={"page_size": 25, "date_from": "2000-01-01"},
     )
     assert resp.status_code == 200
     body = resp.text
@@ -218,14 +218,14 @@ def test_api_transactions_returns_paginated_json(
     client = web_client_factory()
     resp = client.get(
         "/api/transactions",
-        params={"page_size": 10, "date_from": "2000-01-01"},
+        params={"page_size": 25, "date_from": "2000-01-01"},
     )
     assert resp.status_code == 200
     payload = resp.json()
     for key in ("rows", "total", "page", "page_size", "total_pages", "filter"):
         assert key in payload, f"missing key in JSON: {key}"
     assert isinstance(payload["rows"], list)
-    assert payload["page_size"] == 10
+    assert payload["page_size"] == 25
 
 
 # ---------------------------------------------------------------------------

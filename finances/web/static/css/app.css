@@ -1,0 +1,85 @@
+/* finances web viewer — local styles
+ *
+ * Tailwind handles utility classes via the Play CDN (see base.html).
+ * This file owns the **structural** rules that don't fit utility-class
+ * mode: the subgrid card-row system used by every list page.
+ *
+ * Phase 2b owns the card-row system (this block). Subsequent agents
+ * (2a, 2c, 2d) may APPEND additional rules below the marker but must
+ * not modify the core grid.
+ */
+
+/* === card-row system === */
+
+/* Parent grid: defines the column tracks the card-rows align to.
+ *
+ * Six tracks on desktop:
+ *   1. date           (9rem)
+ *   2. account chip   (8rem)
+ *   3. description    (1fr — fills the rest)
+ *   4. amount block   (10rem, right-aligned)
+ *   5. category chip  (9rem)
+ *   6. flags          (7rem, right-aligned)
+ */
+.cards {
+  display: grid;
+  grid-template-columns: 9rem 8rem 1fr 10rem 9rem 7rem;
+  gap: 0.5rem 0.75rem;
+}
+
+/* Tablet: collapse account + flags into the description column to keep
+ * the layout legible without horizontal scrolling.
+ */
+@media (max-width: 1023px) {
+  .cards {
+    grid-template-columns: 7rem 1fr 9rem;
+  }
+}
+
+/* Phone: stack each card-row vertically. Children get full width. */
+@media (max-width: 640px) {
+  .cards {
+    display: block;
+  }
+}
+
+/* Each card spans every column of the parent grid and uses subgrid so
+ * its children align across rows. align-items:baseline keeps the date,
+ * description, and amount visually anchored.
+ */
+.card-row {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: baseline;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.5rem;
+  background: #ffffff;
+}
+
+@media (max-width: 1023px) {
+  .card-row {
+    grid-template-columns: subgrid;
+  }
+}
+
+@media (max-width: 640px) {
+  .card-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    align-items: stretch;
+  }
+}
+
+/* Header row reuses the same grid-template-columns via subgrid so the
+ * column labels line up with the card data.
+ */
+.cards > .grid-cols-subgrid {
+  grid-template-columns: subgrid;
+}
+
+/* === END card-row system === */
+
+/* --- additional rules: append below this line ----------------------- */

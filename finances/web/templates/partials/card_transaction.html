@@ -1,0 +1,55 @@
+{# Canonical transaction card. Self-contained: requires only `card`.
+
+   Used by:
+   * /transactions list (Phase 2b — this phase)
+   * Dashboard "recent activity" panel (Phase 2a — consumes this file)
+   * Triage queue (Phase 4)
+
+   The article is itself a CSS Grid row (subgrid). Wrap inside a
+   `.cards` parent (defined in static/css/app.css) for the column
+   layout to align across rows.
+#}
+{% from "_macros.html" import rate_source_badge, needs_review_badge, kind_class, format_date, format_amount %}
+
+<article
+  class="card-row hover:bg-slate-50"
+  data-card-row
+  data-tx-id="{{ card.id }}"
+  data-account="{{ card.account_name }}"
+  data-kind="{{ card.kind }}"
+  data-needs-review="{{ 'true' if card.needs_review else 'false' }}"
+>
+  <time class="text-xs text-slate-500 tabular-nums" datetime="{{ card.occurred_at.isoformat() }}">
+    {{ format_date(card.occurred_at) }}
+  </time>
+
+  <span class="text-xs font-medium text-slate-700 truncate">
+    {{ card.account_name }}
+  </span>
+
+  <span class="text-sm text-slate-900 truncate" title="{{ card.description }}">
+    {{ card.description if card.description else '—' }}
+  </span>
+
+  <div class="text-right tabular-nums">
+    <div class="text-sm font-mono {{ kind_class(card.kind) }}">
+      {{ format_amount(card.amount_native) }} <span class="text-xs text-slate-500">{{ card.currency }}</span>
+    </div>
+    <div class="text-[11px] {% if card.is_bcv_fallback %}text-slate-400 italic{% else %}text-slate-500{% endif %} flex items-center gap-1 justify-end">
+      {% if card.amount_usd is none %}
+        <span>&mdash;</span>
+      {% else %}
+        <span>${{ format_amount(card.amount_usd) }}</span>
+      {% endif %}
+      {{ rate_source_badge(card.rate_source, card.is_bcv_fallback) }}
+    </div>
+  </div>
+
+  <span class="text-xs text-slate-600 truncate">
+    {% if card.category_name %}{{ card.category_name }}{% else %}<span class="text-slate-300">&mdash;</span>{% endif %}
+  </span>
+
+  <span class="text-right">
+    {% if card.needs_review %}{{ needs_review_badge() }}{% endif %}
+  </span>
+</article>
