@@ -70,3 +70,37 @@
   {% if hint %}<div class="mt-1 text-xs text-slate-500">{{ hint }}</div>{% endif %}
 </div>
 {%- endmacro -%}
+
+{# --- Phase 2a additions (append-only) ---------------------------------- #}
+
+{%- macro sync_chip(source, status, last_run_at, severity='green') -%}
+{#- One sync-status chip. severity ∈ {green, yellow, red}. -#}
+{%- set sev_class = {
+    'green': 'bg-emerald-100 text-emerald-700 border-emerald-300',
+    'yellow': 'bg-amber-100 text-amber-700 border-amber-300',
+    'red':   'bg-rose-100 text-rose-700 border-rose-300',
+}.get(severity, 'bg-slate-100 text-slate-600 border-slate-300') -%}
+{%- set when_label -%}
+{%- if last_run_at is none -%}never{%- elif last_run_at.strftime is defined -%}{{ last_run_at.strftime('%Y-%m-%d %H:%M') }}{%- else -%}{{ last_run_at }}{%- endif -%}
+{%- endset -%}
+<span class="inline-flex items-center gap-1 px-2 py-1 text-xs border rounded-full {{ sev_class }}"
+      data-source="{{ source }}"
+      data-severity="{{ severity }}"
+      data-status="{{ status }}"
+      title="{{ source }} — {{ status }} @ {{ when_label }}">
+  <span class="font-medium">{{ source }}</span>
+  <span class="opacity-70">{{ status }}</span>
+  <span class="opacity-60 hidden sm:inline">{{ when_label }}</span>
+</span>
+{%- endmacro -%}
+
+{%- macro warning_chip(message) -%}
+{#- A loud yellow chip for the net-worth missing-pair indicator. -#}
+<span class="inline-flex items-center gap-1 px-2 py-1 text-xs border rounded-full
+             bg-amber-100 text-amber-800 border-amber-300"
+      data-warning-chip
+      title="{{ message }}">
+  <span aria-hidden="true">!</span>
+  <span>{{ message }}</span>
+</span>
+{%- endmacro -%}

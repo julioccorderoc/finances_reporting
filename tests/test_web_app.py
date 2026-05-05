@@ -107,22 +107,49 @@ def test_lan_bind_rejects_unauthenticated_request() -> None:
     assert resp.status_code == 401
 
 
-def test_lan_bind_accepts_bearer_token() -> None:
+def _tmp_migrated_db_path(tmp_path) -> "object":
+    """Create a tmp sqlite DB with migrations applied; return its path.
+
+    Phase 2a wired the / route to query the DB, so middleware tests that
+    hit / now need a real database path.
+    """
+    import sqlite3
+
+    from finances.db.connection import _register_decimal_adapters
+    from finances.db.migrate import apply_migrations
+
+    db_path = tmp_path / "web.db"
+    _register_decimal_adapters()
+    conn = sqlite3.connect(
+        str(db_path),
+        detect_types=sqlite3.PARSE_DECLTYPES,
+        isolation_level=None,
+    )
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    apply_migrations(conn)
+    conn.close()
+    return db_path
+
+
+def test_lan_bind_accepts_bearer_token(tmp_path) -> None:
     from finances.web.app import create_app
     from finances.web.settings import WebSettings
 
-    app = create_app(WebSettings(host="0.0.0.0", token="secret"))
+    db_path = _tmp_migrated_db_path(tmp_path)
+    app = create_app(WebSettings(host="0.0.0.0", token="secret", db_path=db_path))
     client = TestClient(app)
 
     resp = client.get("/", headers={"Authorization": "Bearer secret"})
     assert resp.status_code == 200
 
 
-def test_lan_bind_accepts_token_query_string_and_sets_cookie() -> None:
+def test_lan_bind_accepts_token_query_string_and_sets_cookie(tmp_path) -> None:
     from finances.web.app import create_app
     from finances.web.settings import WebSettings
 
-    app = create_app(WebSettings(host="0.0.0.0", token="secret"))
+    db_path = _tmp_migrated_db_path(tmp_path)
+    app = create_app(WebSettings(host="0.0.0.0", token="secret", db_path=db_path))
     client = TestClient(app)
 
     # Follow redirects so the implementation can choose either pattern:
@@ -145,20 +172,28 @@ def test_lan_bind_serves_static_without_auth() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Dashboard placeholder (Phase 1).
+# Dashboard route — Phase 1 placeholder replaced by Phase 2a real handler.
 # ---------------------------------------------------------------------------
 
 
-def test_dashboard_route_renders_placeholder_in_phase1() -> None:
+def test_dashboard_route_renders(tmp_path) -> None:
+    """Phase 2a replaces the Phase 1 placeholder with the real dashboard.
+
+    We assert the route boots and contains a stable dashboard marker
+    rather than the placeholder copy that no longer ships.
+    """
     from finances.web.app import create_app
     from finances.web.settings import WebSettings
 
-    app = create_app(WebSettings(host="127.0.0.1"))
+    db_path = _tmp_migrated_db_path(tmp_path)
+    app = create_app(WebSettings(host="127.0.0.1", db_path=db_path))
     client = TestClient(app)
 
     resp = client.get("/")
     assert resp.status_code == 200
-    assert "Phase 1 foundation" in resp.text
+    # Phase 2a contract: the dashboard exposes the four KPI labels.
+    assert "Net worth" in resp.text
+    assert "Recent activity" in resp.text
 
 
 # ---------------------------------------------------------------------------

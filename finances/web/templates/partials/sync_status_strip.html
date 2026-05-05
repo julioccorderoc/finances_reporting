@@ -1,0 +1,11 @@
+{# Dashboard sync-status strip.
+   Context: ``chips`` (list[services.dashboard.SyncChip]).
+   Returned standalone by /_partial/dashboard/sync-status (no base.html shell).
+#}
+{% from "_macros.html" import sync_chip %}
+
+<div class="sync-strip" aria-label="Ingest sync status">
+  {% for chip in chips %}
+    {{ sync_chip(chip.source, chip.last_status, chip.last_run_at, chip.severity) }}
+  {% endfor %}
+</div>
