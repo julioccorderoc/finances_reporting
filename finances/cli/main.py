@@ -50,6 +50,11 @@ def ingest_binance(
         "--lookback-days",
         help="Fallback window when no --since and no stored import_state (default 35).",
     ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run/--no-dry-run",
+        help="Fetch and validate but do not write to the DB.",
+    ),
 ) -> None:
     """Incrementally sync Binance endpoints into the ledger (EPIC-007)."""
     from finances.ingest.binance import sync_binance
@@ -59,13 +64,18 @@ def ingest_binance(
     try:
         client = _make_binance_client()
         result = sync_binance(
-            conn, client=client, since=since, lookback_days=lookback_days
+            conn,
+            client=client,
+            since=since,
+            lookback_days=lookback_days,
+            dry_run=dry_run,
         )
     finally:
         conn.close()
 
+    label = "binance sync (dry-run)" if dry_run else "binance sync"
     typer.echo(
-        f"binance sync: inserted={result['rows_inserted']} "
+        f"{label}: inserted={result['rows_inserted']} "
         f"updated={result['rows_updated']} "
         f"earn={result['earn_positions']} errors={len(result['errors'])}"
     )
@@ -94,6 +104,11 @@ def ingest_provincial(
         "--no-pairing",
         help="Skip the bank-anchored P2P pairing pass after upserts.",
     ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run/--no-dry-run",
+        help="Parse and validate the CSV but do not write to the DB.",
+    ),
 ) -> None:
     """Ingest a Provincial bank CSV and run the P2P pairing pass (EPIC-008)."""
     from finances.ingest.provincial import ingest_csv
@@ -106,12 +121,14 @@ def ingest_provincial(
             csv_path,
             pairing_window_days=pairing_window_days,
             run_pairing=not no_pairing,
+            dry_run=dry_run,
         )
     finally:
         conn.close()
 
+    label = "provincial ingest (dry-run)" if dry_run else "provincial ingest"
     typer.echo(
-        f"provincial ingest: seen={report.rows_seen} "
+        f"{label}: seen={report.rows_seen} "
         f"inserted={report.rows_inserted} updated={report.rows_updated}"
     )
     if report.reconciliation is not None:
@@ -126,17 +143,24 @@ def ingest_provincial(
 
 
 @ingest_app.command("bcv")
-def ingest_bcv() -> None:
+def ingest_bcv(
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run/--no-dry-run",
+        help="Fetch and validate but do not write to the DB.",
+    ),
+) -> None:
     """Fetch BCV reference rates (USD/VES, EUR/VES) and upsert into rates (EPIC-009)."""
     from finances.ingest.bcv import ingest_bcv as run_bcv
 
     conn = get_connection(DB_PATH)
     apply_migrations(conn)
     try:
-        inserted = run_bcv(conn)
+        inserted = run_bcv(conn, dry_run=dry_run)
     finally:
         conn.close()
-    typer.echo(f"bcv: inserted {inserted} rate rows")
+    prefix = "bcv (dry-run): would insert" if dry_run else "bcv: inserted"
+    typer.echo(f"{prefix} {inserted} rate rows")
 
 
 @ingest_app.command("p2p-rates")
@@ -149,6 +173,11 @@ def ingest_p2p_rates_cmd(
     asset: str = typer.Option("USDT", "--asset", help="Base asset code."),
     fiat: str = typer.Option("VES", "--fiat", help="Quote fiat code."),
     rows: int = typer.Option(10, "--rows", help="Top-N adverts per side."),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run/--no-dry-run",
+        help="Fetch and compute medians but do not write to the DB.",
+    ),
 ) -> None:
     """Fetch Binance P2P medians and upsert buy/sell/midpoint rate rows (EPIC-010)."""
     from datetime import date as _date
@@ -168,13 +197,19 @@ def ingest_p2p_rates_cmd(
     apply_migrations(conn)
     try:
         result = ingest_p2p_rates(
-            conn, as_of_date=as_of_date, asset=asset, fiat=fiat, rows=rows
+            conn,
+            as_of_date=as_of_date,
+            asset=asset,
+            fiat=fiat,
+            rows=rows,
+            dry_run=dry_run,
         )
     finally:
         conn.close()
 
+    label = "P2P (dry-run)" if dry_run else "P2P"
     typer.echo(
-        f"P2P {asset}/{fiat} @ {as_of_date.isoformat()}: "
+        f"{label} {asset}/{fiat} @ {as_of_date.isoformat()}: "
         f"buy={result['buy_median']} sell={result['sell_median']} "
         f"midpoint={result['midpoint']} "
         f"(n_buy={result['buy_adverts_used']}, n_sell={result['sell_adverts_used']})"
@@ -304,6 +339,11 @@ def backfill(
         "--force",
         help="Re-run even if the ledger already has transactions (wipes cleanup state).",
     ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run/--no-dry-run",
+        help="Run the full backfill in a transaction and roll back; no DB writes persist.",
+    ),
 ) -> None:
     """One-time backfill of historical CSVs through production ingest (EPIC-012)."""
     from finances.migration.backfill import run_backfill
@@ -316,12 +356,14 @@ def backfill(
             from_dir,
             pairing_window_days=pairing_window_days,
             force=force,
+            dry_run=dry_run,
         )
     finally:
         conn.close()
 
+    label = "backfill (dry-run)" if dry_run else "backfill"
     typer.echo(
-        f"backfill: binance={report.binance_rows_inserted}/{report.binance_rows_seen} "
+        f"{label}: binance={report.binance_rows_inserted}/{report.binance_rows_seen} "
         f"provincial={report.provincial_rows_inserted}/{report.provincial_rows_seen} "
         f"bcv_rates={report.bcv_rates_inserted}/{report.bcv_rows_seen} "
         f"errors={len(report.errors)}"
@@ -687,6 +729,74 @@ def sync_sheets(
         f"tabs={len(report.tabs)} "
         f"rows={{{counts}}} "
         f"duration={report.duration_s:.2f}s"
+    )
+
+
+@app.command("serve")
+def serve_cmd(
+    host: str = typer.Option(
+        "127.0.0.1",
+        "--host",
+        help="Address to bind. 127.0.0.1 (default) is localhost-only and "
+        "skips auth. Anything else requires --token / FINANCES_WEB_TOKEN.",
+    ),
+    port: int = typer.Option(8765, "--port", help="TCP port to bind."),
+    open_browser: bool = typer.Option(
+        False,
+        "--open/--no-open",
+        help="Open the viewer in the default browser after boot.",
+    ),
+    token: str | None = typer.Option(
+        None,
+        "--token",
+        envvar="FINANCES_WEB_TOKEN",
+        help="Bearer token required for non-localhost binds (ADR-012).",
+    ),
+) -> None:
+    """Run the local web viewer (EPIC-022)."""
+    import threading
+    import webbrowser
+
+    import uvicorn
+
+    from finances.web.app import create_app
+    from finances.web.settings import WebSettings
+
+    try:
+        settings = WebSettings(
+            host=host,
+            port=port,
+            token=token,
+        )
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+
+    fastapi_app = create_app(settings)
+
+    base_url = f"http://localhost:{settings.port}/"
+    if settings.token:
+        # Print the URL with token query for first-hop convenience
+        # (ADR-012); subsequent visits use the cookie.
+        from urllib.parse import urlencode
+
+        typer.echo(
+            f"finances serve: {base_url}?{urlencode({'token': settings.token})}"
+        )
+    else:
+        typer.echo(f"finances serve: {base_url}")
+
+    if open_browser:
+        threading.Timer(
+            1.0,
+            lambda: webbrowser.open(base_url),
+        ).start()
+
+    uvicorn.run(
+        fastapi_app,
+        host=settings.host,
+        port=settings.port,
+        log_level="info",
     )
 
 

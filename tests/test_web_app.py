@@ -169,12 +169,12 @@ def test_dashboard_route_renders_placeholder_in_phase1() -> None:
 def test_serve_cli_command_validates_lan_token() -> None:
     from finances.cli.main import app as cli_app
 
-    runner = CliRunner(mix_stderr=False)
+    runner = CliRunner()
     result = runner.invoke(
         cli_app,
         ["serve", "--host", "0.0.0.0", "--port", "18765"],
         env={"FINANCES_WEB_TOKEN": ""},
     )
     assert result.exit_code != 0
-    combined = (result.stdout or "") + (result.stderr or "")
+    combined = result.output or ""
     assert "token" in combined.lower()

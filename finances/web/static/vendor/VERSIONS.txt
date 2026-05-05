@@ -1,0 +1,6 @@
+# Pinned versions for vendored client libraries (EPIC-022 / ADR-012).
+# Bump deliberately and re-fetch via curl into this directory.
+
+htmx.min.js        htmx.org@2.0.4         https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js
+alpine.min.js      alpinejs@3.14.7        https://unpkg.com/alpinejs@3.14.7/dist/cdn.min.js
+chart.umd.min.js   chart.js@4.4.7         https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js

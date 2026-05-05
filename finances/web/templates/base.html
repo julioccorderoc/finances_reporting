@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Finances{% endblock %}</title>
+
+    <!-- Tailwind CSS via Play CDN. The only CDN allowed (ADR-012). -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Vendored client libraries (offline-capable, version pinned in
+         finances/web/static/vendor/VERSIONS.txt). -->
+    <script src="/static/vendor/htmx.min.js"></script>
+    <script defer src="/static/vendor/alpine.min.js"></script>
+    <script src="/static/vendor/chart.umd.min.js"></script>
+
+    <link rel="stylesheet" href="/static/css/app.css">
+  </head>
+  <body class="min-h-screen bg-slate-50 text-slate-900">
+    <nav class="bg-white border-b border-slate-200">
+      <div class="max-w-6xl mx-auto px-4 py-3 flex flex-wrap gap-4 items-center">
+        <a href="/" class="font-semibold text-slate-900">Finances</a>
+        <div class="flex flex-wrap gap-3 text-sm">
+          <a href="/" class="text-slate-600 hover:text-slate-900">Dashboard</a>
+          <a href="/transactions" class="text-slate-600 hover:text-slate-900">Transactions</a>
+          <a href="/monthly" class="text-slate-600 hover:text-slate-900">Monthly</a>
+          <a href="/triage" class="text-slate-600 hover:text-slate-900">Triage</a>
+          <a href="/accounts" class="text-slate-600 hover:text-slate-900">Accounts</a>
+          <a href="/rates" class="text-slate-600 hover:text-slate-900">Rates</a>
+        </div>
+      </div>
+    </nav>
+
+    <main class="max-w-6xl mx-auto px-4 py-6">
+      {% block content %}{% endblock %}
+    </main>
+  </body>
+</html>
