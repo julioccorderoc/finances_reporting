@@ -1,0 +1,28 @@
+{# Latest-rate-per-pair card list. Self-contained: requires `latest`. #}
+{% from "_macros.html" import format_amount, format_date, rate_source_badge %}
+
+{% if latest %}
+  <div class="rate-cards">
+    {% for r in latest %}
+      <div class="rate-card" data-rate-card data-base="{{ r.base }}" data-quote="{{ r.quote }}" data-source="{{ r.source }}">
+        <div class="flex items-center justify-between gap-2">
+          <div class="text-sm font-semibold text-slate-900">
+            {{ r.base }}/{{ r.quote }}
+          </div>
+          {{ rate_source_badge(r.source) }}
+        </div>
+        <div class="mt-1 text-lg font-mono tabular-nums text-slate-900">
+          {{ format_amount(r.rate, 4) }}
+        </div>
+        <div class="text-[11px] text-slate-500">
+          as of {{ format_date(r.as_of_date) }}
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="p-6 text-center text-slate-500 text-sm border border-dashed border-slate-300 rounded">
+    No rates yet. Run <code>finances ingest p2p-rates</code> and
+    <code>finances ingest bcv</code>.
+  </div>
+{% endif %}

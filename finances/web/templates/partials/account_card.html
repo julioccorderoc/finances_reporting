@@ -1,0 +1,44 @@
+{# Canonical account card. Self-contained: requires only `card`.
+
+   Wrap inside `.account-cards` for the auto-fit grid layout.
+#}
+{% from "_macros.html" import format_amount, kind_chip %}
+
+<a
+  class="account-card{% if not card.active %} is-inactive{% endif %}"
+  href="{{ card.drill_url }}"
+  data-account-card
+  data-account="{{ card.name }}"
+  data-account-kind="{{ card.kind }}"
+  data-active="{{ 'true' if card.active else 'false' }}"
+>
+  <div class="flex items-start justify-between gap-2">
+    <div class="min-w-0">
+      <div class="text-base font-semibold text-slate-900 truncate" title="{{ card.name }}">
+        {{ card.name }}
+      </div>
+      {% if card.institution %}
+        <div class="text-xs text-slate-500 truncate">{{ card.institution }}</div>
+      {% endif %}
+    </div>
+    {{ kind_chip(card.kind) }}
+  </div>
+
+  <div class="mt-3 flex items-baseline justify-between gap-2 tabular-nums">
+    <div class="text-lg font-mono text-slate-900">
+      {{ format_amount(card.balance_native) }}
+      <span class="text-xs text-slate-500">{{ card.currency }}</span>
+    </div>
+    <div class="text-xs italic text-slate-500">
+      {% if card.balance_usdt is none %}
+        &mdash;
+      {% else %}
+        ${{ format_amount(card.balance_usdt) }} <span class="not-italic">USDT</span>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if not card.active %}
+    <div class="mt-2 text-[10px] uppercase tracking-wide text-slate-400">inactive</div>
+  {% endif %}
+</a>

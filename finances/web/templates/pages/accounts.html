@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Accounts{% endblock %}
+{% block content %}
+  <header class="mb-4">
+    <h1 class="text-2xl font-semibold">Accounts</h1>
+    <p class="mt-1 text-sm text-slate-600">
+      Active accounts first, then inactive. Click any card to drill into its
+      transactions. USDT-equivalent uses Binance P2P median (rule-005, never BCV).
+    </p>
+  </header>
+
+  {% if cards %}
+    <section class="account-cards" id="account-cards">
+      {% for card in cards %}
+        {% include "partials/account_card.html" %}
+      {% endfor %}
+    </section>
+  {% else %}
+    <div class="p-6 text-center text-slate-500 text-sm border border-dashed border-slate-300 rounded">
+      No accounts found. Run the ingest commands first.
+    </div>
+  {% endif %}
+{% endblock %}

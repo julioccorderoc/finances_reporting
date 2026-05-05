@@ -1,0 +1,104 @@
+{# Rates chart fragment.
+
+   Self-contained: renders the range chips, the <canvas>, and an inline
+   <script> that constructs / re-constructs the Chart.js instance using
+   the `chart` variable in scope (instance of `RatesChart`).
+
+   Used by:
+   * /rates page (full HTML render)
+   * /_partial/rates/chart (HTMX swap on range-toggle)
+#}
+
+<div id="rates-chart" class="space-y-3">
+  <div class="flex flex-wrap items-center gap-2 text-xs">
+    <span class="text-slate-500">Range:</span>
+    {% for opt in range_options %}
+      {% set active = (opt == range_days) %}
+      <button
+        type="button"
+        class="px-2 py-1 border rounded {% if active %}bg-slate-900 text-white border-slate-900{% else %}bg-white text-slate-700 border-slate-300 hover:bg-slate-50{% endif %}"
+        hx-get="/_partial/rates/chart"
+        hx-target="#rates-chart"
+        hx-swap="outerHTML"
+        hx-push-url="true"
+        hx-vals='{"range_days": "{{ opt }}"}'
+      >
+        {{ opt }}d
+      </button>
+    {% endfor %}
+    <span class="ml-auto text-slate-500">
+      USDT/VES P2P median &middot; USD/VES BCV (reference)
+    </span>
+  </div>
+
+  <div class="rates-chart-wrap">
+    <canvas id="rates-chart-canvas"></canvas>
+  </div>
+
+  {# Render data inline as JSON so the script can hydrate the chart. #}
+  <script id="rates-chart-data" type="application/json">
+    {
+      "series": [
+        {% for s in chart.series %}
+        {
+          "label": {{ s.label | tojson }},
+          "source": {{ s.source | tojson }},
+          "points": [
+            {% for p in s.points -%}
+            {"x": {{ p.as_of_date.isoformat() | tojson }}, "y": {{ p.rate | string | tojson }}}{% if not loop.last %},{% endif %}
+            {%- endfor %}
+          ]
+        }{% if not loop.last %},{% endif %}
+        {% endfor %}
+      ],
+      "range_days": {{ range_days }}
+    }
+  </script>
+
+  <script>
+    (function () {
+      var dataEl = document.getElementById("rates-chart-data");
+      if (!dataEl) return;
+      var data;
+      try { data = JSON.parse(dataEl.textContent); } catch (e) { return; }
+      var canvas = document.getElementById("rates-chart-canvas");
+      if (!canvas || typeof Chart === "undefined") return;
+
+      // Destroy any existing chart on this canvas (HTMX swap re-runs this).
+      if (window.__ratesChart) {
+        try { window.__ratesChart.destroy(); } catch (e) {}
+      }
+
+      var palette = ["#0284c7", "#d97706"];
+      var datasets = data.series.map(function (s, idx) {
+        return {
+          label: s.label,
+          data: s.points.map(function (pt) { return { x: pt.x, y: parseFloat(pt.y) }; }),
+          borderColor: palette[idx % palette.length],
+          backgroundColor: palette[idx % palette.length],
+          borderWidth: idx === 0 ? 2 : 1,
+          tension: 0.15,
+          pointRadius: 1.5,
+          fill: false,
+        };
+      });
+
+      window.__ratesChart = new Chart(canvas.getContext("2d"), {
+        type: "line",
+        data: { datasets: datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          parsing: { xAxisKey: "x", yAxisKey: "y" },
+          scales: {
+            x: { type: "category" },
+            y: { beginAtZero: false }
+          },
+          plugins: {
+            legend: { position: "top", labels: { boxWidth: 10 } }
+          }
+        }
+      });
+    })();
+  </script>
+</div>

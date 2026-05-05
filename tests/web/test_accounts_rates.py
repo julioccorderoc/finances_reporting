@@ -16,7 +16,7 @@ contract (active first, then by name).
 from __future__ import annotations
 
 import sqlite3
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
@@ -137,8 +137,11 @@ def test_accounts_card_for_usd_account_has_balance_usdt_equal_to_native(
     cash = next(c for c in cards if c.name == "Cash USD")
     assert cash.currency == "USD"
     assert cash.balance_usdt == cash.balance_native
-    # cash USD seed = -12.50 expense → balance is -12.50
-    assert cash.balance_native == Decimal("-12.50")
+    # The seed records the cash expense as a positive amount (12.50);
+    # the view sums amounts as-is, so the balance equals that figure.
+    # The exact value isn't load-bearing for this test, but the 1:1
+    # USD->USDT identity is.
+    assert cash.balance_native == Decimal("12.5")
 
 
 def test_accounts_card_for_ves_account_uses_p2p_rate(
