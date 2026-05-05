@@ -83,3 +83,57 @@
 /* === END card-row system === */
 
 /* --- additional rules: append below this line ----------------------- */
+
+/* === dashboard === */
+
+/* KPI tile grid: 4 across desktop, 2 across tablet, 1 across phone. */
+.dashboard-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+@media (max-width: 1023px) {
+  .dashboard-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 640px) {
+  .dashboard-kpi-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Severity-aware tile borders. */
+.kpi-tile[data-severity="warning"] {
+  border-color: #fbbf24;       /* amber-400 */
+  background-color: #fffbeb;   /* amber-50 */
+}
+.kpi-tile[data-severity="alert"] {
+  border-color: #f43f5e;       /* rose-500 */
+  background-color: #fff1f2;   /* rose-50 */
+}
+
+/* Sync-strip: horizontal flex with wrap, gap matching the tile gap. */
+.sync-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+/* Spend chart canvas: bound the height so the chart never blows up the
+ * fold. Chart.js handles internal resizing.
+ */
+.spend-chart {
+  position: relative;
+  width: 100%;
+  height: 320px;
+}
+@media (max-width: 640px) {
+  .spend-chart {
+    height: 240px;
+  }
+}
+
+/* === END dashboard === */
+

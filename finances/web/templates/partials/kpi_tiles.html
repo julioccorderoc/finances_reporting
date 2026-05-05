@@ -1,0 +1,19 @@
+{# Dashboard KPI tiles row.
+   Context: ``kpis`` (services.dashboard.KpiTiles).
+#}
+<section class="dashboard-kpi-grid" aria-label="Headline KPIs">
+  {% for tile in [kpis.net_worth, kpis.month_spend, kpis.month_income, kpis.needs_review] %}
+    <article
+      class="kpi-tile rounded-lg border border-slate-200 bg-white p-4"
+      data-severity="{{ tile.severity }}"
+    >
+      <div class="text-xs uppercase tracking-wide text-slate-500">
+        {{ tile.label }}
+      </div>
+      <div class="mt-1 text-2xl font-semibold tabular-nums">{{ tile.value }}</div>
+      {% if tile.hint %}
+        <div class="mt-1 text-xs text-slate-500">{{ tile.hint }}</div>
+      {% endif %}
+    </article>
+  {% endfor %}
+</section>

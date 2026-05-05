@@ -1,6 +1,33 @@
 {% extends "base.html" %}
 {% block title %}Finances{% endblock %}
 {% block content %}
-  <h1 class="text-2xl font-semibold">Finances</h1>
-  <p class="mt-2 text-slate-600">Phase 1 foundation. Pages arrive in Phase 2.</p>
+  <header class="mb-4">
+    <h1 class="text-2xl font-semibold">Finances</h1>
+    <p class="mt-1 text-sm text-slate-600">
+      Headline net worth (USDT-denominated), this-month flows, sync status,
+      and the past six months of spending.
+    </p>
+  </header>
+
+  <section class="space-y-6">
+    {# 1. KPI tiles. #}
+    {% include "partials/kpi_tiles.html" %}
+
+    {# 2. Sync status strip. Polled every 60s for live updates. #}
+    <div
+      id="sync-status-strip"
+      hx-get="/_partial/dashboard/sync-status"
+      hx-trigger="every 60s"
+      hx-swap="innerHTML"
+      aria-live="polite"
+    >
+      {% include "partials/sync_status_strip.html" %}
+    </div>
+
+    {# 3. Recent activity. Reuses the canonical card partial. #}
+    {% include "partials/recent_activity.html" %}
+
+    {# 4. 6-month stacked-bar spend chart. #}
+    {% include "partials/spend_trend_chart.html" %}
+  </section>
 {% endblock %}

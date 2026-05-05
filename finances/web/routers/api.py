@@ -1,19 +1,28 @@
-"""JSON API endpoints (EPIC-022 / ADR-012, EPIC-023 Phase 2b).
+"""JSON API endpoints (EPIC-022 / ADR-012, EPIC-023 Phase 2b/2a).
 
-Phase 2b wires the read-only ``GET /api/transactions`` endpoint. The
-shape (``TransactionsPage``) is the foundation for the deferred
-EPIC-016 mobile API; the HTMX layer does not depend on it.
+Phase 2b wires ``GET /api/transactions``. Phase 2a appends the dashboard
+JSON endpoints used by the deferred mobile API and easy debugging via
+``curl``. The HTMX layer does not depend on them.
 """
 
 from __future__ import annotations
 
 import sqlite3
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends
 
 from finances.web.deps import get_conn
 from finances.web.routers._tx_filter_dep import filter_from_query
+from finances.web.services.dashboard import (
+    KpiTiles,
+    SpendTrend,
+    build_kpis,
+    build_recent_activity,
+    build_spend_trend,
+)
 from finances.web.services.transactions_query import (
+    TransactionCard,
     TransactionsFilter,
     TransactionsPage,
     query_transactions,
@@ -32,3 +41,34 @@ def transactions_list_json(
 ) -> TransactionsPage:
     """Return paginated, filtered transactions as JSON."""
     return query_transactions(conn, f)
+
+
+# ---------------------------------------------------------------------------
+# Dashboard endpoints (Phase 2a).
+# ---------------------------------------------------------------------------
+
+
+@router.get("/dashboard/kpis", response_model=KpiTiles)
+def dashboard_kpis(
+    conn: sqlite3.Connection = Depends(get_conn),
+) -> KpiTiles:
+    """Return the four KPI tiles as JSON."""
+    today = datetime.now(tz=UTC).date()
+    return build_kpis(conn, today=today)
+
+
+@router.get("/dashboard/recent", response_model=list[TransactionCard])
+def dashboard_recent(
+    conn: sqlite3.Connection = Depends(get_conn),
+) -> list[TransactionCard]:
+    """Return the most recent income/expense transactions as cards."""
+    return build_recent_activity(conn, limit=10)
+
+
+@router.get("/dashboard/spend-trend", response_model=SpendTrend)
+def dashboard_spend_trend(
+    conn: sqlite3.Connection = Depends(get_conn),
+) -> SpendTrend:
+    """Return the 6-month stacked-bar dataset for the spend chart."""
+    today = datetime.now(tz=UTC).date()
+    return build_spend_trend(conn, today=today, months_back=6)

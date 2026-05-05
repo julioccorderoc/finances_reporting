@@ -1,0 +1,39 @@
+{# Dashboard "Recent activity" panel.
+   Context: ``recent`` (list[services.transactions_query.TransactionCard]).
+   Reuses the canonical card_transaction.html partial inside a .cards
+   parent so the column tracks align with the rest of the viewer.
+#}
+<section aria-labelledby="recent-activity-heading">
+  <header class="mb-2 flex items-baseline justify-between">
+    <h2 id="recent-activity-heading" class="text-lg font-semibold">
+      Recent activity
+    </h2>
+    <a
+      href="/transactions?kinds=income&kinds=expense"
+      class="text-sm text-sky-700 hover:text-sky-900"
+    >
+      View all &rarr;
+    </a>
+  </header>
+
+  <div class="cards">
+    <div class="hidden sm:grid grid-cols-subgrid col-span-full text-[10px] uppercase tracking-wide text-slate-400 px-3">
+      <span>Date</span>
+      <span>Account</span>
+      <span>Description</span>
+      <span class="text-right">Amount</span>
+      <span>Category</span>
+      <span class="text-right">Flags</span>
+    </div>
+
+    {% if recent %}
+      {% for card in recent %}
+        {% include "partials/card_transaction.html" %}
+      {% endfor %}
+    {% else %}
+      <div class="col-span-full p-6 text-center text-slate-500 text-sm border border-dashed border-slate-300 rounded">
+        No recent income or expense activity yet.
+      </div>
+    {% endif %}
+  </div>
+</section>
