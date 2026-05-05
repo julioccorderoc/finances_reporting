@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Monthly (mobile){% endblock %}
+{% block content %}
+  <header class="mb-3">
+    <h1 class="text-xl font-semibold">Monthly</h1>
+    <p class="mt-1 text-xs text-slate-600">
+      Single-month view. Use the chevrons to walk months.
+    </p>
+  </header>
+
+  {# Kind tabs reuse the same desktop component — mobile-friendly already. #}
+  <div class="mb-3">
+    {% include "partials/monthly_kind_tabs.html" %}
+  </div>
+
+  {% include "partials/monthly_mobile_inner.html" %}
+{% endblock %}

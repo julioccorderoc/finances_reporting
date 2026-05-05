@@ -1,0 +1,87 @@
+{# Stacked-bar chart for /monthly. Chart.js via vendored UMD.
+
+   We embed the data as JSON in a `data-chart` attribute and a tiny
+   inline <script> instantiates the chart. Bar click uses
+   getElementsAtEventForMode to navigate to /transactions.
+#}
+{%- set chart_payload -%}
+{
+  "months": {{ chart.months | tojson }},
+  "series": [
+    {%- for s in chart.series -%}
+      {"category": {{ s.category | tojson }}, "values": [{% for v in s.values %}{{ v }}{% if not loop.last %},{% endif %}{% endfor %}]}{% if not loop.last %},{% endif %}
+    {%- endfor -%}
+  ],
+  "fallback_per_month": [{% for v in chart.fallback_per_month %}{{ v }}{% if not loop.last %},{% endif %}{% endfor %}],
+  "kind": {{ chart.filter.kind.value | tojson }}
+}
+{%- endset -%}
+<section id="monthly-chart" class="mt-4">
+  <div class="monthly-chart-wrap bg-white border border-slate-200 rounded-lg p-3">
+    <canvas
+      data-monthly-chart
+      data-chart='{{ chart_payload | safe }}'
+    ></canvas>
+  </div>
+</section>
+
+<script>
+(function () {
+  if (typeof window === 'undefined' || !window.Chart) return;
+  var canvases = document.querySelectorAll('canvas[data-monthly-chart]');
+  canvases.forEach(function (canvas) {
+    if (canvas.dataset.bound === 'true') return;
+    canvas.dataset.bound = 'true';
+    var raw = canvas.getAttribute('data-chart');
+    if (!raw) return;
+    var payload;
+    try { payload = JSON.parse(raw); } catch (e) { return; }
+    var palette = ['#0ea5e9','#22c55e','#a855f7','#f59e0b','#ef4444','#64748b'];
+    var datasets = (payload.series || []).map(function (s, i) {
+      return {
+        label: s.category,
+        data: s.values,
+        backgroundColor: palette[i % palette.length],
+        stack: 'stack-a',
+      };
+    });
+    if ((payload.fallback_per_month || []).some(function (v) { return Number(v) !== 0; })) {
+      datasets.push({
+        label: 'BCV fallback',
+        data: payload.fallback_per_month,
+        backgroundColor: 'rgba(245, 158, 11, 0.35)',
+        stack: 'stack-b',
+        borderColor: '#f59e0b',
+        borderWidth: 1,
+      });
+    }
+    new window.Chart(canvas, {
+      type: 'bar',
+      data: { labels: payload.months || [], datasets: datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: { stacked: true, ticks: { font: { size: 11 } } },
+          y: { stacked: true, ticks: { font: { size: 11 } } },
+        },
+        plugins: {
+          legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
+          tooltip: { mode: 'index', intersect: false },
+        },
+        onClick: function (evt) {
+          var pts = this.getElementsAtEventForMode(evt, 'index', { intersect: false }, true);
+          if (!pts || !pts.length) return;
+          var idx = pts[0].index;
+          var month = (payload.months || [])[idx];
+          if (!month) return;
+          var df = month + '-01';
+          var url = '/transactions?date_from=' + encodeURIComponent(df) +
+                    '&kinds=' + encodeURIComponent(payload.kind || 'expense');
+          window.location.href = url;
+        },
+      },
+    });
+  });
+})();
+</script>

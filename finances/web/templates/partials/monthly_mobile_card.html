@@ -1,0 +1,30 @@
+{# One category card for the mobile view. #}
+<a
+  href="{{ category.drill_url }}"
+  class="monthly-mobile-card hover:bg-slate-50"
+  data-mobile-card
+  data-category="{{ category.category_name or 'Uncategorized' }}"
+  data-needs-review-count="{{ category.needs_review_count }}"
+>
+  <div class="flex items-center justify-between">
+    <span class="text-sm font-medium text-slate-900">
+      {{ category.category_name or 'Uncategorized' }}
+      {% if category.needs_review_count > 0 %}
+        <span class="ml-1 inline-block w-2 h-2 rounded-full bg-yellow-500"></span>
+      {% endif %}
+    </span>
+    <span class="text-sm tabular-nums font-mono text-slate-900">
+      ${{ '%.2f' | format(category.total_usd) }}
+      {% if category.fallback_usd and category.fallback_usd != 0 %}
+        <span class="text-[10px] text-amber-600 ml-1">(+{{ '%.2f' | format(category.fallback_usd) }} bcv)</span>
+      {% endif %}
+    </span>
+  </div>
+  <div class="bar" aria-hidden="true">
+    <span style="width: {{ (category.pct_of_month * 100) | round(1) }}%"></span>
+  </div>
+  <div class="flex items-center justify-between text-[11px] text-slate-500">
+    <span>{{ (category.pct_of_month * 100) | round(1) }}% of month</span>
+    <span>tap to view</span>
+  </div>
+</a>
