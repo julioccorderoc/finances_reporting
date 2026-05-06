@@ -28,6 +28,12 @@ from finances.web.services.transactions_write import (
     TransactionEditRequest,
     apply_edit,
 )
+from finances.web.services.triage import (
+    TriageType,
+    build_queue,
+    confirm_pair,
+    get_skip_store,
+)
 from finances.web.services.monthly_view import (
     MonthlyFilter,
     build_chart,
@@ -282,6 +288,238 @@ def transactions_edit_partial(
         "partials/card_transaction.html",
         {"card": card},
     )
+    response.headers["HX-Trigger"] = "closeModal"
+    return response
+
+
+# ---------------------------------------------------------------------------
+# Triage partials (Phase 4 / EPIC-025).
+# ---------------------------------------------------------------------------
+
+
+def _parse_triage_type_partial(value: str | None) -> TriageType | None:
+    if value in (None, "", "all"):
+        return None
+    try:
+        return TriageType(value)
+    except ValueError:
+        return None
+
+
+def _render_queue_partial(request: Request, conn: sqlite3.Connection):
+    """Render only the inner queue list (pairs with hx-target=#triage-queue)."""
+    skip_store = get_skip_store(request.app)
+    queue = build_queue(
+        conn,
+        type_filter=None,
+        skipped_ids=set(skip_store) if skip_store else None,
+    )
+    templates = request.app.state.templates
+    return templates.TemplateResponse(
+        request,
+        "partials/triage_queue.html",
+        {"queue": queue},
+    )
+
+
+@router.get("/triage/queue", include_in_schema=False)
+def triage_queue_partial(
+    request: Request,
+    type_filter: str | None = Query(default=None),
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Return the queue partial — used by filter chips + post-save refresh."""
+    parsed = _parse_triage_type_partial(type_filter)
+    skip_store = get_skip_store(request.app)
+    queue = build_queue(
+        conn,
+        type_filter=parsed,
+        skipped_ids=set(skip_store) if skip_store else None,
+    )
+    templates = request.app.state.templates
+    return templates.TemplateResponse(
+        request,
+        "partials/triage_queue.html",
+        {"queue": queue},
+    )
+
+
+@router.get("/triage/{txn_id}/modal", include_in_schema=False)
+def triage_modal_partial(
+    request: Request,
+    txn_id: int,
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Render the Save & next variant of the txn-edit modal."""
+    txn = transactions_repo.get_by_id(conn, txn_id)
+    if txn is None:
+        raise HTTPException(
+            status_code=404, detail=f"transaction id={txn_id} not found"
+        )
+
+    account_row = conn.execute(
+        "SELECT name FROM accounts WHERE id = ?", (txn.account_id,)
+    ).fetchone()
+    account_name = account_row["name"] if account_row else ""
+
+    category_name: str | None = None
+    if txn.category_id is not None:
+        cat = categories_repo.get_by_id(conn, txn.category_id)
+        category_name = cat.name if cat else None
+
+    card = _project_card(
+        conn,
+        txn,
+        account_name=account_name,
+        category_name=category_name,
+    )
+
+    categories = categories_repo.list_all(conn)
+
+    templates = request.app.state.templates
+    return templates.TemplateResponse(
+        request,
+        "partials/modal_transaction_triage.html",
+        {
+            "txn": txn,
+            "card": card,
+            "categories": categories,
+            "account_name": account_name,
+        },
+    )
+
+
+@router.post("/triage/{txn_id}/edit", include_in_schema=False)
+def triage_edit_partial(
+    request: Request,
+    txn_id: int,
+    set_category: str | None = Form(default=None),
+    category_id: str | None = Form(default=None),
+    set_user_rate: str | None = Form(default=None),
+    user_rate: str | None = Form(default=None),
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Apply the edit and return a fresh queue partial.
+
+    Sets ``HX-Trigger: closeModal, advanceQueue`` so the base.html
+    Alpine listener clears the modal host and the page advances to the
+    next item.
+    """
+    req = TransactionEditRequest(
+        set_category=_parse_form_bool(set_category),
+        category_id=_parse_optional_int(category_id),
+        set_user_rate=_parse_form_bool(set_user_rate),
+        user_rate=_parse_optional_decimal(user_rate),
+    )
+
+    try:
+        apply_edit(conn, txn_id=txn_id, req=req)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    response = _render_queue_partial(request, conn)
+    response.headers["HX-Trigger"] = "closeModal, advanceQueue"
+    return response
+
+
+@router.get(
+    "/triage/pair/{deposit_id}/{sell_id}/modal",
+    include_in_schema=False,
+)
+def triage_pair_modal_partial(
+    request: Request,
+    deposit_id: int,
+    sell_id: int,
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Render the pair-confirm modal for the (deposit, sell) pair.
+
+    The modal carries the proposal so the user can confirm or skip.
+    """
+    from finances.web.services.transactions_query import _project_card
+    from finances.web.services.triage import PairProposal
+
+    deposit = transactions_repo.get_by_id(conn, deposit_id)
+    sell = transactions_repo.get_by_id(conn, sell_id)
+    if deposit is None or sell is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"transaction id={deposit_id if deposit is None else sell_id} not found",
+        )
+
+    deposit_account = conn.execute(
+        "SELECT name FROM accounts WHERE id = ?", (deposit.account_id,)
+    ).fetchone()
+    sell_account = conn.execute(
+        "SELECT name FROM accounts WHERE id = ?", (sell.account_id,)
+    ).fetchone()
+    deposit_card = _project_card(
+        conn,
+        deposit,
+        account_name=deposit_account["name"] if deposit_account else "",
+        category_name=None,
+    )
+    sell_card = _project_card(
+        conn,
+        sell,
+        account_name=sell_account["name"] if sell_account else "",
+        category_name=None,
+    )
+
+    proposal = PairProposal(
+        proposal_id=f"{deposit_id}:{sell_id}",
+        deposit=deposit_card,
+        sell=sell_card,
+        confidence=1.0,
+        details={
+            "bank_transaction_id": deposit_id,
+            "binance_transaction_id": sell_id,
+        },
+    )
+
+    templates = request.app.state.templates
+    return templates.TemplateResponse(
+        request,
+        "partials/modal_pair_confirm.html",
+        {"proposal": proposal},
+    )
+
+
+@router.post(
+    "/triage/pair/{deposit_id}/{sell_id}/confirm",
+    include_in_schema=False,
+)
+def triage_pair_confirm_partial(
+    request: Request,
+    deposit_id: int,
+    sell_id: int,
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Confirm the pair → calls :func:`confirm_pair` → fresh queue."""
+    try:
+        confirm_pair(conn, deposit_id=deposit_id, sell_id=sell_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    response = _render_queue_partial(request, conn)
+    response.headers["HX-Trigger"] = "closeModal"
+    return response
+
+
+@router.post("/triage/skip/{item_id:path}", include_in_schema=False)
+def triage_skip_partial(
+    request: Request,
+    item_id: str,
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Push ``item_id`` into the per-app skip store; return queue partial."""
+    skip_store = get_skip_store(request.app)
+    skip_store.add(item_id)
+    response = _render_queue_partial(request, conn)
     response.headers["HX-Trigger"] = "closeModal"
     return response
 

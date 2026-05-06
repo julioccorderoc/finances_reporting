@@ -1,0 +1,21 @@
+{# Triage RATE / CATEGORY card. Wraps the canonical card_transaction.html
+   with badges on top and overrides the modal trigger to point at the
+   triage Save & next variant.
+
+   Inputs (from triage_queue.html):
+     item   TriageItem     (provides item.txn_card and item.txn_issue_badges)
+#}
+{% from "_macros.html" import triage_type_badge %}
+
+{% set card = item.txn_card %}
+{% set triage_modal_url = '/_partial/triage/' ~ card.id ~ '/modal' %}
+
+<div class="card-row-group" data-triage-card="txn" data-tx-id="{{ card.id }}">
+  <div class="triage-badge-row">
+    {% for badge in item.txn_issue_badges %}
+      {{ triage_type_badge(badge) }}
+    {% endfor %}
+  </div>
+
+  {% include "partials/card_transaction.html" %}
+</div>

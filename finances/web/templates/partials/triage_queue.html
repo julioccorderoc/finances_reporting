@@ -1,0 +1,20 @@
+{# Triage queue list — included from /triage and served standalone via
+   GET /_partial/triage/queue for HTMX swaps (filter chip, post-save
+   refresh).
+
+   Inputs:
+     queue        TriageQueue (services/triage.py)
+#}
+<div class="cards" data-triage-queue>
+  {% if queue.items %}
+    {% for item in queue.items %}
+      {% if item.type.value == 'pair' %}
+        {% include "partials/triage_card_pair.html" %}
+      {% else %}
+        {% include "partials/triage_card_txn.html" %}
+      {% endif %}
+    {% endfor %}
+  {% else %}
+    {% include "partials/triage_empty.html" %}
+  {% endif %}
+</div>

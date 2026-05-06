@@ -1,0 +1,122 @@
+{# Triage variant of the transaction-edit modal (EPIC-025 / Phase 4).
+
+   Same fields as Phase 3's modal_transaction.html, but the buttons are
+   [Save & next] [Skip → bottom] [Cancel]. The form posts to the triage
+   edit endpoint, which returns a fresh queue partial and sets
+   ``HX-Trigger: closeModal, advanceQueue`` on the response.
+
+   Inputs:
+     txn            Transaction (Pydantic)
+     card           TransactionCard (projection)
+     categories     list[Category]
+     account_name   str
+#}
+{% from "_macros.html" import rate_source_badge, needs_review_badge,
+                              kind_class, format_date, format_amount,
+                              category_select %}
+
+<div
+  class="tx-modal-overlay"
+  data-tx-modal="triage"
+  data-tx-id="{{ txn.id }}"
+  x-data="{}"
+  @keydown.escape.window="window.dispatchEvent(new CustomEvent('close-modal'))"
+>
+  <div class="tx-modal-card" role="dialog" aria-modal="true">
+    <header class="tx-modal-header">
+      <div class="flex items-baseline gap-2">
+        <span class="text-xs uppercase tracking-wide {{ kind_class(card.kind) }}">{{ card.kind }}</span>
+        <time class="text-xs text-slate-500 tabular-nums" datetime="{{ card.occurred_at.isoformat() }}">
+          {{ format_date(card.occurred_at) }}
+        </time>
+      </div>
+      <div class="mt-1 text-lg font-semibold tabular-nums">
+        {{ format_amount(card.amount_native) }} <span class="text-sm text-slate-500">{{ card.currency }}</span>
+        {% if card.amount_usd is not none %}
+          <span class="ml-2 text-sm text-slate-500">${{ format_amount(card.amount_usd) }}</span>
+        {% else %}
+          <span class="ml-2 text-sm text-slate-400">&mdash;</span>
+        {% endif %}
+      </div>
+      <div class="mt-1 text-xs text-slate-500">{{ account_name }}</div>
+    </header>
+
+    <section class="tx-modal-section">
+      <h3 class="tx-modal-section-title">Provenance</h3>
+      <dl class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-600">
+        <dt>source</dt>
+        <dd class="font-mono">{{ txn.source }}</dd>
+
+        <dt>source_ref</dt>
+        <dd class="font-mono break-all">{{ txn.source_ref or '—' }}</dd>
+
+        <dt>rate_source</dt>
+        <dd>
+          {{ rate_source_badge(card.rate_source, card.is_bcv_fallback) }}
+          {% if card.is_bcv_fallback %}<span class="text-amber-700 ml-1">(BCV fallback — reference only)</span>{% endif %}
+        </dd>
+
+        <dt>needs_review</dt>
+        <dd>
+          {% if card.needs_review %}{{ needs_review_badge() }}{% else %}<span class="text-slate-400">no</span>{% endif %}
+        </dd>
+      </dl>
+    </section>
+
+    <section class="tx-modal-section">
+      <h3 class="tx-modal-section-title">Description</h3>
+      <p class="text-sm text-slate-800 whitespace-pre-wrap break-words">{{ txn.description or '—' }}</p>
+    </section>
+
+    {# Editable form: Save & next variant. #}
+    <form
+      class="tx-modal-form"
+      hx-post="/_partial/triage/{{ txn.id }}/edit"
+      hx-target="#triage-queue"
+      hx-swap="innerHTML"
+    >
+      <input type="hidden" name="set_category" value="true">
+      <input type="hidden" name="set_user_rate" value="true">
+
+      <label class="block">
+        <span class="text-xs uppercase tracking-wide text-slate-500">Category</span>
+        {{ category_select("category_id", categories, selected=txn.category_id) }}
+      </label>
+
+      <label class="block">
+        <span class="text-xs uppercase tracking-wide text-slate-500">User rate</span>
+        <input
+          type="text"
+          name="user_rate"
+          inputmode="decimal"
+          autocomplete="off"
+          value="{{ txn.user_rate if txn.user_rate is not none else '' }}"
+          placeholder="{% if card.rate_source not in ('user_rate', 'native_usd') and card.amount_usd is not none %}fallback: {{ card.rate_source }}{% else %}native amount in {{ txn.currency }}/USD{% endif %}"
+          class="mt-1 w-full border border-slate-300 rounded px-2 py-1 text-sm font-mono"
+        >
+        <span class="text-[11px] text-slate-500">
+          empty = clear (re-derives needs_review)
+        </span>
+      </label>
+
+      <div class="tx-modal-actions">
+        <button
+          type="button"
+          class="px-3 py-1.5 text-sm border border-slate-300 rounded bg-white hover:bg-slate-50"
+          @click="window.dispatchEvent(new CustomEvent('close-modal'))"
+        >Cancel</button>
+        <button
+          type="button"
+          class="px-3 py-1.5 text-sm border border-amber-300 rounded bg-amber-50 text-amber-800 hover:bg-amber-100"
+          hx-post="/_partial/triage/skip/txn:{{ txn.id }}"
+          hx-target="#triage-queue"
+          hx-swap="innerHTML"
+        >Skip → bottom</button>
+        <button
+          type="submit"
+          class="px-3 py-1.5 text-sm border border-slate-900 rounded bg-slate-900 text-white hover:bg-slate-800"
+        >Save &amp; next</button>
+      </div>
+    </form>
+  </div>
+</div>

@@ -1,0 +1,101 @@
+{# Pair-confirm modal (EPIC-025 / Phase 4 / ADR-002).
+
+   Side-by-side mini-cards for the bank deposit + Binance sell. Confirm
+   POSTs to /_partial/triage/pair/{deposit_id}/{sell_id}/confirm which
+   delegates to ``confirm_pair`` → :func:`create_transfer`.
+
+   Inputs:
+     proposal       PairProposal
+#}
+{% from "_macros.html" import format_date, format_amount, rate_source_badge %}
+
+{% set deposit = proposal.deposit %}
+{% set sell = proposal.sell %}
+
+<div
+  class="tx-modal-overlay"
+  data-tx-modal="pair"
+  data-deposit-id="{{ deposit.id }}"
+  data-sell-id="{{ sell.id }}"
+  x-data="{}"
+  @keydown.escape.window="window.dispatchEvent(new CustomEvent('close-modal'))"
+>
+  <div class="tx-modal-card" role="dialog" aria-modal="true">
+    <header class="tx-modal-header">
+      <div class="text-sm font-semibold">Confirm transfer pair</div>
+      <div class="text-xs text-slate-500">
+        Pairs the bank deposit with the Binance sell as one transfer
+        (shared transfer_id, sums to zero per ADR-002).
+      </div>
+    </header>
+
+    <section class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <div class="border border-slate-200 rounded p-3">
+        <div class="text-xs uppercase tracking-wide text-slate-500">Bank deposit</div>
+        <div class="mt-1 text-sm font-medium">{{ deposit.account_name }}</div>
+        <time class="text-xs text-slate-500" datetime="{{ deposit.occurred_at.isoformat() }}">
+          {{ format_date(deposit.occurred_at) }}
+        </time>
+        <div class="mt-1 text-base font-mono text-emerald-700">
+          +{{ format_amount(deposit.amount_native) }}
+          <span class="text-xs text-slate-500">{{ deposit.currency }}</span>
+        </div>
+        {% if deposit.amount_usd is not none %}
+          <div class="text-xs text-slate-500">
+            ≈ ${{ format_amount(deposit.amount_usd) }}
+            {{ rate_source_badge(deposit.rate_source, deposit.is_bcv_fallback) }}
+          </div>
+        {% endif %}
+        <p class="mt-2 text-xs text-slate-700 break-words">{{ deposit.description }}</p>
+      </div>
+
+      <div class="border border-slate-200 rounded p-3">
+        <div class="text-xs uppercase tracking-wide text-slate-500">Binance sell</div>
+        <div class="mt-1 text-sm font-medium">{{ sell.account_name }}</div>
+        <time class="text-xs text-slate-500" datetime="{{ sell.occurred_at.isoformat() }}">
+          {{ format_date(sell.occurred_at) }}
+        </time>
+        <div class="mt-1 text-base font-mono text-rose-700">
+          {{ format_amount(sell.amount_native) }}
+          <span class="text-xs text-slate-500">{{ sell.currency }}</span>
+        </div>
+        {% if sell.amount_usd is not none %}
+          <div class="text-xs text-slate-500">
+            ≈ ${{ format_amount(sell.amount_usd) }}
+            {{ rate_source_badge(sell.rate_source, sell.is_bcv_fallback) }}
+          </div>
+        {% endif %}
+        <p class="mt-2 text-xs text-slate-700 break-words">{{ sell.description }}</p>
+      </div>
+    </section>
+
+    <section class="text-center text-xs text-slate-500" data-pair-confidence>
+      Confidence:
+      <span class="font-semibold text-slate-700">
+        {{ '%.0f' | format(proposal.confidence * 100) }}%
+      </span>
+    </section>
+
+    <div class="tx-modal-actions">
+      <button
+        type="button"
+        class="px-3 py-1.5 text-sm border border-slate-300 rounded bg-white hover:bg-slate-50"
+        @click="window.dispatchEvent(new CustomEvent('close-modal'))"
+      >Cancel</button>
+      <button
+        type="button"
+        class="px-3 py-1.5 text-sm border border-amber-300 rounded bg-amber-50 text-amber-800 hover:bg-amber-100"
+        hx-post="/_partial/triage/skip/pair:{{ proposal.proposal_id }}"
+        hx-target="#triage-queue"
+        hx-swap="innerHTML"
+      >Skip</button>
+      <button
+        type="button"
+        class="px-3 py-1.5 text-sm border border-slate-900 rounded bg-slate-900 text-white hover:bg-slate-800"
+        hx-post="/_partial/triage/pair/{{ deposit.id }}/{{ sell.id }}/confirm"
+        hx-target="#triage-queue"
+        hx-swap="innerHTML"
+      >Confirm pair</button>
+    </div>
+  </div>
+</div>

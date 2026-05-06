@@ -14,7 +14,7 @@ import sqlite3
 from datetime import UTC, date, datetime
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict
 
 from finances.web.deps import get_conn
@@ -51,6 +51,13 @@ from finances.web.services.transactions_query import (
 from finances.web.services.transactions_write import (
     TransactionEditRequest,
     apply_edit,
+)
+from finances.web.services.triage import (
+    TriageQueue,
+    TriageType,
+    build_queue,
+    confirm_pair,
+    get_skip_store,
 )
 
 router = APIRouter(prefix="/api")
@@ -183,3 +190,83 @@ def rates_json(
         chart=build_rates_chart(conn, range_days=range_days),
         latest=build_latest_rates(conn),
     )
+
+
+# ---------------------------------------------------------------------------
+# Triage endpoints (Phase 4 / EPIC-025).
+# ---------------------------------------------------------------------------
+
+
+def _parse_triage_type(value: str | None) -> TriageType | None:
+    if value in (None, "", "all"):
+        return None
+    try:
+        return TriageType(value)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422, detail=f"unknown type_filter: {value!r}"
+        ) from exc
+
+
+@router.get("/triage", response_model=TriageQueue)
+def triage_list_json(
+    request: Request,
+    type_filter: str | None = Query(default=None),
+    conn: sqlite3.Connection = Depends(get_conn),
+) -> TriageQueue:
+    """Return the unified triage queue as JSON.
+
+    ``type_filter`` filters by ``rate``, ``category``, or ``pair``. The
+    ``counts`` dict in the response is always unfiltered so chip badges
+    stay accurate.
+    """
+    parsed = _parse_triage_type(type_filter)
+    skip_store = get_skip_store(request.app)
+    return build_queue(
+        conn,
+        type_filter=parsed,
+        skipped_ids=set(skip_store) if skip_store else None,
+    )
+
+
+class _TransfersCreateRequest(BaseModel):
+    """Body for POST /api/transfers (pair-confirm)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    deposit_id: int
+    sell_id: int
+
+
+class _TransfersCreateResponse(BaseModel):
+    """JSON shape returned by POST /api/transfers."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    transfer_id: str
+    from_transaction_id: int
+    to_transaction_id: int
+
+
+@router.post("/transfers", response_model=_TransfersCreateResponse)
+def transfers_create(
+    body: _TransfersCreateRequest,
+    conn: sqlite3.Connection = Depends(get_conn),
+) -> _TransfersCreateResponse:
+    """Pair a bank deposit + Binance sell as a transfer (rule-002).
+
+    Per ADR-002 / rule-002 this delegates to
+    :func:`finances.domain.transfers.create_transfer` (mode 3 — both
+    anchors). Returns a 404 if either id is unknown, 422 if either is
+    already part of a transfer.
+    """
+    try:
+        result = confirm_pair(
+            conn, deposit_id=body.deposit_id, sell_id=body.sell_id
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return _TransfersCreateResponse(**result)

@@ -167,6 +167,22 @@
 </select>
 {%- endmacro -%}
 
+{# --- Phase 4 (EPIC-025): triage type badge --------------------------- #}
+
+{%- macro triage_type_badge(badge_type) -%}
+{%- set badge_map = {
+    "rate":     ("RATE",     "bg-rose-100 text-rose-700 border-rose-300"),
+    "category": ("CATEGORY", "bg-sky-100 text-sky-700 border-sky-300"),
+    "pair":     ("PAIR",     "bg-violet-100 text-violet-700 border-violet-300"),
+} -%}
+{%- set entry = badge_map.get(badge_type, (badge_type, "bg-slate-100 text-slate-600 border-slate-300")) -%}
+<span class="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide border rounded {{ entry[1] }}"
+      data-triage-badge="{{ badge_type }}"
+      title="triage issue: {{ badge_type }}">
+  {{ entry[0] }}
+</span>
+{%- endmacro -%}
+
 {%- macro pivot_cell(amount, fallback_amount, needs_review_count) -%}
 {#- One pivot cell. Renders the headline amount, an overlay if BCV
     fallback contributed, and a small needs-review dot if any rows in

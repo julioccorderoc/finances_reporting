@@ -1,0 +1,67 @@
+{# Triage PAIR card — two side-by-side mini-rows + confidence + Open CTA.
+
+   Inputs (from triage_queue.html):
+     item   TriageItem (with item.pair_proposal)
+#}
+{% from "_macros.html" import triage_type_badge, format_date, format_amount, rate_source_badge %}
+
+{% set proposal = item.pair_proposal %}
+{% set deposit = proposal.deposit %}
+{% set sell = proposal.sell %}
+
+<article
+  class="pair-row col-span-full"
+  data-pair-row
+  data-deposit-id="{{ deposit.id }}"
+  data-sell-id="{{ sell.id }}"
+  data-proposal-id="{{ proposal.proposal_id }}"
+  hx-get="/_partial/triage/pair/{{ deposit.id }}/{{ sell.id }}/modal"
+  hx-target="#tx-modal-host"
+  hx-trigger="click"
+  hx-swap="innerHTML"
+>
+  <header class="pair-row-header">
+    {{ triage_type_badge('pair') }}
+    <span class="text-xs text-slate-500">
+      Confidence: {{ '%.0f' | format(proposal.confidence * 100) }}%
+    </span>
+  </header>
+
+  <div class="pair-row-grid">
+    <div class="pair-leg">
+      <div class="text-xs uppercase tracking-wide text-slate-500">Bank deposit</div>
+      <div class="text-xs text-slate-700 truncate">{{ deposit.account_name }}</div>
+      <time class="text-xs text-slate-500" datetime="{{ deposit.occurred_at.isoformat() }}">
+        {{ format_date(deposit.occurred_at) }}
+      </time>
+      <div class="text-sm font-mono text-emerald-700">
+        +{{ format_amount(deposit.amount_native) }}
+        <span class="text-xs text-slate-500">{{ deposit.currency }}</span>
+      </div>
+      <div class="text-[11px] text-slate-500 truncate" title="{{ deposit.description }}">
+        {{ deposit.description }}
+      </div>
+    </div>
+
+    <div class="pair-row-divider" aria-hidden="true">↕</div>
+
+    <div class="pair-leg">
+      <div class="text-xs uppercase tracking-wide text-slate-500">Binance sell</div>
+      <div class="text-xs text-slate-700 truncate">{{ sell.account_name }}</div>
+      <time class="text-xs text-slate-500" datetime="{{ sell.occurred_at.isoformat() }}">
+        {{ format_date(sell.occurred_at) }}
+      </time>
+      <div class="text-sm font-mono text-rose-700">
+        {{ format_amount(sell.amount_native) }}
+        <span class="text-xs text-slate-500">{{ sell.currency }}</span>
+      </div>
+      <div class="text-[11px] text-slate-500 truncate" title="{{ sell.description }}">
+        {{ sell.description }}
+      </div>
+    </div>
+  </div>
+
+  <footer class="pair-row-footer text-right">
+    <span class="text-xs text-slate-500">Open →</span>
+  </footer>
+</article>

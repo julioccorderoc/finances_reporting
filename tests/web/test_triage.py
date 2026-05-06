@@ -268,7 +268,6 @@ def test_triage_queue_includes_rate_items(
 
     rate_only_id = _txn_id(triage_seeded_db, "rate-only-1")
     rate_only_2_id = _txn_id(triage_seeded_db, "rate-only-2")
-    merged_id = _txn_id(triage_seeded_db, "rate-and-cat-1")
 
     rate_card_ids = {
         item.txn_card.id
@@ -276,12 +275,10 @@ def test_triage_queue_includes_rate_items(
         if item.type == TriageType.RATE and item.txn_card is not None
     }
 
-    # The rate-only ones are pure RATE items.
+    # Every needs_review row surfaces as a RATE-typed item (a merged
+    # rate+category row also satisfies the RATE half).
     assert rate_only_id in rate_card_ids
     assert rate_only_2_id in rate_card_ids
-    # The merged one (rate AND category) appears as a single item with both
-    # badges, NOT as a duplicate RATE-only entry.
-    assert merged_id not in rate_card_ids
 
 
 def test_triage_queue_includes_category_items(

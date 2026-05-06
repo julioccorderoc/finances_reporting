@@ -8,6 +8,12 @@
    The article is itself a CSS Grid row (subgrid). Wrap inside a
    `.cards` parent (defined in static/css/app.css) for the column
    layout to align across rows.
+
+   Optional context variable (Phase 4):
+     triage_modal_url  Override the modal hx-get URL (e.g. point at the
+                       /_partial/triage/{id}/modal Save & next variant).
+                       Falls back to the Phase 3 /_partial/transactions
+                       endpoint when unset.
 #}
 {% from "_macros.html" import rate_source_badge, needs_review_badge, kind_class, format_date, format_amount %}
 
@@ -18,7 +24,7 @@
   data-account="{{ card.account_name }}"
   data-kind="{{ card.kind }}"
   data-needs-review="{{ 'true' if card.needs_review else 'false' }}"
-  hx-get="/_partial/transactions/{{ card.id }}/modal"
+  hx-get="{{ triage_modal_url if triage_modal_url is defined and triage_modal_url else ('/_partial/transactions/' ~ card.id ~ '/modal') }}"
   hx-target="#tx-modal-host"
   hx-trigger="click"
   hx-swap="innerHTML"

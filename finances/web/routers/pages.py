@@ -41,8 +41,22 @@ from finances.web.services.transactions_query import (
     TransactionsFilter,
     query_transactions,
 )
+from finances.web.services.triage import (
+    TriageType,
+    build_queue,
+    get_skip_store,
+)
 
 router = APIRouter()
+
+
+def _parse_triage_type(value: str | None) -> TriageType | None:
+    if value in (None, "", "all"):
+        return None
+    try:
+        return TriageType(value)
+    except ValueError:
+        return None
 
 
 @router.get("/", include_in_schema=False)
@@ -123,6 +137,37 @@ def accounts_page(
         request,
         "pages/accounts.html",
         {"title": "Accounts", "cards": cards},
+    )
+
+
+@router.get("/triage", include_in_schema=False)
+def triage_page(
+    request: Request,
+    type_filter: str | None = Query(default=None),
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Render the /triage page (unified queue + filter chips).
+
+    The page reads the per-app skip store so refreshes preserve any
+    items the user already pushed to the bottom this session. The
+    skip store is intentionally session-local; see services/triage.py.
+    """
+    parsed = _parse_triage_type(type_filter)
+    skip_store = get_skip_store(request.app)
+    queue = build_queue(
+        conn,
+        type_filter=parsed,
+        skipped_ids=set(skip_store) if skip_store else None,
+    )
+    templates = request.app.state.templates
+    return templates.TemplateResponse(
+        request,
+        "pages/triage.html",
+        {
+            "title": "Triage",
+            "queue": queue,
+            "active_filter": parsed.value if parsed is not None else None,
+        },
     )
 
 

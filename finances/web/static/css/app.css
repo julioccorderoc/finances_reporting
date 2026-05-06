@@ -441,3 +441,83 @@
 }
 
 /* === END modal === */
+
+/* === triage === */
+
+/* Pair card sits inside the .cards grid as a row that spans every
+ * column — different layout than card-row (subgrid), so it uses its
+ * own internal grid for the two legs + divider.
+ */
+.pair-row {
+  display: block;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.5rem;
+  background: #ffffff;
+  cursor: pointer;
+  transition: background-color 80ms ease;
+}
+.pair-row:hover {
+  background: #f8fafc;
+}
+
+.pair-row-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.pair-row-grid {
+  display: grid;
+  grid-template-columns: 1fr 2rem 1fr;
+  gap: 0.75rem;
+  align-items: stretch;
+}
+
+@media (max-width: 640px) {
+  .pair-row-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.pair-leg {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.pair-row-divider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.125rem;
+  color: #94a3b8;
+}
+
+.pair-row-footer {
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+}
+
+/* Stack of badges on top of a triage txn card. */
+.card-row-group {
+  display: contents;
+}
+.triage-badge-row {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  padding: 0 0.75rem;
+  margin-top: 0.25rem;
+}
+
+@media (max-width: 640px) {
+  .triage-badge-row {
+    padding: 0;
+  }
+}
+
+/* === END triage === */
