@@ -40,6 +40,20 @@ finances sync sheets --spreadsheet-id <id>    # read-only Sheets mirror (EPIC-01
 finances backfill --from data/                # one-time historical import
 ```
 
+## Local viewer
+
+A FastAPI/HTMX/Alpine viewer ships under `finances/web/`. Read-only by default
+on `127.0.0.1`; write-back (categorize, set rate, confirm transfer pair) routes
+through the same repo APIs the CLI uses (rule-012, ADR-012).
+
+```bash
+uv pip install -e .
+finances serve --port 8765 --open
+```
+
+For LAN access from an iPhone on the same Wi-Fi, see
+[`docs/runbooks/web-viewer-lan.md`](docs/runbooks/web-viewer-lan.md).
+
 ## Tests
 
 ```bash

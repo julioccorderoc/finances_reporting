@@ -1,19 +1,36 @@
 {# Dashboard KPI tiles row.
    Context: ``kpis`` (services.dashboard.KpiTiles).
+
+   Phase 5 (EPIC-026): the needs-review tile is a link to /triage so
+   the user can jump from the dashboard straight into rate-triage.
+   Other tiles stay non-interactive articles.
 #}
 <section class="dashboard-kpi-grid" aria-label="Headline KPIs">
-  {% for tile in [kpis.net_worth, kpis.month_spend, kpis.month_income, kpis.needs_review] %}
-    <article
-      class="kpi-tile rounded-lg border border-slate-200 bg-white p-4"
-      data-severity="{{ tile.severity }}"
-    >
-      <div class="text-xs uppercase tracking-wide text-slate-500">
-        {{ tile.label }}
-      </div>
-      <div class="mt-1 text-2xl font-semibold tabular-nums">{{ tile.value }}</div>
-      {% if tile.hint %}
-        <div class="mt-1 text-xs text-slate-500">{{ tile.hint }}</div>
-      {% endif %}
-    </article>
+  {% for tile, href in [
+        (kpis.net_worth,    None),
+        (kpis.month_spend,  None),
+        (kpis.month_income, None),
+        (kpis.needs_review, '/triage?type_filter=rate'),
+      ] %}
+    {% if href %}
+      <a
+        class="kpi-tile rounded-lg border border-slate-200 bg-white p-4 block hover:bg-slate-50 no-underline"
+        href="{{ href }}"
+        data-severity="{{ tile.severity }}"
+      >
+        <div class="text-xs uppercase tracking-wide text-slate-500">{{ tile.label }}</div>
+        <div class="mt-1 text-2xl font-semibold tabular-nums">{{ tile.value }}</div>
+        {% if tile.hint %}<div class="mt-1 text-xs text-slate-500">{{ tile.hint }}</div>{% endif %}
+      </a>
+    {% else %}
+      <article
+        class="kpi-tile rounded-lg border border-slate-200 bg-white p-4"
+        data-severity="{{ tile.severity }}"
+      >
+        <div class="text-xs uppercase tracking-wide text-slate-500">{{ tile.label }}</div>
+        <div class="mt-1 text-2xl font-semibold tabular-nums">{{ tile.value }}</div>
+        {% if tile.hint %}<div class="mt-1 text-xs text-slate-500">{{ tile.hint }}</div>{% endif %}
+      </article>
+    {% endif %}
   {% endfor %}
 </section>
