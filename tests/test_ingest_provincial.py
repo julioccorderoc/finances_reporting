@@ -709,3 +709,112 @@ def test_ingest_raises_on_malformed_row(
     )
     with pytest.raises(ValidationError):
         ingest_csv(seeded_db, csv_path)
+
+
+# ---------------------------------------------------------------------------
+# Dry-run (mirrors the BCV pattern — see finances/ingest/bcv.py:155-220)
+# ---------------------------------------------------------------------------
+
+
+def test_provincial_ingest_dry_run_persists_nothing(
+    tmp_path: Path, seeded_db: sqlite3.Connection
+) -> None:
+    """``dry_run=True`` parses + computes without persisting any side effects.
+
+    The bank-anchored P2P pairing pass also runs end-to-end (so callers can
+    preview pairings), but every write — transaction upsert, transfer
+    promotion, ``import_runs`` row, ``import_state`` cursor — is rolled back.
+    """
+    from finances.ingest.provincial import ingest_csv
+
+    binance_spot = accounts_repo.get_by_name(seeded_db, "Binance Spot")
+    assert binance_spot is not None and binance_spot.id is not None
+    _insert_binance_p2p_sell(
+        seeded_db,
+        account_id=binance_spot.id,
+        occurred_at=datetime(2026, 4, 18, 14, 0, tzinfo=CARACAS_TZ),
+        usdt_amount=Decimal("500.00"),
+        user_rate=Decimal("40.0"),
+        source_ref="p2p:dry-run-001",
+    )
+    txns_before = txn_repo.count(seeded_db)
+
+    csv_path = _write_csv(
+        tmp_path,
+        [
+            _HEADER,
+            "19/04/2026;COM. PAGO MOVIL;-14,4;8.240,23",
+            "18/04/2026;TRAV0031264379000118698;20.000,00;20.115,09",
+            "17/04/2026;DR OB V07372929 191NAC.C;-4.800,00;8.254,63",
+        ],
+    )
+
+    report = ingest_csv(seeded_db, csv_path, dry_run=True)
+
+    assert report.rows_seen == 3
+    assert report.rows_inserted == 3, "dry-run reports would-be inserts"
+
+    # No new transaction rows (the seeded Binance leg should still be the
+    # only one); pairing-side promotions must also have been rolled back.
+    assert txn_repo.count(seeded_db) == txns_before, (
+        "dry-run must not persist transactions or pairing promotions"
+    )
+    seeded_binance = txn_repo.get_by_source_ref(
+        seeded_db, "binance", "p2p:dry-run-001"
+    )
+    assert seeded_binance is not None
+    assert seeded_binance.kind is TransactionKind.EXPENSE
+    assert seeded_binance.transfer_id is None, (
+        "pairing promotion must be rolled back in dry-run"
+    )
+
+    runs_count = seeded_db.execute(
+        "SELECT COUNT(*) FROM import_runs WHERE source = 'provincial'"
+    ).fetchone()[0]
+    assert runs_count == 0, "dry-run must not persist import_runs rows"
+
+    state_count = seeded_db.execute(
+        "SELECT COUNT(*) FROM import_state WHERE source = 'provincial'"
+    ).fetchone()[0]
+    assert state_count == 0, "dry-run must not persist import_state rows"
+
+
+def test_provincial_ingest_dry_run_after_real_run_does_not_double_count(
+    tmp_path: Path, seeded_db: sqlite3.Connection
+) -> None:
+    """A real run followed by a dry-run leaves real data intact and reports
+    zero would-be inserts on the same input (ADR-010 idempotency)."""
+    from finances.ingest.provincial import ingest_csv
+
+    csv_path = _write_csv(
+        tmp_path,
+        [
+            _HEADER,
+            "19/04/2026;COM. PAGO MOVIL;-14,4;8.240,23",
+            "18/04/2026;TRAV0031264379000118698;20.000,00;20.115,09",
+            "17/04/2026;DR OB V07372929 191NAC.C;-4.800,00;8.254,63",
+        ],
+    )
+
+    real = ingest_csv(seeded_db, csv_path)
+    assert real.rows_inserted == 3
+    real_count = txn_repo.count(seeded_db)
+
+    real_runs = seeded_db.execute(
+        "SELECT COUNT(*) FROM import_runs WHERE source = 'provincial'"
+    ).fetchone()[0]
+    assert real_runs == 1
+
+    dry = ingest_csv(seeded_db, csv_path, dry_run=True)
+    assert dry.rows_seen == 3
+    assert dry.rows_inserted == 0, (
+        "second pass against same CSV is fully duplicate; dry-run reports 0"
+    )
+
+    assert txn_repo.count(seeded_db) == real_count, (
+        "dry-run must not corrupt real-run data"
+    )
+    runs_after = seeded_db.execute(
+        "SELECT COUNT(*) FROM import_runs WHERE source = 'provincial'"
+    ).fetchone()[0]
+    assert runs_after == real_runs, "dry-run must not add an import_runs row"

@@ -784,6 +784,7 @@ def run_backfill(
     *,
     pairing_window_days: int = 2,
     force: bool = False,
+    dry_run: bool = False,
 ) -> BackfillReport:
     """Read all three legacy CSVs and feed them through production ingest.
 
@@ -803,8 +804,19 @@ def run_backfill(
     (bcv, provincial, binance) still write their own per-source rows
     via the production ingest path — the backfill row exists in
     addition, as the audit anchor for the operation as a whole.
+
+    When ``dry_run=True``, the umbrella runs the entire pipeline (parse,
+    validate, upsert, reconcile) inside a transaction that is rolled back
+    at the end. No rows are persisted to ``transactions``, ``rates``,
+    ``accounts``, ``import_runs``, or ``earn_positions``; the returned
+    ``BackfillReport`` reflects what *would* have been inserted. The
+    legacy-category-annotation and rules-engine passes are skipped in
+    dry-run mode — they only UPDATE rows that the rollback discards
+    anyway, so running them would be wasted work (and they call
+    ``conn.commit()`` internally, which would prematurely close our
+    BEGIN block). Mirrors the BCV reference pattern (``ingest_bcv``).
     """
-    run_id = import_state.start_run(conn, BACKFILL_SOURCE)
+    run_id = None if dry_run else import_state.start_run(conn, BACKFILL_SOURCE)
     try:
         binance_path = data_dir / BINANCE_CSV_NAME
         provincial_path = data_dir / PROVINCIAL_CSV_NAME
@@ -826,54 +838,75 @@ def run_backfill(
                 )
 
         report = BackfillReport()
-        account_ids = ensure_accounts(conn)
         rate_lookup = build_rate_index_from_provincial(provincial_path)
         derived_rates = derive_p2p_rates_greedy(
             binance_path, provincial_path, rate_lookup=rate_lookup
         )
 
-        if bcv_path.exists():
-            backfill_bcv(conn, bcv_path, report=report)
-        backfill_provincial(
-            conn, provincial_path, account_ids=account_ids, report=report
-        )
-        backfill_binance(
-            conn,
-            binance_path,
-            account_ids=account_ids,
-            rate_lookup=rate_lookup,
-            derived_rates=derived_rates,
-            report=report,
-        )
+        if dry_run:
+            conn.execute("BEGIN")
+        try:
+            account_ids = ensure_accounts(conn)
 
-        strategy = BankAnchoredP2pPairing(
-            conn,
-            window_days=pairing_window_days,
-            bank_source=PROVINCIAL_SOURCE,
-            binance_source=BINANCE_SOURCE,
-        )
-        report.reconciliation = run_reconciliation_pass(strategy)
+            if bcv_path.exists():
+                backfill_bcv(conn, bcv_path, report=report)
+            backfill_provincial(
+                conn, provincial_path, account_ids=account_ids, report=report
+            )
+            backfill_binance(
+                conn,
+                binance_path,
+                account_ids=account_ids,
+                rate_lookup=rate_lookup,
+                derived_rates=derived_rates,
+                report=report,
+            )
 
-        report.rows_legacy_mapped = apply_legacy_category_annotations(conn, data_dir)
-        report.rows_categorized = apply_category_rules(conn)
+            strategy = BankAnchoredP2pPairing(
+                conn,
+                window_days=pairing_window_days,
+                bank_source=PROVINCIAL_SOURCE,
+                binance_source=BINANCE_SOURCE,
+            )
+            report.reconciliation = run_reconciliation_pass(strategy)
 
-        rows_inserted_total = (
-            report.binance_rows_inserted
-            + report.provincial_rows_inserted
-            + report.bcv_rates_inserted
-        )
-        import_state.finish_run(
-            conn,
-            run_id,
-            status="success",
-            rows_inserted=rows_inserted_total,
-        )
+            if not dry_run:
+                # These helpers ``conn.commit()`` internally — running them
+                # under our BEGIN would prematurely close the transaction
+                # before ROLLBACK can undo the inserts. Their effect is
+                # purely UPDATEs to category_id / needs_review on rows that
+                # would be rolled back anyway, so skipping is safe.
+                report.rows_legacy_mapped = apply_legacy_category_annotations(
+                    conn, data_dir
+                )
+                report.rows_categorized = apply_category_rules(conn)
+
+            if dry_run:
+                conn.execute("ROLLBACK")
+        except Exception:
+            if dry_run:
+                conn.execute("ROLLBACK")
+            raise
+
+        if not dry_run:
+            rows_inserted_total = (
+                report.binance_rows_inserted
+                + report.provincial_rows_inserted
+                + report.bcv_rates_inserted
+            )
+            import_state.finish_run(
+                conn,
+                run_id,
+                status="success",
+                rows_inserted=rows_inserted_total,
+            )
         return report
     except Exception as exc:
-        error_msg = f"{type(exc).__name__}: {exc}"[:4000]
-        import_state.finish_run(
-            conn, run_id, status="error", error=error_msg
-        )
+        if not dry_run:
+            error_msg = f"{type(exc).__name__}: {exc}"[:4000]
+            import_state.finish_run(
+                conn, run_id, status="error", error=error_msg
+            )
         raise
 
 

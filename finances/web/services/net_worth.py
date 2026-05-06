@@ -33,6 +33,39 @@ _P2P_SOURCE = "binance_p2p_median"
 _P2P_BASE = "USDT"
 
 
+def usdt_value(
+    conn: sqlite3.Connection,
+    *,
+    currency: str,
+    amount_native: Decimal,
+    as_of_date: date,
+) -> Decimal | None:
+    """Return USDT-equivalent of ``amount_native`` per ADR-005 amendment.
+
+    USD/USDT/USDC are 1:1 with USDT. Other currencies are converted via
+    ``rates(base='USDT', quote=<currency>, source='binance_p2p_median')``
+    on or before ``as_of_date`` — never BCV. ``None`` if no P2P rate
+    is available.
+
+    Shared by :func:`compute_net_worth` (dashboard) and
+    :func:`finances.web.services.accounts_view.build_account_cards`
+    (accounts page) so both surfaces use one auditable conversion path.
+    """
+    code = currency.upper()
+    if code in _NATIVE_USDT_CURRENCIES:
+        return amount_native
+    rate_row = rates_repo.latest_on_or_before(
+        conn,
+        as_of_date=as_of_date,
+        base=_P2P_BASE,
+        quote=code,
+        source=_P2P_SOURCE,
+    )
+    if rate_row is None or rate_row.rate == 0:
+        return None
+    return amount_native / rate_row.rate
+
+
 class AccountContribution(BaseModel):
     """One account's projection into the net-worth tile."""
 
@@ -152,4 +185,5 @@ __all__ = [
     "AccountContribution",
     "NetWorth",
     "compute_net_worth",
+    "usdt_value",
 ]

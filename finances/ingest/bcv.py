@@ -10,18 +10,20 @@ from __future__ import annotations
 
 import re
 import sqlite3
+import ssl
 from datetime import date
 from decimal import Decimal
 from typing import Any
 
 import httpx
+import truststore
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from finances.db.repos import import_state, rates as rates_repo
 from finances.domain.models import Rate
 
-BCV_URL = "https://www.bcv.org.ve/estadisticas/tipo-de-cambio-de-referencia-smc"
+BCV_URL = "https://www.bcv.org.ve/"
 SOURCE_NAME = "bcv"
 
 _MONTH_MAP: dict[str, int] = {
@@ -105,48 +107,59 @@ def clean_currency(text: str) -> Decimal:
 
 
 def parse_bcv_html(html: str) -> list[RawBcvRow]:
-    """Parse the BCV HTML table into ``RawBcvRow`` instances.
+    """Parse the BCV homepage layout into a single ``RawBcvRow``.
 
-    Raises ``BcvParseError`` when the structural parse yields zero valid
-    rows — the caller uses this to trigger rule-007's error path.
+    Since BCV moved the daily reference rates onto the homepage, the page
+    publishes one snapshot per day (today's rates) rather than a multi-day
+    table. The parser extracts USD and EUR from ``<div id="dolar">`` /
+    ``<div id="euro">`` and the value date from
+    ``<span class="date-display-single" content="...">``.
+
+    Returns a 1-element list (kept as a list for API symmetry with the
+    legacy multi-row parser and for upstream callers that iterate). Raises
+    ``BcvParseError`` whenever any required element is missing or
+    unparseable — the caller uses this to trigger rule-007's error path.
     """
     soup = BeautifulSoup(html, "html.parser")
-    tbody = soup.find("tbody")
-    if tbody is None:
-        raise BcvParseError("BCV page has no <tbody> element")
 
-    trs = tbody.find_all("tr")
-    if not trs:
-        raise BcvParseError("BCV <tbody> has no <tr> rows")
+    date_span = soup.find("span", class_="date-display-single")
+    if date_span is None:
+        raise BcvParseError("BCV page has no <span.date-display-single>")
+    iso_attr = date_span.get("content")
+    if not iso_attr:
+        raise BcvParseError("BCV date-display-single has no content attribute")
+    try:
+        as_of_date = date.fromisoformat(iso_attr.split("T", 1)[0])
+    except ValueError as exc:
+        raise BcvParseError(f"BCV date attribute unparseable: {iso_attr!r}") from exc
 
-    rows: list[RawBcvRow] = []
-    for tr in trs:
-        cols = tr.find_all("td")
-        if len(cols) < 3:
-            continue
-        date_raw = cols[0].get_text(strip=True)
-        usd_span = cols[1].find("span")
-        eur_span = cols[2].find("span")
-        if usd_span is None or eur_span is None:
-            continue
-        dt = parse_spanish_date(date_raw)
-        if dt is None:
-            continue
+    def _rate(div_id: str) -> Decimal:
+        block = soup.find(id=div_id)
+        if block is None:
+            raise BcvParseError(f"BCV page missing #{div_id} block")
+        strong = block.find("strong")
+        if strong is None:
+            raise BcvParseError(f"BCV #{div_id} block has no <strong>")
         try:
-            usd = clean_currency(usd_span.get_text(strip=True))
-            eur = clean_currency(eur_span.get_text(strip=True))
-        except ValueError:
-            continue
-        rows.append(RawBcvRow(as_of_date=dt, usd=usd, eur=eur))
+            return clean_currency(strong.get_text(strip=True))
+        except ValueError as exc:
+            raise BcvParseError(f"BCV #{div_id} value unparseable: {exc}") from exc
 
-    if not rows:
-        raise BcvParseError("BCV page produced zero valid rate rows")
-    return rows
+    usd = _rate("dolar")
+    eur = _rate("euro")
+    return [RawBcvRow(as_of_date=as_of_date, usd=usd, eur=eur)]
 
 
 def fetch_bcv_html(url: str = BCV_URL, *, timeout: float = 10.0) -> str:
-    """Fetch the BCV page HTML over HTTPS. Raises httpx errors on failure."""
-    with httpx.Client(timeout=timeout) as client:
+    """Fetch the BCV page HTML over HTTPS. Raises httpx errors on failure.
+
+    Uses ``truststore`` so the SSL context delegates to the OS native trust
+    store (macOS Security framework, Windows Schannel, Linux openssl). BCV's
+    server ships an incomplete cert chain — without AIA fetching, certifi's
+    bundle alone fails. The OS trust store handles AIA, so this works.
+    """
+    ssl_ctx = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    with httpx.Client(timeout=timeout, verify=ssl_ctx) as client:
         response = client.get(url)
         response.raise_for_status()
         return response.text
@@ -157,6 +170,7 @@ def ingest_bcv(
     *,
     html: str | None = None,
     url: str = BCV_URL,
+    dry_run: bool = False,
 ) -> int:
     """Ingest BCV rates into the ``rates`` table.
 
@@ -167,8 +181,13 @@ def ingest_bcv(
     On any failure (fetch, parse, or DB), the ``import_runs`` row is
     marked ``status='error'`` with the exception summary, any partial
     writes are rolled back, and the exception is re-raised.
+
+    When ``dry_run=True``, the function performs the same fetch/parse/validate
+    pipeline and returns the count of rate rows that *would* be inserted, but
+    rolls back the transaction and writes nothing to ``rates``, ``import_runs``,
+    or ``import_state``.
     """
-    run_id = import_state.start_run(conn, SOURCE_NAME)
+    run_id = None if dry_run else import_state.start_run(conn, SOURCE_NAME)
     try:
         raw_html = html if html is not None else fetch_bcv_html(url)
         parsed = parse_bcv_html(raw_html)
@@ -190,19 +209,24 @@ def ingest_bcv(
                         inserted += 1
                     except sqlite3.IntegrityError:
                         continue
-            conn.execute("COMMIT")
+            if dry_run:
+                conn.execute("ROLLBACK")
+            else:
+                conn.execute("COMMIT")
         except Exception:
             conn.execute("ROLLBACK")
             raise
 
-        import_state.upsert_state(conn, source=SOURCE_NAME)
-        import_state.finish_run(
-            conn, run_id, status="success", rows_inserted=inserted
-        )
+        if not dry_run:
+            import_state.upsert_state(conn, source=SOURCE_NAME)
+            import_state.finish_run(
+                conn, run_id, status="success", rows_inserted=inserted
+            )
         return inserted
     except Exception as exc:
-        error_msg = f"{type(exc).__name__}: {exc}"[:4000]
-        import_state.finish_run(conn, run_id, status="error", error=error_msg)
+        if not dry_run:
+            error_msg = f"{type(exc).__name__}: {exc}"[:4000]
+            import_state.finish_run(conn, run_id, status="error", error=error_msg)
         raise
 
 

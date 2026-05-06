@@ -1,25 +1,31 @@
-"""Full HTML page routes (EPIC-022 / ADR-012, EPIC-023 Phase 2b/2a).
+"""Full HTML page routes (EPIC-022 / ADR-012, EPIC-023 Phase 2b/2a/2d).
 
-Phase 1 shipped the placeholder ``/`` route; Phase 2b added
-``/transactions``; Phase 2a wires the real dashboard at ``/``.
-Subsequent Phase 2 agents append their own page handlers here without
-touching the existing ones.
+Phase 1 shipped the placeholder ``/`` route; Phase 2b added ``/transactions``;
+Phase 2a wires the real dashboard at ``/``; Phase 2d adds ``/accounts`` and
+``/rates``. Subsequent Phase 2 agents append their own page handlers here
+without touching the existing ones.
 """
 
 from __future__ import annotations
 
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 
 from finances.db.repos import accounts as accounts_repo
 from finances.web.deps import get_conn
+from finances.web.services.accounts_view import build_account_cards
 from finances.web.services.dashboard import (
     build_kpis,
     build_recent_activity,
     build_spend_trend,
     build_sync_status,
+)
+from finances.web.services.rates_view import (
+    DEFAULT_RANGE_DAYS,
+    build_latest_rates,
+    build_rates_chart,
 )
 from finances.web.services.transactions_query import (
     TransactionsFilter,
@@ -92,5 +98,43 @@ def transactions_page(
             "kinds_options": kinds_options,
             "currencies_options": currencies_options,
             "sources_options": sources_options,
+        },
+    )
+
+
+@router.get("/accounts", include_in_schema=False)
+def accounts_page(
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Render the /accounts card grid (read-only, no filters)."""
+    cards = build_account_cards(conn, today=date.today())
+    templates = request.app.state.templates
+    return templates.TemplateResponse(
+        request,
+        "pages/accounts.html",
+        {"title": "Accounts", "cards": cards},
+    )
+
+
+@router.get("/rates", include_in_schema=False)
+def rates_page(
+    request: Request,
+    range_days: int = Query(DEFAULT_RANGE_DAYS, ge=1, le=3650),
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Render the /rates page (chart + latest-per-pair card list)."""
+    chart = build_rates_chart(conn, range_days=range_days)
+    latest = build_latest_rates(conn)
+    templates = request.app.state.templates
+    return templates.TemplateResponse(
+        request,
+        "pages/rates.html",
+        {
+            "title": "Rates",
+            "chart": chart,
+            "latest": latest,
+            "range_days": range_days,
+            "range_options": [7, 30, 90, 365],
         },
     )

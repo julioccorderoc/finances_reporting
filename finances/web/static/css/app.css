@@ -137,3 +137,65 @@
 
 /* === END dashboard === */
 
+/* === accounts & rates === */
+
+/* Account-card grid: one auto-fit row of card tiles. Different aspect
+ * than the transaction card-rows above — tiles, not rows.
+ */
+.account-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: 0.75rem;
+}
+
+.account-card {
+  display: block;
+  padding: 1rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.5rem;
+  background: #ffffff;
+  text-decoration: none;
+  color: inherit;
+  transition: background-color 80ms ease, border-color 80ms ease;
+}
+
+.account-card:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+.account-card.is-inactive {
+  opacity: 0.55;
+}
+
+/* Rate-card list reuses the auto-fit pattern but at a smaller min width,
+ * since each card carries less text than an account card.
+ */
+.rate-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.5rem;
+}
+
+.rate-card {
+  padding: 0.75rem 1rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.5rem;
+  background: #ffffff;
+}
+
+/* Chart container: fixed height so Chart.js has a deterministic canvas
+ * size while the parent flexes width.
+ */
+.rates-chart-wrap {
+  position: relative;
+  height: 18rem;
+}
+
+@media (max-width: 640px) {
+  .rates-chart-wrap {
+    height: 14rem;
+  }
+}
+
+/* === END accounts & rates === */

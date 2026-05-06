@@ -153,7 +153,7 @@ def seeded_web_db(web_db: sqlite3.Connection) -> sqlite3.Connection:
     rates_repo.upsert(
         web_db,
         Rate(
-            as_of_date=today.date(),
+            as_of_date=date.today(),
             base="USDT",
             quote="VES",
             rate=Decimal("36.50"),
@@ -163,7 +163,7 @@ def seeded_web_db(web_db: sqlite3.Connection) -> sqlite3.Connection:
     rates_repo.upsert(
         web_db,
         Rate(
-            as_of_date=today.date(),
+            as_of_date=date.today(),
             base="USD",
             quote="VES",
             rate=Decimal("36.10"),
