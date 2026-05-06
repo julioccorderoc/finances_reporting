@@ -362,6 +362,18 @@ def test_needs_review_count(
     assert payload["needs_review"]["severity"] == "alert"
 
 
+def test_dashboard_needs_review_tile_links_to_triage(
+    seeded_web_db: sqlite3.Connection,
+    web_client_factory,
+) -> None:
+    """The needs-review tile is a link to /triage?type_filter=rate (Phase 5)."""
+    client = web_client_factory()
+    resp = client.get("/")
+    assert resp.status_code == 200
+    body = resp.text
+    assert 'href="/triage?type_filter=rate"' in body
+
+
 # ---------------------------------------------------------------------------
 # Sync status strip.
 # ---------------------------------------------------------------------------
