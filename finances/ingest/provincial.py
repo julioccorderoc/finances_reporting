@@ -265,7 +265,6 @@ def ingest_csv(
     categorizer: Categorizer | None = None,
     pairing_window_days: int = 2,
     run_pairing: bool = True,
-    dry_run: bool = False,
 ) -> IngestReport:
     """Ingest a Provincial statement CSV into ``transactions``.
 
@@ -287,85 +286,66 @@ def ingest_csv(
     Per rule-007 / ADR-007, every run records one row in ``import_runs``:
     ``status='success'`` with row counts on the happy path, or
     ``status='error'`` with an exception summary and re-raise on failure.
-
-    When ``dry_run=True`` the function executes the same parse / upsert /
-    pairing pipeline inside a single transaction but issues ``ROLLBACK``
-    instead of ``COMMIT``, leaving ``transactions``, ``import_runs``, and
-    ``import_state`` untouched. The returned :class:`IngestReport` reports
-    the would-be inserts/updates and the pairing pass (if any) as if the
-    run had committed.
     """
-    run_id = None if dry_run else import_state.start_run(conn, SOURCE)
+    run_id = import_state.start_run(conn, SOURCE)
     try:
         resolved_account_id, currency = _resolve_account(conn, account_id)
 
         report = IngestReport()
 
-        conn.execute("BEGIN")
-        try:
-            for raw in iter_raw_rows(csv_path):
-                report.rows_seen += 1
+        for raw in iter_raw_rows(csv_path):
+            report.rows_seen += 1
 
-                occurred_at = raw.to_datetime()
-                category_id: int | None = None
-                if categorizer is not None:
-                    category_id = categorizer(raw.descripcion)
-                needs_review = category_id is None
+            occurred_at = raw.to_datetime()
+            category_id: int | None = None
+            if categorizer is not None:
+                category_id = categorizer(raw.descripcion)
+            needs_review = category_id is None
 
-                source_ref = compute_source_ref(
-                    occurred_at=occurred_at,
-                    amount=raw.monto,
-                    description=raw.descripcion,
-                )
-
-                txn = Transaction(
-                    account_id=resolved_account_id,
-                    occurred_at=occurred_at,
-                    kind=raw.kind,
-                    amount=raw.monto,
-                    currency=currency,
-                    description=raw.descripcion,
-                    category_id=category_id,
-                    source=SOURCE,
-                    source_ref=source_ref,
-                    needs_review=needs_review,
-                )
-
-                result = txn_repo.upsert_by_source_ref(conn, txn)
-                report.rows_inserted += result["rows_inserted"]
-                report.rows_updated += result["rows_updated"]
-
-            if run_pairing:
-                strategy = BankAnchoredP2pPairing(
-                    conn,
-                    window_days=pairing_window_days,
-                    bank_source=SOURCE,
-                )
-                report.reconciliation = run_reconciliation_pass(strategy)
-
-            if dry_run:
-                conn.execute("ROLLBACK")
-            else:
-                conn.execute("COMMIT")
-        except Exception:
-            conn.execute("ROLLBACK")
-            raise
-
-        if not dry_run:
-            import_state.finish_run(
-                conn,
-                run_id,
-                status="success",
-                rows_inserted=report.rows_inserted,
-                rows_updated=report.rows_updated,
+            source_ref = compute_source_ref(
+                occurred_at=occurred_at,
+                amount=raw.monto,
+                description=raw.descripcion,
             )
+
+            txn = Transaction(
+                account_id=resolved_account_id,
+                occurred_at=occurred_at,
+                kind=raw.kind,
+                amount=raw.monto,
+                currency=currency,
+                description=raw.descripcion,
+                category_id=category_id,
+                source=SOURCE,
+                source_ref=source_ref,
+                needs_review=needs_review,
+            )
+
+            result = txn_repo.upsert_by_source_ref(conn, txn)
+            report.rows_inserted += result["rows_inserted"]
+            report.rows_updated += result["rows_updated"]
+
+        if run_pairing:
+            strategy = BankAnchoredP2pPairing(
+                conn,
+                window_days=pairing_window_days,
+                bank_source=SOURCE,
+            )
+            report.reconciliation = run_reconciliation_pass(strategy)
+
+        import_state.finish_run(
+            conn,
+            run_id,
+            status="success",
+            rows_inserted=report.rows_inserted,
+            rows_updated=report.rows_updated,
+        )
         return report
     except Exception as exc:
-        if not dry_run:
-            error_msg = f"{type(exc).__name__}: {exc}"[:4000]
-            import_state.finish_run(
-                conn, run_id, status="error", error=error_msg
-            )
+        error_msg = f"{type(exc).__name__}: {exc}"[:4000]
+        import_state.finish_run(
+            conn, run_id, status="error", error=error_msg
+        )
         raise
 
 

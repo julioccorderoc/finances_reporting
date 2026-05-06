@@ -637,7 +637,6 @@ def sync_binance(
     client: Any,
     since: datetime | None = None,
     lookback_days: int = DEFAULT_LOOKBACK_DAYS,
-    dry_run: bool = False,
 ) -> dict[str, Any]:
     """Pull every configured Binance endpoint, upsert into the ledger.
 
@@ -648,13 +647,8 @@ def sync_binance(
     a ``status='success'`` row on the happy path (with ``rows_inserted`` /
     ``rows_updated`` counts), or a ``status='error'`` row carrying a brief
     error summary and re-raising the exception on failure.
-
-    When ``dry_run=True``, the function performs the same fetch/parse/upsert
-    pipeline (so ``rows_inserted`` accurately reflects what *would* be written),
-    but the surrounding transaction is rolled back and no rows are written to
-    ``transactions``, ``earn_positions``, ``import_runs``, or ``import_state``.
     """
-    run_id = None if dry_run else import_state_repo.start_run(conn, SOURCE)
+    run_id = import_state_repo.start_run(conn, SOURCE)
     try:
         account_ids = _resolve_accounts(conn)
         interest_id = _interest_category_id(conn)
@@ -669,62 +663,51 @@ def sync_binance(
         spot_id = account_ids[_SPOT_ACCOUNT_NAME]
         earn_id = account_ids[_EARN_ACCOUNT_NAME]
 
-        conn.execute("BEGIN")
-        try:
-            _ingest_deposits(
-                conn, client, start_ms=start_ms, end_ms=end_ms, spot_id=spot_id,
-                stats=stats, errors=errors,
-            )
-            _ingest_withdrawals(
-                conn, client, start_ms=start_ms, end_ms=end_ms, spot_id=spot_id,
-                stats=stats, errors=errors,
-            )
-            _ingest_p2p(
-                conn, client, start_ms=start_ms, end_ms=end_ms, spot_id=spot_id,
-                stats=stats, errors=errors,
-            )
-            _ingest_converts(
-                conn, client, start_ms=start_ms, end_ms=end_ms, spot_id=spot_id,
-                stats=stats, errors=errors,
-            )
-            _ingest_internal_transfers(
-                conn, client, start_ms=start_ms, end_ms=end_ms, account_ids=account_ids,
-                stats=stats, errors=errors,
-            )
-            _ingest_earn_rewards(
-                conn, client, start_ms=start_ms, end_ms=end_ms, earn_id=earn_id,
-                interest_id=interest_id, stats=stats, errors=errors,
-            )
-            _ingest_pay(
-                conn, client, start_ms=start_ms, end_ms=end_ms, spot_id=spot_id,
-                stats=stats, errors=errors,
-            )
+        _ingest_deposits(
+            conn, client, start_ms=start_ms, end_ms=end_ms, spot_id=spot_id,
+            stats=stats, errors=errors,
+        )
+        _ingest_withdrawals(
+            conn, client, start_ms=start_ms, end_ms=end_ms, spot_id=spot_id,
+            stats=stats, errors=errors,
+        )
+        _ingest_p2p(
+            conn, client, start_ms=start_ms, end_ms=end_ms, spot_id=spot_id,
+            stats=stats, errors=errors,
+        )
+        _ingest_converts(
+            conn, client, start_ms=start_ms, end_ms=end_ms, spot_id=spot_id,
+            stats=stats, errors=errors,
+        )
+        _ingest_internal_transfers(
+            conn, client, start_ms=start_ms, end_ms=end_ms, account_ids=account_ids,
+            stats=stats, errors=errors,
+        )
+        _ingest_earn_rewards(
+            conn, client, start_ms=start_ms, end_ms=end_ms, earn_id=earn_id,
+            interest_id=interest_id, stats=stats, errors=errors,
+        )
+        _ingest_pay(
+            conn, client, start_ms=start_ms, end_ms=end_ms, spot_id=spot_id,
+            stats=stats, errors=errors,
+        )
 
-            snapshot_at = datetime.now(tz=UTC)
-            earn_stats = _ingest_earn_positions(
-                conn, client, earn_id=earn_id, snapshot_at=snapshot_at, errors=errors,
-            )
+        snapshot_at = datetime.now(tz=UTC)
+        earn_stats = _ingest_earn_positions(
+            conn, client, earn_id=earn_id, snapshot_at=snapshot_at, errors=errors,
+        )
 
-            if dry_run:
-                conn.execute("ROLLBACK")
-            else:
-                conn.execute("COMMIT")
-        except Exception:
-            conn.execute("ROLLBACK")
-            raise
+        import_state_repo.upsert_state(
+            conn, source=SOURCE, last_synced_at=snapshot_at
+        )
 
-        if not dry_run:
-            import_state_repo.upsert_state(
-                conn, source=SOURCE, last_synced_at=snapshot_at
-            )
-
-            import_state_repo.finish_run(
-                conn,
-                run_id,
-                status="success",
-                rows_inserted=stats["rows_inserted"],
-                rows_updated=stats["rows_updated"],
-            )
+        import_state_repo.finish_run(
+            conn,
+            run_id,
+            status="success",
+            rows_inserted=stats["rows_inserted"],
+            rows_updated=stats["rows_updated"],
+        )
 
         return {
             **stats,
@@ -734,11 +717,10 @@ def sync_binance(
             "end_ms": end_ms,
         }
     except Exception as exc:
-        if not dry_run:
-            error_msg = f"{type(exc).__name__}: {exc}"[:4000]
-            import_state_repo.finish_run(
-                conn, run_id, status="error", error=error_msg
-            )
+        error_msg = f"{type(exc).__name__}: {exc}"[:4000]
+        import_state_repo.finish_run(
+            conn, run_id, status="error", error=error_msg
+        )
         raise
 
 
