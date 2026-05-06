@@ -199,3 +199,155 @@
 }
 
 /* === END accounts & rates === */
+
+/* === monthly pivot === */
+
+/* The pivot is a CSS Grid (not <table>): first column = category,
+ * remaining columns = months. Sticky first row + first column let the
+ * user scroll a wide pivot without losing context.
+ *
+ * Column count is set on the parent via inline `style` from the
+ * template: --month-cols: <N>;
+ */
+.monthly-pivot {
+  display: grid;
+  grid-template-columns: minmax(10rem, 14rem) repeat(var(--month-cols, 6), minmax(5.5rem, 1fr));
+  gap: 0;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.5rem;
+  background: #ffffff;
+  overflow: auto;
+  max-height: 70vh;
+}
+
+.monthly-pivot .pivot-head,
+.monthly-pivot .pivot-row-label,
+.monthly-pivot .pivot-row > a,
+.monthly-pivot .pivot-row > span {
+  border-right: 1px solid #f1f5f9;
+  border-bottom: 1px solid #f1f5f9;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8125rem;
+}
+
+.monthly-pivot .pivot-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #f8fafc;
+  font-weight: 600;
+  color: #475569;
+  text-align: right;
+}
+
+.monthly-pivot .pivot-head.first {
+  left: 0;
+  z-index: 3;
+  text-align: left;
+}
+
+.monthly-pivot .pivot-row-label {
+  position: sticky;
+  left: 0;
+  background: #ffffff;
+  z-index: 1;
+  font-weight: 500;
+  color: #0f172a;
+}
+
+.monthly-pivot .pivot-row > a,
+.monthly-pivot .pivot-row > span {
+  text-align: right;
+  text-decoration: none;
+  color: #0f172a;
+}
+
+.monthly-pivot .pivot-row > a:hover {
+  background: #f8fafc;
+}
+
+/* The cell itself sits inside the anchor; markers (BCV stripe + needs
+ * review dot) attach via :before / :after.
+ */
+.pivot-cell {
+  position: relative;
+  display: inline-block;
+  padding: 0 0.25rem;
+}
+
+.pivot-cell.has-bcv-fallback::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgba(245, 158, 11, 0.12) 0,
+    rgba(245, 158, 11, 0.12) 3px,
+    transparent 3px,
+    transparent 7px
+  );
+  border-radius: 0.125rem;
+}
+
+.pivot-cell.has-needs-review::after {
+  content: "";
+  position: absolute;
+  top: 0.125rem;
+  right: 0.125rem;
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 9999px;
+  background: #eab308;
+  box-shadow: 0 0 0 1px rgba(234, 179, 8, 0.3);
+}
+
+/* Footer row (column totals) */
+.monthly-pivot .pivot-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  background: #f8fafc;
+  font-weight: 600;
+  color: #0f172a;
+  text-align: right;
+  border-top: 1px solid #e2e8f0;
+}
+
+.monthly-pivot .pivot-footer.first {
+  left: 0;
+  z-index: 3;
+  text-align: left;
+}
+
+/* Mobile single-month list */
+.monthly-mobile-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.5rem;
+  background: #ffffff;
+}
+
+.monthly-mobile-card .bar {
+  height: 4px;
+  background: #e5e7eb;
+  border-radius: 9999px;
+  overflow: hidden;
+}
+
+.monthly-mobile-card .bar > span {
+  display: block;
+  height: 100%;
+  background: #0ea5e9;
+}
+
+/* Chart container needs an explicit height so Chart.js can size to it. */
+.monthly-chart-wrap {
+  position: relative;
+  height: 18rem;
+}
+
+/* === END monthly pivot === */

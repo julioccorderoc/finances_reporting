@@ -1,0 +1,24 @@
+{# Kind tabs: Expense / Income / Net.
+
+   Keeps every other filter intact via hidden form fields rendered by
+   the parent. Each tab is a regular link (full-page nav) — the change
+   is small enough that we don't bother with HTMX swaps.
+#}
+{% from "_macros.html" import kind_tab %}
+
+{%- macro _build_url(kind, filter) -%}
+?range_preset={{ filter.range_preset.value }}
+{%- if filter.since %}&since={{ filter.since }}{% endif -%}
+{%- if filter.until %}&until={{ filter.until }}{% endif -%}
+&kind={{ kind }}
+{%- for a in filter.accounts %}&accounts={{ a }}{% endfor -%}
+{%- for c in filter.categories %}&categories={{ c }}{% endfor -%}
+{%- for cu in filter.currencies %}&currencies={{ cu }}{% endfor -%}
+&include_bcv_fallback={{ 'true' if filter.include_bcv_fallback else 'false' }}
+{%- endmacro -%}
+
+<div class="flex flex-wrap items-center gap-2" data-monthly-kind-tabs>
+  {{ kind_tab('Expense', filter.kind.value == 'expense', _build_url('expense', filter)) }}
+  {{ kind_tab('Income',  filter.kind.value == 'income',  _build_url('income',  filter)) }}
+  {{ kind_tab('Net',     filter.kind.value == 'net',     _build_url('net',     filter)) }}
+</div>

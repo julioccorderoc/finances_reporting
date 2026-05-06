@@ -1,0 +1,50 @@
+{# CSS Grid pivot.
+
+   Rows: categories (sorted desc by row_total). Columns: months
+   (oldest -> newest). Each non-empty cell is wrapped in an <a> that
+   drills down to the filtered /transactions page.
+
+   The grid template column count is bound via a CSS custom property
+   set on the parent so the same stylesheet works for any range size.
+#}
+{% from "_macros.html" import pivot_cell %}
+<section
+  id="monthly-pivot"
+  class="monthly-pivot mt-4"
+  style="--month-cols: {{ pivot.months | length }};"
+>
+  {# Header row: blank corner + month labels. #}
+  <div class="pivot-head first">Category</div>
+  {% for m in pivot.months %}
+    <div class="pivot-head" data-month="{{ m }}">{{ m }}</div>
+  {% endfor %}
+
+  {# Body rows. #}
+  {% for row in pivot.rows %}
+    <div class="pivot-row-label" data-row-category="{{ row.category_name or 'Uncategorized' }}">
+      {{ row.category_name or 'Uncategorized' }}
+    </div>
+    <div class="contents pivot-row" data-row>
+      {% for m in pivot.months %}
+        {% set cell = row.cells_by_month[m] %}
+        {% if cell.tx_count > 0 or cell.fallback_usd != 0 %}
+          <a href="{{ cell.drill_url }}" data-cell data-month="{{ m }}" data-category="{{ row.category_name or 'Uncategorized' }}">
+            {{ pivot_cell(cell.total_usd, cell.fallback_usd, cell.needs_review_count) }}
+          </a>
+        {% else %}
+          <span data-cell data-empty data-month="{{ m }}">
+            <span class="text-slate-300">&mdash;</span>
+          </span>
+        {% endif %}
+      {% endfor %}
+    </div>
+  {% endfor %}
+
+  {# Footer row: column totals. #}
+  <div class="pivot-footer first">Total</div>
+  {% for m in pivot.months %}
+    <div class="pivot-footer" data-col-total="{{ m }}">
+      {{ '%.2f' | format(pivot.totals.column_total_usd[m]) }}
+    </div>
+  {% endfor %}
+</section>

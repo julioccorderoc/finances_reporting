@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Monthly{% endblock %}
+{% block content %}
+  <header class="mb-4">
+    <h1 class="text-2xl font-semibold">Monthly</h1>
+    <p class="mt-1 text-sm text-slate-600">
+      Category × month pivot. Default range is the last 6 months. Click a cell to drill into transactions.
+    </p>
+  </header>
+
+  {# Kind tabs (Expense / Income / Net). #}
+  <div class="mb-3">
+    {% include "partials/monthly_kind_tabs.html" %}
+  </div>
+
+  {# Filter form. HTMX-driven swap of #monthly-pivot. #}
+  {% include "partials/monthly_filters.html" %}
+
+  {# Chart. #}
+  {% include "partials/monthly_chart.html" %}
+
+  {# Pivot table (CSS Grid). #}
+  {% include "partials/monthly_pivot.html" %}
+{% endblock %}

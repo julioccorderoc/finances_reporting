@@ -1,0 +1,78 @@
+{# Filter form for /monthly. HTMX-driven: changing any filter swaps
+   #monthly-pivot and #monthly-chart without a full page reload, while
+   pushing the URL so state is shareable.
+#}
+<form
+  id="monthly-filters"
+  class="bg-white border border-slate-200 rounded-lg p-4 space-y-3"
+  hx-get="/_partial/monthly/pivot"
+  hx-target="#monthly-pivot"
+  hx-swap="outerHTML"
+  hx-push-url="true"
+  hx-trigger="change"
+>
+  <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+    <label class="text-xs flex flex-col gap-1">
+      <span class="text-slate-500">Range</span>
+      <select name="range_preset" class="border border-slate-300 rounded px-2 py-1 text-sm">
+        {% for opt in ['3m', '6m', '12m', 'ytd', 'all', 'custom'] %}
+          <option value="{{ opt }}" {% if filter.range_preset.value == opt %}selected{% endif %}>{{ opt }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="text-xs flex flex-col gap-1">
+      <span class="text-slate-500">Since (YYYY-MM)</span>
+      <input
+        type="text"
+        name="since"
+        value="{{ filter.since or '' }}"
+        placeholder="2026-01"
+        class="border border-slate-300 rounded px-2 py-1 text-sm"
+      >
+    </label>
+    <label class="text-xs flex flex-col gap-1">
+      <span class="text-slate-500">Until (YYYY-MM)</span>
+      <input
+        type="text"
+        name="until"
+        value="{{ filter.until or '' }}"
+        placeholder="2026-05"
+        class="border border-slate-300 rounded px-2 py-1 text-sm"
+      >
+    </label>
+    {% if accounts_options %}
+      <label class="text-xs flex flex-col gap-1">
+        <span class="text-slate-500">Accounts</span>
+        <select name="accounts" multiple size="3" class="border border-slate-300 rounded px-2 py-1 text-sm">
+          {% for opt in accounts_options %}
+            <option value="{{ opt }}" {% if opt in filter.accounts %}selected{% endif %}>{{ opt }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    {% endif %}
+    {% if currencies_options %}
+      <label class="text-xs flex flex-col gap-1">
+        <span class="text-slate-500">Currencies</span>
+        <select name="currencies" multiple size="3" class="border border-slate-300 rounded px-2 py-1 text-sm">
+          {% for opt in currencies_options %}
+            <option value="{{ opt }}" {% if opt in filter.currencies %}selected{% endif %}>{{ opt }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    {% endif %}
+  </div>
+
+  <label class="text-xs flex items-center gap-2">
+    <input
+      type="checkbox"
+      name="include_bcv_fallback"
+      value="true"
+      {% if filter.include_bcv_fallback %}checked{% endif %}
+      class="border border-slate-300 rounded"
+    >
+    <span class="text-slate-500">Show BCV fallback overlay</span>
+  </label>
+
+  {# Preserve the active kind across filter changes. #}
+  <input type="hidden" name="kind" value="{{ filter.kind.value }}">
+</form>

@@ -1,21 +1,24 @@
-"""JSON API endpoints (EPIC-022 / ADR-012, EPIC-023 Phase 2b/2a/2d).
+"""JSON API endpoints (EPIC-022 / ADR-012, EPIC-023 Phase 2b/2a/2c/2d).
 
 Phase 2b wires ``GET /api/transactions``. Phase 2a appends the dashboard
 JSON endpoints used by the deferred mobile API and easy debugging via
-``curl``. Phase 2d adds ``GET /api/accounts`` and ``GET /api/rates``
-with the same JSON-first discipline. The HTMX layer does not depend on
-any of these endpoints.
+``curl``. Phase 2c adds ``GET /api/monthly`` (pivot or mobile DTO).
+Phase 2d adds ``GET /api/accounts`` and ``GET /api/rates`` with the
+same JSON-first discipline. The HTMX layer does not depend on any of
+these endpoints.
 """
 
 from __future__ import annotations
 
 import sqlite3
 from datetime import UTC, date, datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, ConfigDict
 
 from finances.web.deps import get_conn
+from finances.web.routers._monthly_filter_dep import monthly_filter_from_query
 from finances.web.routers._tx_filter_dep import filter_from_query
 from finances.web.services.accounts_view import AccountCard, build_account_cards
 from finances.web.services.dashboard import (
@@ -24,6 +27,13 @@ from finances.web.services.dashboard import (
     build_kpis,
     build_recent_activity,
     build_spend_trend,
+)
+from finances.web.services.monthly_view import (
+    MonthlyFilter,
+    MonthlyMobile,
+    MonthlyPivot,
+    build_mobile,
+    build_pivot,
 )
 from finances.web.services.rates_view import (
     DEFAULT_RANGE_DAYS,
@@ -83,6 +93,29 @@ def dashboard_spend_trend(
     """Return the 6-month stacked-bar dataset for the spend chart."""
     today = datetime.now(tz=UTC).date()
     return build_spend_trend(conn, today=today, months_back=6)
+
+
+# ---------------------------------------------------------------------------
+# Monthly endpoint (Phase 2c).
+# ---------------------------------------------------------------------------
+
+
+@router.get("/monthly")
+def monthly_json(
+    layout: Literal["desktop", "mobile"] | None = Query(default=None),
+    month: str | None = Query(default=None),
+    f: MonthlyFilter = Depends(monthly_filter_from_query),
+    conn: sqlite3.Connection = Depends(get_conn),
+) -> MonthlyPivot | MonthlyMobile:
+    """Return the monthly pivot (default) or mobile DTO when ``layout=mobile``.
+
+    Note we don't use ``response_model`` here because the response shape
+    branches on a query parameter; the union return type is enforced by
+    the Pydantic models themselves.
+    """
+    if layout == "mobile":
+        return build_mobile(conn, f, month=month)
+    return build_pivot(conn, f)
 
 
 # ---------------------------------------------------------------------------

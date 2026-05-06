@@ -123,3 +123,34 @@
   {{ entry[0] }}
 </span>
 {%- endmacro -%}
+
+{# --- /monthly macros (Phase 2c) ----------------------------------------- #}
+
+{%- macro kind_tab(label, active, target_url) -%}
+<a
+  href="{{ target_url }}"
+  class="px-3 py-1.5 text-sm border rounded
+         {% if active %}bg-slate-900 text-white border-slate-900{% else %}bg-white text-slate-700 border-slate-300 hover:bg-slate-50{% endif %}"
+  data-kind-tab
+  data-active="{{ 'true' if active else 'false' }}"
+>{{ label }}</a>
+{%- endmacro -%}
+
+{%- macro pivot_cell(amount, fallback_amount, needs_review_count) -%}
+{#- One pivot cell. Renders the headline amount, an overlay if BCV
+    fallback contributed, and a small needs-review dot if any rows in
+    the bucket failed to resolve.
+
+    Caller wraps the resulting span in an <a> for the drill-down URL.
+-#}
+<span
+  class="pivot-cell tabular-nums {% if fallback_amount and fallback_amount != 0 %}has-bcv-fallback{% endif %} {% if needs_review_count and needs_review_count > 0 %}has-needs-review{% endif %}"
+  data-bcv-fallback="{{ 'true' if fallback_amount and fallback_amount != 0 else 'false' }}"
+  data-needs-review-count="{{ needs_review_count or 0 }}"
+  title="USD {{ '%.2f' | format(amount or 0) }}{% if fallback_amount and fallback_amount != 0 %} (+ {{ '%.2f' | format(fallback_amount) }} BCV fallback){% endif %}{% if needs_review_count and needs_review_count > 0 %} · {{ needs_review_count }} needs review{% endif %}"
+>
+  {%- if amount is none -%}&mdash;
+  {%- else -%}{{ '%.2f' | format(amount) }}
+  {%- endif -%}
+</span>
+{%- endmacro -%}
