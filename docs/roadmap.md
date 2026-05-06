@@ -22,6 +22,7 @@
 | 2 | EPIC-004 … EPIC-011 | Yes (8-way) | All ingest + domain modules green; unit tests pass; per-epic TDD checklist met (rule-011) |
 | 3 | EPIC-012, EPIC-013, EPIC-014, EPIC-021 | Partial (012 first; then 013 ‖ 014 ‖ 021) | Backfill clean; balances reconcile; Sheets mirror live; integration suite green |
 | 4 (future) | EPIC-015, EPIC-016, EPIC-017, EPIC-018, EPIC-019, EPIC-020 | Partial (017 → 018 → 019; 020 after 017; 016 after 017+018) | Out of scope for v1 cut |
+| 5 (v1.5) | EPIC-022, EPIC-023, EPIC-024, EPIC-025, EPIC-026 | Partial (022 sequential; 023 4-way parallel; 024 → 025 → 026 sequential) | Local web viewer (FastAPI + HTMX) replaces hand-edited Sheets workflow; LAN-accessible from iPhone |
 
 ## Epic Ledger
 
@@ -663,6 +664,114 @@
 - View `v_receipts_tax` materializes the join.
 
 **Verification Criteria (Definition of Done):** Defined when activated.
+
+---
+
+### EPIC-022 — Web Viewer Foundation
+
+**Status:** Active
+**Wave:** 5
+**Dependencies:** EPIC-002 (schema/repos), EPIC-009/EPIC-010 (rate streams), EPIC-013 (reports). All Complete on `main`.
+**ADRs:** ADR-012, rule-012; respects ADR-005, ADR-009.
+
+**Business Objective:** Stand up the FastAPI/Jinja/HTMX skeleton under `finances/web/` and a `finances serve` CLI command, so subsequent phases can wire pages without re-deciding architecture.
+
+**Technical Boundary:**
+
+- New package `finances/web/` with `app.py` factory, `deps.py` (`get_conn`), `auth.py` (BearerTokenMiddleware), `settings.py` (Pydantic v2), `routers/{pages,partials,api}.py` empty stubs.
+- `finances/web/templates/base.html` with vendored HTMX/Alpine/Chart.js.
+- `finances/web/static/vendor/` with pinned htmx 2.0.x, alpinejs 3.14.x, chart.js 4.4.x.
+- `finances serve --host --port --open --token` Typer command.
+- Add `fastapi`, `uvicorn[standard]`, `jinja2`, `python-multipart` deps to `pyproject.toml`.
+- Tests: `tests/test_web_app.py` covers boot, auth middleware (LAN bind requires token), static-file serving.
+
+**Verification Criteria:** `uv pip install -e .` succeeds; `finances serve --port 8765` boots; `/health` returns ok JSON; LAN bind without token exits non-zero; `pytest tests/test_web_app.py` all green.
+
+---
+
+### EPIC-023 — Read-Only Web Pages (Dashboard, Transactions, Monthly, Accounts, Rates)
+
+**Status:** Active
+**Wave:** 5
+**Dependencies:** EPIC-022.
+**ADRs:** ADR-012, rule-012, ADR-005 amendment (USDT-only for net-worth tile).
+
+**Business Objective:** Render the five primary read-only pages of the viewer, all reusing the existing report/repo APIs through the canonical card-row component.
+
+**Technical Boundary:**
+
+- Phase 2b owns `services/transactions_query.py`, the canonical `partials/card_transaction.html`, and the subgrid card-row CSS.
+- Phase 2a owns `services/{dashboard,net_worth}.py` and the dashboard page (KPIs, sync strip, recent activity, 6-month spend chart).
+- Phase 2c owns `services/monthly_view.py` plus pivot + chart + mobile single-month templates; `/monthly` uses a UA heuristic (or `?layout=`) to pick desktop pivot vs. mobile list.
+- Phase 2d owns `services/{accounts_view,rates_view}.py` plus the accounts grid and the rates chart/latest-per-pair list.
+- Net-worth math (USDT P2P only, never BCV) is shared via `services/net_worth.usdt_value` to keep the dashboard and the accounts page in lockstep.
+- File-ownership matrix per `docs/plans/web-viewer-v1.md`. Append-only edits to shared files (`_macros.html`, `app.css`, routers).
+
+**Verification Criteria:** All five pages return 200 on real seeded data; HTMX filter swaps work without full reloads; `/monthly` mobile UA renders the single-month list; chart canvases populate; ≥75% coverage on `finances/web/services/*` and routers.
+
+---
+
+### EPIC-024 — Transaction Edit Modal (Write-back)
+
+**Status:** Active
+**Wave:** 5
+**Dependencies:** EPIC-022, EPIC-023.
+**ADRs:** ADR-012 (atomic per-Save semantics, derived `needs_review`), ADR-005, rule-012.
+
+**Business Objective:** Make rows editable. Categorize, set `user_rate`, recompute `needs_review` via `rates.resolve`, swap the row card in place — without parallel write logic.
+
+**Technical Boundary:**
+
+- `services/transactions_write.py` exposes `apply_edit(conn, *, txn_id, req)` that calls `transactions_repo.update`, then `rates.resolve` to derive `needs_review`, then projects the updated card via the Phase 2b helper.
+- New `transactions_repo.update(conn, *, id, category_id, user_rate, needs_review)` with `_UNSET` sentinels; raises `LookupError` on unknown id.
+- `PATCH /api/transactions/{id}` returning `TransactionCard`, 404 on missing, 422 on bad category.
+- `GET /_partial/transactions/{id}/modal` + `POST /_partial/transactions/{id}/edit`. `HX-Trigger: closeModal` on success; Alpine listener on `<body>` clears the host div.
+- `partials/modal_transaction.html` shows read-only header + provenance + description and editable category + user_rate. **No `needs_review` toggle in UI.**
+- `_macros.html` gets `category_select`; `app.css` gets `=== modal ===` block (centered desktop, full-screen sheet on `≤640px`).
+
+**Verification Criteria:** Setting `user_rate` flips `needs_review` to false; clearing it flips back. Setting category does not touch `needs_review`. Description/amount/account/source/source_ref are not editable. `PATCH` 404s for unknown ids and 422s for invalid bodies. All Phase 2 tests still green.
+
+---
+
+### EPIC-025 — `/triage` Unified Queue + Pair-Confirm
+
+**Status:** Active
+**Wave:** 5
+**Dependencies:** EPIC-024.
+**ADRs:** ADR-012 (unified queue), ADR-002 (transfer pairing), rule-012.
+
+**Business Objective:** Replace the old hand-edited Sheets triage motion with a single oldest-first queue surfacing rate / category / pair issues, with `[Save & next] [Skip → bottom] [Cancel]` semantics and a side-by-side pair-confirm modal.
+
+**Technical Boundary:**
+
+- `services/triage.py` builds `TriageQueue` from `transactions WHERE needs_review=1`, `transactions WHERE category_id IS NULL` (excluding transfer/adjustment), and `BankAnchoredP2pPairing.match()` proposals. A txn with both rate and category issues appears once with both badges.
+- Skip-store is a per-app in-memory `set[str]` (session-local, intentionally not persisted).
+- `GET /triage`, `GET /api/triage[?type_filter=rate|category|pair]`, `POST /api/transfers`, plus six HTMX endpoints (queue, txn modal, txn edit, pair modal, pair confirm, skip).
+- Triage variant of the modal posts to `/_partial/triage/{id}/edit` and sets `HX-Trigger: closeModal, advanceQueue`.
+- Pair-confirm calls `transfers.create_transfer(conn, anchor_transaction_id=deposit_id, counterpart_transaction_id=sell_id, ...)` — no parallel SQL.
+- Cards on `/triage` use a `triage_modal_url` override on the canonical card so the Save & next modal opens; `/transactions` cards still use the Phase 3 modal (regression-tested).
+
+**Verification Criteria:** Queue is oldest-first with type-filter chips and unfiltered counts; merged items render once with two badges; pair-confirm creates a transfer (both legs share the new `transfer_id`); skip pushes items to the bottom of the queue; integrity warnings surface for any `transfer_id` with only one leg; full suite green.
+
+---
+
+### EPIC-026 — Mobile Polish + LAN Runbook
+
+**Status:** Active
+**Wave:** 5
+**Dependencies:** EPIC-025.
+**ADRs:** ADR-012 (LAN auth section).
+
+**Business Objective:** Land the iPhone-Safari polish (mobile breakpoints, safe-area insets, ≥44px tap targets, dashboard deep-link to `/triage`) and document the LAN bring-up procedure.
+
+**Technical Boundary:**
+
+- `finances/web/static/css/app.css` Phase 5 mobile-polish block: long-description word-break, filter-chip wrap, pair-row single-column collapse, modal full-screen sheet on phones with `env(safe-area-inset-*)`, ≥44px tap targets, nav wrap.
+- `partials/kpi_tiles.html`: needs-review tile becomes an `<a>` to `/triage?type_filter=rate`. Other tiles stay non-interactive `<article>`s.
+- `docs/runbooks/web-viewer-lan.md`: token generation (`secrets.token_urlsafe(24)`), `<host>.local` Bonjour, troubleshooting, deliberate v1 limits.
+- `README.md` "Local viewer" section linking the runbook.
+
+**Verification Criteria:** `test_dashboard_needs_review_tile_links_to_triage` passes; mobile UA on `/transactions` and `/triage` returns expected body; `docs/runbooks/web-viewer-lan.md` exists and references ADR-012; full suite stays at 535+ green.
 
 ---
 
