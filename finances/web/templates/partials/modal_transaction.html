@@ -1,0 +1,140 @@
+{# Transaction edit modal (EPIC-024 / Phase 3 / ADR-012).
+
+   Rendered into #tx-modal-host by HTMX when a card is clicked. The
+   modal closes via the ``HX-Trigger: closeModal`` response header set
+   on the POST handler, which fires a window event the base.html
+   <body x-data> listener listens for to clear the host div.
+
+   Encoding choice: ``set_category=true`` and ``set_user_rate=true``
+   are always submitted; the user clears a field by submitting an
+   empty value. Documented in routers/partials.py.
+
+   What is editable: ``category_id``, ``user_rate``.
+   What is read-only: everything else (description, amount, account,
+   occurred_at, source, source_ref, kind, rate_source). This protects
+   audit-trail / dedup-key invariants per ADR-012 / Phase 3 spec.
+
+   No needs_review toggle (rule-012 — flag is fully derived from
+   rates.resolve and recomputed on every save).
+#}
+{% from "_macros.html" import rate_source_badge, needs_review_badge,
+                              kind_class, format_date, format_amount,
+                              category_select %}
+
+<div
+  class="tx-modal-overlay"
+  data-tx-modal
+  data-tx-id="{{ txn.id }}"
+  x-data="{}"
+  @keydown.escape.window="window.dispatchEvent(new CustomEvent('close-modal'))"
+>
+  <div class="tx-modal-card" role="dialog" aria-modal="true">
+    {# 1. Header --------------------------------------------------------- #}
+    <header class="tx-modal-header">
+      <div class="flex items-baseline gap-2">
+        <span class="text-xs uppercase tracking-wide {{ kind_class(card.kind) }}">{{ card.kind }}</span>
+        <time class="text-xs text-slate-500 tabular-nums" datetime="{{ card.occurred_at.isoformat() }}">
+          {{ format_date(card.occurred_at) }}
+        </time>
+      </div>
+      <div class="mt-1 text-lg font-semibold tabular-nums">
+        {{ format_amount(card.amount_native) }} <span class="text-sm text-slate-500">{{ card.currency }}</span>
+        {% if card.amount_usd is not none %}
+          <span class="ml-2 text-sm text-slate-500">${{ format_amount(card.amount_usd) }}</span>
+        {% else %}
+          <span class="ml-2 text-sm text-slate-400">&mdash;</span>
+        {% endif %}
+      </div>
+      <div class="mt-1 text-xs text-slate-500">{{ account_name }}</div>
+    </header>
+
+    {# 2. Provenance ----------------------------------------------------- #}
+    <section class="tx-modal-section">
+      <h3 class="tx-modal-section-title">Provenance</h3>
+      <dl class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-600">
+        <dt>source</dt>
+        <dd class="font-mono">{{ txn.source }}</dd>
+
+        <dt>source_ref</dt>
+        <dd class="font-mono break-all">{{ txn.source_ref or '—' }}</dd>
+
+        <dt>created_at</dt>
+        <dd class="font-mono">
+          {% if txn.created_at %}{{ format_date(txn.created_at) }}{% else %}&mdash;{% endif %}
+        </dd>
+
+        <dt>updated_at</dt>
+        <dd class="font-mono">
+          {% if txn.updated_at %}{{ format_date(txn.updated_at) }}{% else %}&mdash;{% endif %}
+        </dd>
+
+        <dt>rate_source</dt>
+        <dd>
+          {{ rate_source_badge(card.rate_source, card.is_bcv_fallback) }}
+          {% if card.is_bcv_fallback %}<span class="text-amber-700 ml-1">(BCV fallback — reference only)</span>{% endif %}
+        </dd>
+
+        <dt>user_rate (current)</dt>
+        <dd class="font-mono">
+          {% if txn.user_rate is not none %}{{ txn.user_rate }}{% else %}&mdash;{% endif %}
+        </dd>
+
+        <dt>needs_review</dt>
+        <dd>
+          {% if card.needs_review %}{{ needs_review_badge() }}{% else %}<span class="text-slate-400">no</span>{% endif %}
+        </dd>
+      </dl>
+    </section>
+
+    {# 3. Description ----------------------------------------------------- #}
+    <section class="tx-modal-section">
+      <h3 class="tx-modal-section-title">Description</h3>
+      <p class="text-sm text-slate-800 whitespace-pre-wrap break-words">{{ txn.description or '—' }}</p>
+    </section>
+
+    {# 4. Editable form --------------------------------------------------- #}
+    <form
+      class="tx-modal-form"
+      hx-post="/_partial/transactions/{{ txn.id }}/edit"
+      hx-target="[data-tx-id='{{ txn.id }}']"
+      hx-swap="outerHTML"
+    >
+      {# Always-set sentinels: empty value clears the field. #}
+      <input type="hidden" name="set_category" value="true">
+      <input type="hidden" name="set_user_rate" value="true">
+
+      <label class="block">
+        <span class="text-xs uppercase tracking-wide text-slate-500">Category</span>
+        {{ category_select("category_id", categories, selected=txn.category_id) }}
+      </label>
+
+      <label class="block">
+        <span class="text-xs uppercase tracking-wide text-slate-500">User rate</span>
+        <input
+          type="text"
+          name="user_rate"
+          inputmode="decimal"
+          autocomplete="off"
+          value="{{ txn.user_rate if txn.user_rate is not none else '' }}"
+          placeholder="{% if card.amount_usd is not none and card.rate_source != 'user_rate' and card.rate_source != 'native_usd' %}fallback: {{ card.rate_source }}{% else %}native amount in {{ txn.currency }}/USD{% endif %}"
+          class="mt-1 w-full border border-slate-300 rounded px-2 py-1 text-sm font-mono"
+        >
+        <span class="text-[11px] text-slate-500">
+          empty = clear (re-derives needs_review)
+        </span>
+      </label>
+
+      <div class="tx-modal-actions">
+        <button
+          type="button"
+          class="px-3 py-1.5 text-sm border border-slate-300 rounded bg-white hover:bg-slate-50"
+          @click="window.dispatchEvent(new CustomEvent('close-modal'))"
+        >Cancel</button>
+        <button
+          type="submit"
+          class="px-3 py-1.5 text-sm border border-slate-900 rounded bg-slate-900 text-white hover:bg-slate-800"
+        >Save</button>
+      </div>
+    </form>
+  </div>
+</div>

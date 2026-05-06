@@ -351,3 +351,93 @@
 }
 
 /* === END monthly pivot === */
+
+/* === modal === */
+
+/* Transaction edit modal (EPIC-024 / Phase 3 / ADR-012).
+ *
+ * Desktop: centered card on a dimmed backdrop.
+ * Mobile (<=640px): full-screen sheet for thumb reach. The modal host
+ * <div id="tx-modal-host"></div> sits at the end of <body>; HTMX swaps
+ * the markup in and out via innerHTML, so position:fixed here covers
+ * the viewport regardless of where the host is in document order.
+ */
+.tx-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(15, 23, 42, 0.45);   /* slate-900 / 45% */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.tx-modal-card {
+  width: 100%;
+  max-width: 36rem;
+  max-height: 90vh;
+  overflow-y: auto;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  box-shadow: 0 24px 48px -12px rgba(15, 23, 42, 0.35);
+  padding: 1.25rem 1.25rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.tx-modal-header {
+  border-bottom: 1px solid #f1f5f9;
+  padding-bottom: 0.75rem;
+}
+
+.tx-modal-section {
+  border-bottom: 1px solid #f1f5f9;
+  padding-bottom: 0.75rem;
+}
+
+.tx-modal-section:last-of-type {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.tx-modal-section-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748b;          /* slate-500 */
+  margin-bottom: 0.375rem;
+}
+
+.tx-modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.tx-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding-top: 0.5rem;
+}
+
+@media (max-width: 640px) {
+  .tx-modal-overlay {
+    padding: 0;
+    align-items: stretch;
+  }
+  .tx-modal-card {
+    max-width: 100%;
+    max-height: 100vh;
+    border-radius: 0;
+    border-left: 0;
+    border-right: 0;
+    border-top: 0;
+  }
+}
+
+/* === END modal === */

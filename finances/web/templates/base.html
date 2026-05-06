@@ -16,7 +16,17 @@
 
     <link rel="stylesheet" href="/static/css/app.css">
   </head>
-  <body class="min-h-screen bg-slate-50 text-slate-900">
+  <body
+    class="min-h-screen bg-slate-50 text-slate-900"
+    x-data="{}"
+    @close-modal.window="document.getElementById('tx-modal-host').replaceChildren()"
+    @htmx:after-on-load.window="
+      const trigger = $event.detail && $event.detail.xhr && $event.detail.xhr.getResponseHeader('HX-Trigger');
+      if (trigger && trigger.split(',').map(s => s.trim()).includes('closeModal')) {
+        window.dispatchEvent(new CustomEvent('close-modal'));
+      }
+    "
+  >
     <nav class="bg-white border-b border-slate-200">
       <div class="max-w-6xl mx-auto px-4 py-3 flex flex-wrap gap-4 items-center">
         <a href="/" class="font-semibold text-slate-900">Finances</a>
@@ -34,5 +44,12 @@
     <main class="max-w-6xl mx-auto px-4 py-6">
       {% block content %}{% endblock %}
     </main>
+
+    {# Modal host (EPIC-024 / Phase 3). HTMX swaps in modal_transaction.html
+       when a transaction card is clicked. The Alpine listener on <body>
+       clears this element on the ``close-modal`` window event, which is
+       fired by the HX-Trigger: closeModal response header on save and
+       by the modal's Cancel/Escape handlers. #}
+    <div id="tx-modal-host"></div>
   </body>
 </html>

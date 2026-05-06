@@ -136,6 +136,37 @@
 >{{ label }}</a>
 {%- endmacro -%}
 
+{# --- Phase 3 (EPIC-024): category dropdown ----------------------------- #}
+
+{%- macro category_select(name, options, selected=None) -%}
+{#- Render a <select> for the modal's category field.
+
+    ``options`` should be a list of Pydantic ``Category`` objects (the
+    output of ``categories_repo.list_all``). Categories are grouped by
+    ``kind`` to mimic the existing CLI flow.
+
+    The "no category" option carries an empty value so an empty form
+    submission clears the field (per Phase 3 form-encoding choice).
+-#}
+<select
+  name="{{ name }}"
+  class="mt-1 w-full border border-slate-300 rounded px-2 py-1 text-sm bg-white"
+>
+  <option value="" {% if selected is none %}selected{% endif %}>— no category —</option>
+  {%- set ns = namespace(prev_kind=None) -%}
+  {%- for opt in options -%}
+    {%- set kind_value = opt.kind.value if opt.kind.value is defined else opt.kind -%}
+    {%- if kind_value != ns.prev_kind -%}
+      {%- if ns.prev_kind is not none %}</optgroup>{% endif %}
+      <optgroup label="{{ kind_value }}">
+      {%- set ns.prev_kind = kind_value -%}
+    {%- endif -%}
+    <option value="{{ opt.id }}" {% if selected is not none and opt.id == selected %}selected{% endif %}>{{ opt.name }}</option>
+  {%- endfor -%}
+  {%- if ns.prev_kind is not none %}</optgroup>{% endif %}
+</select>
+{%- endmacro -%}
+
 {%- macro pivot_cell(amount, fallback_amount, needs_review_count) -%}
 {#- One pivot cell. Renders the headline amount, an overlay if BCV
     fallback contributed, and a small needs-review dot if any rows in

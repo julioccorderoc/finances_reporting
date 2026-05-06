@@ -12,13 +12,22 @@ sync state every 60 seconds. Phase 2c adds
 from __future__ import annotations
 
 import sqlite3
+from decimal import Decimal, InvalidOperation
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, Response
 
+from finances.db.repos import accounts as accounts_repo
+from finances.db.repos import categories as categories_repo
+from finances.db.repos import transactions as transactions_repo
 from finances.web.deps import get_conn
 from finances.web.routers._monthly_filter_dep import monthly_filter_from_query
 from finances.web.routers._tx_filter_dep import filter_from_query
 from finances.web.services.dashboard import build_sync_status
+from finances.web.services.transactions_query import _project_card
+from finances.web.services.transactions_write import (
+    TransactionEditRequest,
+    apply_edit,
+)
 from finances.web.services.monthly_view import (
     MonthlyFilter,
     build_chart,
@@ -128,6 +137,153 @@ def monthly_mobile_partial(
 # ---------------------------------------------------------------------------
 # Rates partials (Phase 2d).
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Transaction edit modal partials (Phase 3 / EPIC-024).
+#
+# Two endpoints back the row-edit flow:
+#
+#   GET  /_partial/transactions/{id}/modal — renders the modal markup,
+#        targeted at #tx-modal-host on the base layout.
+#   POST /_partial/transactions/{id}/edit  — accepts a form-encoded
+#        TransactionEditRequest, applies the change via apply_edit,
+#        returns the updated card_transaction.html partial, and sets
+#        the HX-Trigger: closeModal response header so the Alpine
+#        listener on <body> can clear the host div.
+#
+# Form encoding choice (Phase 3 plan, simpler-of-two):
+#   The modal *always* sets ``set_category=true`` and ``set_user_rate=true``
+#   so submitting an empty string clears that field. There is no per-field
+#   "set_*" checkbox in the rendered HTML — but the API still accepts the
+#   ``set_*=false`` shape from JSON callers via the same Pydantic model.
+# ---------------------------------------------------------------------------
+
+
+def _parse_optional_int(value: str | None) -> int | None:
+    if value is None:
+        return None
+    s = value.strip()
+    if not s:
+        return None
+    try:
+        return int(s)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422, detail=f"category_id must be an integer or empty: {value!r}"
+        ) from exc
+
+
+def _parse_optional_decimal(value: str | None) -> Decimal | None:
+    if value is None:
+        return None
+    s = value.strip()
+    if not s:
+        return None
+    try:
+        return Decimal(s)
+    except InvalidOperation as exc:
+        raise HTTPException(
+            status_code=422, detail=f"user_rate must be a decimal or empty: {value!r}"
+        ) from exc
+
+
+def _parse_form_bool(value: str | None) -> bool:
+    if value is None:
+        return False
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+@router.get("/transactions/{txn_id}/modal", include_in_schema=False)
+def transactions_modal_partial(
+    request: Request,
+    txn_id: int,
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Render the edit modal for ``txn_id``.
+
+    Returns 404 if the transaction does not exist. Renders the modal
+    template with both the read-only provenance block (source,
+    source_ref, rate_source, etc.) and the editable form. The form
+    targets ``[data-tx-id="{id}"]`` so HTMX can ``outerHTML`` swap the
+    row card on save.
+    """
+    txn = transactions_repo.get_by_id(conn, txn_id)
+    if txn is None:
+        raise HTTPException(status_code=404, detail=f"transaction id={txn_id} not found")
+
+    # Account name + category name for the read-only header / current
+    # selection in the dropdown.
+    account_row = conn.execute(
+        "SELECT name FROM accounts WHERE id = ?", (txn.account_id,)
+    ).fetchone()
+    account_name = account_row["name"] if account_row else ""
+
+    category_name: str | None = None
+    if txn.category_id is not None:
+        cat = categories_repo.get_by_id(conn, txn.category_id)
+        category_name = cat.name if cat else None
+
+    card = _project_card(
+        conn,
+        txn,
+        account_name=account_name,
+        category_name=category_name,
+    )
+
+    categories = categories_repo.list_all(conn)
+
+    templates = request.app.state.templates
+    return templates.TemplateResponse(
+        request,
+        "partials/modal_transaction.html",
+        {
+            "txn": txn,
+            "card": card,
+            "categories": categories,
+            "account_name": account_name,
+        },
+    )
+
+
+@router.post("/transactions/{txn_id}/edit", include_in_schema=False)
+def transactions_edit_partial(
+    request: Request,
+    txn_id: int,
+    set_category: str | None = Form(default=None),
+    category_id: str | None = Form(default=None),
+    set_user_rate: str | None = Form(default=None),
+    user_rate: str | None = Form(default=None),
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Apply the modal-form edit and return the updated card partial.
+
+    On success the response carries ``HX-Trigger: closeModal`` so the
+    Alpine listener on ``<body>`` (added in base.html) can clear the
+    modal host div.
+    """
+    req = TransactionEditRequest(
+        set_category=_parse_form_bool(set_category),
+        category_id=_parse_optional_int(category_id),
+        set_user_rate=_parse_form_bool(set_user_rate),
+        user_rate=_parse_optional_decimal(user_rate),
+    )
+
+    try:
+        card = apply_edit(conn, txn_id=txn_id, req=req)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    templates = request.app.state.templates
+    response = templates.TemplateResponse(
+        request,
+        "partials/card_transaction.html",
+        {"card": card},
+    )
+    response.headers["HX-Trigger"] = "closeModal"
+    return response
 
 
 @router.get("/rates/chart", include_in_schema=False)

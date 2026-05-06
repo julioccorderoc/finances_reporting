@@ -12,12 +12,16 @@
 {% from "_macros.html" import rate_source_badge, needs_review_badge, kind_class, format_date, format_amount %}
 
 <article
-  class="card-row hover:bg-slate-50"
+  class="card-row hover:bg-slate-50 cursor-pointer"
   data-card-row
   data-tx-id="{{ card.id }}"
   data-account="{{ card.account_name }}"
   data-kind="{{ card.kind }}"
   data-needs-review="{{ 'true' if card.needs_review else 'false' }}"
+  hx-get="/_partial/transactions/{{ card.id }}/modal"
+  hx-target="#tx-modal-host"
+  hx-trigger="click"
+  hx-swap="innerHTML"
 >
   <time class="text-xs text-slate-500 tabular-nums" datetime="{{ card.occurred_at.isoformat() }}">
     {{ format_date(card.occurred_at) }}

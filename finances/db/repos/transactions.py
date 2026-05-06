@@ -1,10 +1,35 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Final
 
 from finances.domain.models import Transaction, TransactionKind
+
+
+class _Unset:
+    """Sentinel for ``update`` arguments that callers want left untouched.
+
+    A bare ``None`` is a *meaningful* value at the SQL boundary
+    (e.g. clear ``user_rate``); we need a third state for "do not touch".
+    """
+
+    _instance: "_Unset | None" = None
+
+    def __new__(cls) -> "_Unset":
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __repr__(self) -> str:  # pragma: no cover - debug aid
+        return "_UNSET"
+
+    def __bool__(self) -> bool:
+        return False
+
+
+_UNSET: Final[_Unset] = _Unset()
 
 
 def _to_text(value: Decimal | None) -> str | None:
@@ -176,3 +201,55 @@ def list_by_account(
 def count(conn: sqlite3.Connection) -> int:
     row = conn.execute("SELECT COUNT(*) AS c FROM transactions").fetchone()
     return int(row["c"])
+
+
+def update(
+    conn: sqlite3.Connection,
+    *,
+    id: int,
+    category_id: int | None | _Unset = _UNSET,
+    user_rate: Decimal | None | _Unset = _UNSET,
+    needs_review: bool | _Unset = _UNSET,
+) -> Transaction:
+    """Patch a single transaction's mutable fields.
+
+    Only fields explicitly passed (not the ``_UNSET`` sentinel) are
+    touched; ``None`` is a real value meaning "clear this column". The
+    function always sets ``updated_at`` to the current UTC instant
+    regardless of which fields were provided.
+
+    Per ADR-009 / rule-009, the return value is a Pydantic ``Transaction``
+    re-fetched from the row's authoritative state.
+
+    Per rule-012, this is the only allowed entry point for the web
+    viewer's transaction-edit modal — the viewer must not run its own
+    UPDATE statements.
+    """
+    sets: list[str] = []
+    params: list[Any] = []
+
+    if not isinstance(category_id, _Unset):
+        sets.append("category_id = ?")
+        params.append(category_id)
+
+    if not isinstance(user_rate, _Unset):
+        sets.append("user_rate = ?")
+        params.append(_to_text(user_rate))
+
+    if not isinstance(needs_review, _Unset):
+        sets.append("needs_review = ?")
+        params.append(1 if needs_review else 0)
+
+    sets.append("updated_at = ?")
+    params.append(datetime.now(tz=UTC).isoformat())
+
+    params.append(id)
+    sql = f"UPDATE transactions SET {', '.join(sets)} WHERE id = ?"
+    cur = conn.execute(sql, params)
+    if cur.rowcount == 0:
+        raise LookupError(f"transaction id={id} not found")
+
+    refreshed = get_by_id(conn, id)
+    if refreshed is None:  # pragma: no cover - defensive; UPDATE just succeeded
+        raise LookupError(f"transaction id={id} disappeared after update")
+    return refreshed

@@ -14,7 +14,7 @@ import sqlite3
 from datetime import UTC, date, datetime
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
 
 from finances.web.deps import get_conn
@@ -48,6 +48,10 @@ from finances.web.services.transactions_query import (
     TransactionsPage,
     query_transactions,
 )
+from finances.web.services.transactions_write import (
+    TransactionEditRequest,
+    apply_edit,
+)
 
 router = APIRouter(prefix="/api")
 
@@ -62,6 +66,29 @@ def transactions_list_json(
 ) -> TransactionsPage:
     """Return paginated, filtered transactions as JSON."""
     return query_transactions(conn, f)
+
+
+@router.patch(
+    "/transactions/{txn_id}",
+    response_model=TransactionCard,
+)
+def transactions_patch(
+    txn_id: int,
+    req: TransactionEditRequest,
+    conn: sqlite3.Connection = Depends(get_conn),
+) -> TransactionCard:
+    """Apply category / user_rate edits and return the updated card.
+
+    Per ADR-012 the modal Save is atomic per click — one PATCH carries
+    all dirty fields. ``needs_review`` is fully derived from
+    ``rates.resolve``; the body has no toggle for it.
+    """
+    try:
+        return apply_edit(conn, txn_id=txn_id, req=req)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------
