@@ -16,7 +16,7 @@ Nothing is deleted from history — git keeps it all.
 `docs/architecture/`, and any plan/prompt docs that are finished (including
 `docs/plans/revival/` itself once its README shows all ✅ — else leave it).
 Add `docs/archive/README.md`: one paragraph — "historical process docs,
-reference only, superseded by CLAUDE.md invariants on <date>".
+reference only, superseded by CLAUDE.md invariants on {date}".
 
 ### B. New 1-page CLAUDE.md (versioned!)
 
@@ -46,10 +46,10 @@ reference only, superseded by CLAUDE.md invariants on <date>".
 
 ### C. Cruft removal (list everything first, then act)
 
-- Stale git worktrees: `git worktree list` → remove stale ones
-  (`git worktree remove --force` only after showing the list in the session
-  and confirming they hold no unique uncommitted work — check with
-  `git -C <wt> status`).
+- Stale git worktrees: already cleaned 2026-07-10 (3 agent worktrees, all
+  verified fully merged). Just confirm `git worktree list` shows only the
+  main worktree; if new ones appeared, remove them the same way (verify
+  merged + no uncommitted work first).
 - Stray DB copies at repo root (`finances.db.bak-*`, old backups >30 days) —
   list, then delete.
 - `pandas` appears unused: verify `grep -rn "import pandas\|from pandas" finances/ tests/`
