@@ -188,35 +188,37 @@ def mocked_http() -> Iterator[responses.RequestsMock]:
 
 @pytest.fixture
 def mocked_binance_sdk() -> MagicMock:
-    """``MagicMock`` shaped like the ``binance.Client`` surface Wave-2 ingest uses.
+    """``MagicMock`` spec'd against the real ``binance.spot.Spot`` client.
 
-    The mock pre-stubs the methods that EPIC-007 / EPIC-008 are expected to
-    call (spot account snapshot, recent trades, C2C fills, flexible earn
-    positions, etc.) so individual tests can just patch return values via
-    ``mocked_binance_sdk.my_trades.return_value = [...]`` without having to
-    wire up a ``spec=Client`` first. Returning empty lists by default keeps
-    "no-op" tests honest — the SDK was consulted, found nothing, and the
-    ingester is free to short-circuit.
+    ``spec=Spot`` means configuring or calling a method that does not exist
+    on the installed SDK raises ``AttributeError`` immediately — this is what
+    catches SDK method renames that a bare ``MagicMock`` silently absorbs
+    (regression: ``simple_earn_flexible_rewards_history`` never existed on
+    binance-connector 3.12; the real name is ``get_flexible_rewards_history``).
+    Tests patch return values via
+    ``mocked_binance_sdk.my_trades.return_value = [...]``. Returning empty
+    lists by default keeps "no-op" tests honest — the SDK was consulted,
+    found nothing, and the ingester is free to short-circuit.
 
     Per rule-011: **mock at the SDK boundary, not at our ingest helpers.**
     Tests should inject this mock at the adapter seam (e.g. by passing it to
     the ingest function or by patching ``binance.Client`` at module level),
     not at internal parsing utilities.
     """
-    client = MagicMock(name="binance.Client")
+    from binance.spot import Spot
+
+    client = MagicMock(name="binance.Spot", spec=Spot)
     # Spot / funding snapshots.
-    client.spot_account.return_value = {"balances": []}
+    client.account.return_value = {"balances": []}
     client.funding_wallet.return_value = []
     # Trade history endpoints.
     client.my_trades.return_value = []
-    client.get_my_trades.return_value = []
     # C2C / P2P fills.
-    client.c2c_order_history.return_value = {"data": [], "total": 0}
     client.c2c_trade_history.return_value = {"data": [], "total": 0}
     # Simple Earn (flexible + locked).
-    client.simple_earn_flexible_position.return_value = {"rows": [], "total": 0}
-    client.simple_earn_locked_position.return_value = {"rows": [], "total": 0}
-    client.simple_earn_flexible_rewards_history.return_value = {"rows": [], "total": 0}
+    client.get_flexible_product_position.return_value = {"rows": [], "total": 0}
+    client.get_locked_product_position.return_value = {"rows": [], "total": 0}
+    client.get_flexible_rewards_history.return_value = {"rows": [], "total": 0}
     # Deposits / withdrawals.
     client.deposit_history.return_value = []
     client.withdraw_history.return_value = []

@@ -194,7 +194,9 @@ def _build_binance_client() -> MagicMock:
     tests — so the integration run rejects the same bad shapes that the
     unit tests do.
     """
-    client = MagicMock(name="binance.Client")
+    from binance.spot import Spot
+
+    client = MagicMock(name="binance.Spot", spec=Spot)
     # Server time well after the fixture timestamps.
     client.time.return_value = {"serverTime": 1773600000000}
 
@@ -222,10 +224,13 @@ def _build_binance_client() -> MagicMock:
     client.get_convert_trade_history.return_value = _read_json(
         _BINANCE_DIR / "converts.json"
     )
-    client.simple_earn_flexible_rewards_history.return_value = _read_json(
-        _BINANCE_DIR / "earn_rewards.json"
-    )
-    client.simple_earn_flexible_position.return_value = _read_json(
+    earn_rewards = _read_json(_BINANCE_DIR / "earn_rewards.json")
+
+    def _rewards_side_effect(*_args: Any, type: str, **_kwargs: Any) -> Any:
+        return earn_rewards if type == "BONUS" else {"rows": [], "total": 0}
+
+    client.get_flexible_rewards_history.side_effect = _rewards_side_effect
+    client.get_flexible_product_position.return_value = _read_json(
         _BINANCE_DIR / "earn_positions.json"
     )
     client.pay_history.return_value = _read_json(_BINANCE_DIR / "pay.json")

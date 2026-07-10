@@ -6,7 +6,7 @@ model, and writes canonical :class:`Transaction` rows via
 ``source_ref`` (ADR-010). Funding↔Spot internal transfers emit a paired row via
 ``domain.transfers.create_transfer``. Earn rewards become ``Interest`` income on
 the Binance Earn account and the ``earn_positions`` table is refreshed from
-``simple_earn_flexible_position``.
+``get_flexible_product_position``.
 
 Per ADR-002 amendment: P2P sells do **not** create a bank-side leg here — the
 bank is the pairing anchor and that job lives in ``finances/ingest/provincial.py``.
@@ -182,7 +182,8 @@ class RawBinanceP2pRow(_RawBase):
 
 
 class RawBinanceConvertRow(_RawBase):
-    tranId: str
+    # Real /sapi/v1/convert/tradeFlow rows carry orderId/quoteId, not tranId.
+    orderId: str
     fromAsset: str
     fromAmount: Decimal
     toAsset: str
@@ -194,11 +195,16 @@ class RawBinanceConvertRow(_RawBase):
     def _dec(cls, v: Any) -> Decimal:
         return _coerce_decimal(v)
 
+    @field_validator("orderId", mode="before")
+    @classmethod
+    def _str_id(cls, v: Any) -> str:
+        return str(v)
+
     def to_transactions(self, *, spot_account_id: int) -> list[Transaction]:
         occurred_at = _from_ms(self.createTime)
         description = (
             f"Convert {format(self.fromAmount, 'f')} {self.fromAsset.upper()} → "
-            f"{format(self.toAmount, 'f')} {self.toAsset.upper()} (tran {self.tranId})"
+            f"{format(self.toAmount, 'f')} {self.toAsset.upper()} (order {self.orderId})"
         )
         from_leg = Transaction(
             account_id=spot_account_id,
@@ -208,7 +214,7 @@ class RawBinanceConvertRow(_RawBase):
             currency=self.fromAsset.upper(),
             description=description,
             source=SOURCE,
-            source_ref=f"convert:{self.tranId}:from",
+            source_ref=f"convert:{self.orderId}:from",
         )
         to_leg = Transaction(
             account_id=spot_account_id,
@@ -218,7 +224,7 @@ class RawBinanceConvertRow(_RawBase):
             currency=self.toAsset.upper(),
             description=description,
             source=SOURCE,
-            source_ref=f"convert:{self.tranId}:to",
+            source_ref=f"convert:{self.orderId}:to",
         )
         return [from_leg, to_leg]
 
@@ -343,6 +349,26 @@ def _resolve_accounts(conn: sqlite3.Connection) -> dict[str, int]:
 def _interest_category_id(conn: sqlite3.Connection) -> int | None:
     cat = categories_repo.get_by_name(conn, TransactionKind.INCOME, "Interest")
     return cat.id if cat is not None else None
+
+
+_MAX_WINDOW_DAYS = 29
+_MAX_WINDOW_MS = _MAX_WINDOW_DAYS * 24 * 60 * 60 * 1000
+
+
+def _window_chunks(start_ms: int, end_ms: int) -> list[tuple[int, int]]:
+    """Split ``[start_ms, end_ms]`` into windows of at most 29 days.
+
+    Binance sapi history endpoints cap query ranges at 30 days and either
+    reject longer ones (-6021 "Query time range too large") or silently
+    truncate. Overlap at chunk boundaries is harmless — dedup via
+    ``UNIQUE(source, source_ref)`` absorbs it.
+    """
+    chunks: list[tuple[int, int]] = []
+    cursor = start_ms
+    while cursor < end_ms:
+        chunks.append((cursor, min(cursor + _MAX_WINDOW_MS, end_ms)))
+        cursor += _MAX_WINDOW_MS
+    return chunks or [(start_ms, end_ms)]
 
 
 def _resolve_time_window(
@@ -478,6 +504,9 @@ def _ingest_converts(
         client.get_convert_trade_history(startTime=start_ms, endTime=end_ms)
     )
     for item in raw:
+        status = item.get("orderStatus") if isinstance(item, dict) else None
+        if status is not None and status != "SUCCESS":
+            continue
         try:
             row = RawBinanceConvertRow.model_validate(item)
         except Exception as exc:  # noqa: BLE001
@@ -540,6 +569,38 @@ def _ingest_internal_transfers(
             stats["rows_inserted"] += 2
 
 
+_REWARDS_PAGE_SIZE = 100
+
+
+def _fetch_rewards_pages(
+    client: Any, *, reward_type: str, start_ms: int, end_ms: int
+) -> list[dict[str, Any]]:
+    """Fetch ALL pages of flexible-rewards history for one reward type.
+
+    The endpoint defaults to 10 rows/page (max 100) and reports the full
+    count in ``total``; without paging, daily REALTIME rewards silently
+    truncate at the first page.
+    """
+    rows: list[dict[str, Any]] = []
+    current = 1
+    while True:
+        response = client.get_flexible_rewards_history(
+            type=reward_type,
+            startTime=start_ms,
+            endTime=end_ms,
+            current=current,
+            size=_REWARDS_PAGE_SIZE,
+        )
+        page = _unpack_rows(response)
+        rows.extend(page)
+        total = response.get("total") if isinstance(response, dict) else None
+        if not page or len(page) < _REWARDS_PAGE_SIZE:
+            return rows
+        if isinstance(total, int) and len(rows) >= total:
+            return rows
+        current += 1
+
+
 def _ingest_earn_rewards(
     conn: sqlite3.Connection,
     client: Any,
@@ -551,11 +612,20 @@ def _ingest_earn_rewards(
     stats: dict[str, int],
     errors: list[str],
 ) -> None:
-    raw = _unpack_rows(
-        client.simple_earn_flexible_rewards_history(
-            startTime=start_ms, endTime=end_ms
-        )
-    )
+    raw: list[Any] = []
+    # The rewards endpoint requires `type`; the three streams are disjoint.
+    for reward_type in ("REALTIME", "BONUS", "REWARDS"):
+        try:
+            raw.extend(
+                _fetch_rewards_pages(
+                    client,
+                    reward_type=reward_type,
+                    start_ms=start_ms,
+                    end_ms=end_ms,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"earn-reward[{reward_type}]: {exc}")
     for item in raw:
         try:
             row = RawBinanceEarnRewardRow.model_validate(item)
@@ -609,16 +679,25 @@ def _ingest_earn_positions(
     snapshot_at: datetime,
     errors: list[str],
 ) -> dict[str, int]:
-    raw = _unpack_rows(client.simple_earn_flexible_position())
+    try:
+        raw = _unpack_rows(client.get_flexible_product_position(size=100))
+    except Exception as exc:  # noqa: BLE001
+        # Do NOT refresh on a failed fetch: an empty snapshot would wrongly
+        # close every open position.
+        errors.append(f"earn-position: {exc}")
+        return {"inserted": 0, "closed": 0, "unchanged": 0}
     snapshot: list[EarnSnapshotRow] = []
     for item in raw:
         try:
+            # Real positions carry latestAnnualPercentageRate; 'apr' kept as
+            # fallback for older payload shapes.
+            apr_raw = item.get("latestAnnualPercentageRate", item.get("apr"))
             snapshot.append(
                 EarnSnapshotRow(
                     product_id=str(item["productId"]),
                     asset=str(item["asset"]),
                     principal=_coerce_decimal(item.get("totalAmount", item.get("amount", "0"))),
-                    apy=_coerce_decimal(item["apr"]) if item.get("apr") is not None else None,
+                    apy=_coerce_decimal(apr_raw) if apr_raw is not None else None,
                 )
             )
         except Exception as exc:  # noqa: BLE001
@@ -637,6 +716,7 @@ def sync_binance(
     client: Any,
     since: datetime | None = None,
     lookback_days: int = DEFAULT_LOOKBACK_DAYS,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     """Pull every configured Binance endpoint, upsert into the ledger.
 
@@ -647,8 +727,13 @@ def sync_binance(
     a ``status='success'`` row on the happy path (with ``rows_inserted`` /
     ``rows_updated`` counts), or a ``status='error'`` row carrying a brief
     error summary and re-raising the exception on failure.
+
+    When ``dry_run=True``, the function performs the same fetch/parse/upsert
+    pipeline (so ``rows_inserted`` accurately reflects what *would* be written),
+    but the surrounding transaction is rolled back and no rows are written to
+    ``transactions``, ``earn_positions``, ``import_runs``, or ``import_state``.
     """
-    run_id = import_state_repo.start_run(conn, SOURCE)
+    run_id = None if dry_run else import_state_repo.start_run(conn, SOURCE)
     try:
         account_ids = _resolve_accounts(conn)
         interest_id = _interest_category_id(conn)
@@ -663,51 +748,70 @@ def sync_binance(
         spot_id = account_ids[_SPOT_ACCOUNT_NAME]
         earn_id = account_ids[_EARN_ACCOUNT_NAME]
 
-        _ingest_deposits(
-            conn, client, start_ms=start_ms, end_ms=end_ms, spot_id=spot_id,
-            stats=stats, errors=errors,
-        )
-        _ingest_withdrawals(
-            conn, client, start_ms=start_ms, end_ms=end_ms, spot_id=spot_id,
-            stats=stats, errors=errors,
-        )
-        _ingest_p2p(
-            conn, client, start_ms=start_ms, end_ms=end_ms, spot_id=spot_id,
-            stats=stats, errors=errors,
-        )
-        _ingest_converts(
-            conn, client, start_ms=start_ms, end_ms=end_ms, spot_id=spot_id,
-            stats=stats, errors=errors,
-        )
-        _ingest_internal_transfers(
-            conn, client, start_ms=start_ms, end_ms=end_ms, account_ids=account_ids,
-            stats=stats, errors=errors,
-        )
-        _ingest_earn_rewards(
-            conn, client, start_ms=start_ms, end_ms=end_ms, earn_id=earn_id,
-            interest_id=interest_id, stats=stats, errors=errors,
-        )
-        _ingest_pay(
-            conn, client, start_ms=start_ms, end_ms=end_ms, spot_id=spot_id,
-            stats=stats, errors=errors,
-        )
+        conn.execute("BEGIN")
+        try:
+            for chunk_start, chunk_end in _window_chunks(start_ms, end_ms):
+                _ingest_deposits(
+                    conn, client, start_ms=chunk_start, end_ms=chunk_end,
+                    spot_id=spot_id, stats=stats, errors=errors,
+                )
+                _ingest_withdrawals(
+                    conn, client, start_ms=chunk_start, end_ms=chunk_end,
+                    spot_id=spot_id, stats=stats, errors=errors,
+                )
+                _ingest_p2p(
+                    conn, client, start_ms=chunk_start, end_ms=chunk_end,
+                    spot_id=spot_id, stats=stats, errors=errors,
+                )
+                _ingest_converts(
+                    conn, client, start_ms=chunk_start, end_ms=chunk_end,
+                    spot_id=spot_id, stats=stats, errors=errors,
+                )
+                _ingest_internal_transfers(
+                    conn, client, start_ms=chunk_start, end_ms=chunk_end,
+                    account_ids=account_ids, stats=stats, errors=errors,
+                )
+                _ingest_earn_rewards(
+                    conn, client, start_ms=chunk_start, end_ms=chunk_end,
+                    earn_id=earn_id, interest_id=interest_id, stats=stats,
+                    errors=errors,
+                )
+                _ingest_pay(
+                    conn, client, start_ms=chunk_start, end_ms=chunk_end,
+                    spot_id=spot_id, stats=stats, errors=errors,
+                )
 
-        snapshot_at = datetime.now(tz=UTC)
-        earn_stats = _ingest_earn_positions(
-            conn, client, earn_id=earn_id, snapshot_at=snapshot_at, errors=errors,
-        )
+            snapshot_at = datetime.now(tz=UTC)
+            earn_stats = _ingest_earn_positions(
+                conn, client, earn_id=earn_id, snapshot_at=snapshot_at, errors=errors,
+            )
 
-        import_state_repo.upsert_state(
-            conn, source=SOURCE, last_synced_at=snapshot_at
-        )
+            if dry_run:
+                conn.execute("ROLLBACK")
+            else:
+                conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
 
-        import_state_repo.finish_run(
-            conn,
-            run_id,
-            status="success",
-            rows_inserted=stats["rows_inserted"],
-            rows_updated=stats["rows_updated"],
-        )
+        if not dry_run:
+            if not errors:
+                # Only advance the sync watermark on a fully clean run. A
+                # swallowed endpoint failure would otherwise move
+                # last_synced_at past a window that was never ingested —
+                # re-running must re-cover it (dedup makes that free).
+                import_state_repo.upsert_state(
+                    conn, source=SOURCE, last_synced_at=snapshot_at
+                )
+
+            import_state_repo.finish_run(
+                conn,
+                run_id,
+                status="success" if not errors else "error",
+                rows_inserted=stats["rows_inserted"],
+                rows_updated=stats["rows_updated"],
+                error="; ".join(errors)[:4000] if errors else None,
+            )
 
         return {
             **stats,
@@ -717,10 +821,11 @@ def sync_binance(
             "end_ms": end_ms,
         }
     except Exception as exc:
-        error_msg = f"{type(exc).__name__}: {exc}"[:4000]
-        import_state_repo.finish_run(
-            conn, run_id, status="error", error=error_msg
-        )
+        if not dry_run:
+            error_msg = f"{type(exc).__name__}: {exc}"[:4000]
+            import_state_repo.finish_run(
+                conn, run_id, status="error", error=error_msg
+            )
         raise
 
 

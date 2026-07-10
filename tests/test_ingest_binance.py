@@ -185,7 +185,7 @@ def test_p2p_buy_row_emits_income() -> None:
 
 def test_convert_row_emits_both_legs() -> None:
     row = RawBinanceConvertRow(
-        tranId="T-1",
+        orderId="T-1",
         fromAsset="USDT",
         fromAmount="100.00",
         toAsset="BTC",
@@ -203,6 +203,32 @@ def test_convert_row_emits_both_legs() -> None:
     assert to_leg.amount == Decimal("0.0015")
     assert to_leg.currency == "BTC"
     assert to_leg.source_ref == "convert:T-1:to"
+
+
+def test_convert_row_parses_real_trade_flow_shape() -> None:
+    """Real /sapi/v1/convert/tradeFlow rows: orderId (int) + quoteId, no tranId.
+
+    Regression: model originally required a ``tranId`` field that the live
+    API never sends.
+    """
+    row = RawBinanceConvertRow.model_validate(
+        {
+            "quoteId": "f63ade9e22bd4d33",
+            "orderId": 940708407462087195,
+            "orderStatus": "SUCCESS",
+            "fromAsset": "USDT",
+            "fromAmount": "20",
+            "toAsset": "BNB",
+            "toAmount": "0.06154036",
+            "ratio": "0.00307702",
+            "inverseRatio": "324.99",
+            "createTime": 1_699_100_000_000,
+            "walletType": "SPOT",
+        }
+    )
+    legs = row.to_transactions(spot_account_id=1)
+    assert legs[0].source_ref == "convert:940708407462087195:from"
+    assert legs[1].source_ref == "convert:940708407462087195:to"
 
 
 # ---------------------------------------------------------------------------
@@ -328,7 +354,9 @@ def _configure_sdk_with_sample_data(
     mocked_binance_sdk.get_convert_trade_history.return_value = {
         "list": [
             {
-                "tranId": "CONV-1",
+                "orderId": 940700000000000001,
+                "quoteId": "q-conv-1",
+                "orderStatus": "SUCCESS",
                 "fromAsset": "USDT",
                 "fromAmount": "30.00",
                 "toAsset": "BTC",
@@ -349,18 +377,23 @@ def _configure_sdk_with_sample_data(
         ],
         "total": 1,
     }
-    mocked_binance_sdk.simple_earn_flexible_rewards_history.return_value = {
-        "rows": [
-            {
-                "asset": "USDT",
-                "rewards": "0.0123",
-                "time": 1_699_300_000_000,
-                "type": "BONUS",
-                "projectId": "PROJ-A",
-            },
-        ],
-        "total": 1,
-    }
+    def _rewards_history(*_args: Any, type: str, **_kwargs: Any) -> dict[str, Any]:
+        if type != "BONUS":
+            return {"rows": [], "total": 0}
+        return {
+            "rows": [
+                {
+                    "asset": "USDT",
+                    "rewards": "0.0123",
+                    "time": 1_699_300_000_000,
+                    "type": "BONUS",
+                    "projectId": "PROJ-A",
+                },
+            ],
+            "total": 1,
+        }
+
+    mocked_binance_sdk.get_flexible_rewards_history.side_effect = _rewards_history
     mocked_binance_sdk.pay_history.return_value = {
         "data": [
             {
@@ -372,9 +405,14 @@ def _configure_sdk_with_sample_data(
             },
         ]
     }
-    mocked_binance_sdk.simple_earn_flexible_position.return_value = {
+    mocked_binance_sdk.get_flexible_product_position.return_value = {
         "rows": [
-            {"productId": "USDT001", "asset": "USDT", "totalAmount": "500.00", "apr": "0.05"},
+            {
+                "productId": "USDT001",
+                "asset": "USDT",
+                "totalAmount": "500.00",
+                "latestAnnualPercentageRate": "0.05",
+            },
         ],
         "total": 1,
     }
@@ -445,18 +483,23 @@ def test_sync_binance_earn_rewards_become_interest_income_on_earn_account(
     )
     assert interest is not None
     mocked_binance_sdk.time.return_value = {"serverTime": 1_700_000_000_000}
-    mocked_binance_sdk.simple_earn_flexible_rewards_history.return_value = {
-        "rows": [
-            {
-                "asset": "USDT",
-                "rewards": "0.50",
-                "time": 1_699_300_000_000,
-                "type": "BONUS",
-                "projectId": "PROJ-A",
-            },
-        ],
-        "total": 1,
-    }
+    def _rewards_history(*_args: Any, type: str, **_kwargs: Any) -> dict[str, Any]:
+        if type != "BONUS":
+            return {"rows": [], "total": 0}
+        return {
+            "rows": [
+                {
+                    "asset": "USDT",
+                    "rewards": "0.50",
+                    "time": 1_699_300_000_000,
+                    "type": "BONUS",
+                    "projectId": "PROJ-A",
+                },
+            ],
+            "total": 1,
+        }
+
+    mocked_binance_sdk.get_flexible_rewards_history.side_effect = _rewards_history
 
     sync_binance(in_memory_db, client=mocked_binance_sdk, lookback_days=35)
 
@@ -474,10 +517,20 @@ def test_sync_binance_refreshes_earn_positions_from_snapshot(
 ) -> None:
     acct_ids = _seed_binance_accounts(in_memory_db)
     mocked_binance_sdk.time.return_value = {"serverTime": 1_700_000_000_000}
-    mocked_binance_sdk.simple_earn_flexible_position.return_value = {
+    mocked_binance_sdk.get_flexible_product_position.return_value = {
         "rows": [
-            {"productId": "USDT001", "asset": "USDT", "totalAmount": "500.00", "apr": "0.05"},
-            {"productId": "BTC001", "asset": "BTC", "totalAmount": "0.1", "apr": "0.03"},
+            {
+                "productId": "USDT001",
+                "asset": "USDT",
+                "totalAmount": "500.00",
+                "latestAnnualPercentageRate": "0.05",
+            },
+            {
+                "productId": "BTC001",
+                "asset": "BTC",
+                "totalAmount": "0.1",
+                "latestAnnualPercentageRate": "0.03",
+            },
         ],
         "total": 2,
     }
@@ -486,6 +539,62 @@ def test_sync_binance_refreshes_earn_positions_from_snapshot(
         in_memory_db, account_id=acct_ids["Binance Earn"]
     )
     assert {p.product_id for p in open_positions} == {"USDT001", "BTC001"}
+    # Regression: real payloads carry latestAnnualPercentageRate, not 'apr' —
+    # apy must round-trip, not silently store NULL.
+    assert {p.product_id: p.apy for p in open_positions} == {
+        "USDT001": Decimal("0.05"),
+        "BTC001": Decimal("0.03"),
+    }
+
+
+def test_sync_binance_earn_position_fetch_failure_keeps_positions(
+    in_memory_db: sqlite3.Connection,
+    mocked_binance_sdk: MagicMock,
+) -> None:
+    """API failure on the position fetch must NOT touch open positions —
+    refreshing from an empty snapshot would close every one of them."""
+    acct_ids = _seed_binance_accounts(in_memory_db)
+    mocked_binance_sdk.time.return_value = {"serverTime": 1_700_000_000_000}
+    mocked_binance_sdk.get_flexible_product_position.return_value = {
+        "rows": [
+            {
+                "productId": "USDT001",
+                "asset": "USDT",
+                "totalAmount": "500.00",
+                "latestAnnualPercentageRate": "0.05",
+            },
+        ],
+        "total": 1,
+    }
+    sync_binance(in_memory_db, client=mocked_binance_sdk, lookback_days=35)
+
+    mocked_binance_sdk.get_flexible_product_position.side_effect = RuntimeError(
+        "boom 451"
+    )
+    result = sync_binance(in_memory_db, client=mocked_binance_sdk, lookback_days=35)
+
+    open_positions = positions_repo.list_open(
+        in_memory_db, account_id=acct_ids["Binance Earn"]
+    )
+    assert {p.product_id for p in open_positions} == {"USDT001"}
+    assert result["earn_positions"] == {"inserted": 0, "closed": 0, "unchanged": 0}
+    assert any("earn-position" in e for e in result["errors"])
+
+
+def test_sync_binance_endpoint_error_does_not_advance_watermark(
+    in_memory_db: sqlite3.Connection,
+    mocked_binance_sdk: MagicMock,
+) -> None:
+    """A swallowed endpoint failure must not move last_synced_at — otherwise
+    the failed window is silently skipped forever on the next run."""
+    _seed_binance_accounts(in_memory_db)
+    mocked_binance_sdk.time.return_value = {"serverTime": 1_700_000_000_000}
+    mocked_binance_sdk.pay_history.side_effect = RuntimeError("transient 429")
+
+    result = sync_binance(in_memory_db, client=mocked_binance_sdk, lookback_days=35)
+
+    assert result["errors"], "expected the pay failure to be reported"
+    assert import_state_repo.get_state(in_memory_db, "binance") is None
 
 
 def test_sync_binance_records_import_state_last_synced_at(
@@ -593,3 +702,214 @@ def test_cli_ingest_binance_invokes_sync(
     runner = CliRunner()
     result = runner.invoke(app, ["ingest", "binance", "--lookback-days", "7"])
     assert result.exit_code == 0, result.stdout
+
+
+def test_window_chunks_split_at_29_days() -> None:
+    """Binance sapi endpoints reject ranges >30 days (-6021). An 81-day
+    window must become 3 chunks of <=29 days covering the full range."""
+    from finances.ingest.binance import _MAX_WINDOW_MS, _window_chunks
+
+    day_ms = 24 * 60 * 60 * 1000
+    start = 1_700_000_000_000
+    end = start + 81 * day_ms
+
+    chunks = _window_chunks(start, end)
+
+    assert len(chunks) == 3
+    assert chunks[0][0] == start
+    assert chunks[-1][1] == end
+    for s, e in chunks:
+        assert e - s <= _MAX_WINDOW_MS
+    # Contiguous: no gap between consecutive chunks.
+    for (_, prev_end), (next_start, _) in zip(chunks, chunks[1:]):
+        assert next_start == prev_end
+
+    # Degenerate/small windows stay a single chunk.
+    assert _window_chunks(start, start) == [(start, start)]
+    assert _window_chunks(start, start + day_ms) == [(start, start + day_ms)]
+
+
+def test_sync_binance_chunks_large_windows_per_endpoint(
+    in_memory_db: sqlite3.Connection,
+    mocked_binance_sdk: MagicMock,
+) -> None:
+    """A --since 81 days back must produce one call per <=29-day chunk on
+    every windowed endpoint, each window no larger than 30 days."""
+    _seed_binance_accounts(in_memory_db)
+    mocked_binance_sdk.time.return_value = {"serverTime": 1_700_000_000_000}
+
+    since = datetime.now(tz=UTC) - timedelta(days=81)
+    sync_binance(in_memory_db, client=mocked_binance_sdk, since=since)
+
+    day_ms = 24 * 60 * 60 * 1000
+    endpoints = {
+        "deposit_history": ("startTime", "endTime"),
+        "c2c_trade_history": ("startTimestamp", "endTimestamp"),
+        "pay_history": ("startTime", "endTime"),
+    }
+    for endpoint, (start_key, end_key) in endpoints.items():
+        calls = getattr(mocked_binance_sdk, endpoint).call_args_list
+        assert len(calls) >= 3, f"{endpoint} not chunked: {len(calls)} calls"
+        for call in calls:
+            span = call.kwargs[end_key] - call.kwargs[start_key]
+            assert span <= 30 * day_ms, f"{endpoint} window too large: {span}"
+
+    # All three disjoint reward streams must be queried — REALTIME is the
+    # dominant daily-interest stream and must never be dropped silently.
+    reward_types = {
+        c.kwargs["type"]
+        for c in mocked_binance_sdk.get_flexible_rewards_history.call_args_list
+    }
+    assert reward_types == {"REALTIME", "BONUS", "REWARDS"}
+
+
+def test_fetch_rewards_pages_paginates_past_first_page() -> None:
+    """Rewards history defaults to 10 rows/page (max 100) with the real count
+    in `total` — a 105-row window must yield 2 calls and all 105 rows."""
+    from binance.spot import Spot
+
+    from finances.ingest.binance import _fetch_rewards_pages
+
+    client = MagicMock(name="binance.Spot", spec=Spot)
+
+    def _paged(*_args: Any, current: int, size: int, **_kwargs: Any) -> dict[str, Any]:
+        assert size == 100
+        rows = [
+            {"asset": "USDT", "rewards": "0.01", "time": i, "type": "REALTIME"}
+            for i in range((current - 1) * 100, min(current * 100, 105))
+        ]
+        return {"rows": rows, "total": 105}
+
+    client.get_flexible_rewards_history.side_effect = _paged
+
+    rows = _fetch_rewards_pages(
+        client, reward_type="REALTIME", start_ms=0, end_ms=1_000_000
+    )
+
+    assert len(rows) == 105
+    assert client.get_flexible_rewards_history.call_count == 2
+    currents = [
+        c.kwargs["current"]
+        for c in client.get_flexible_rewards_history.call_args_list
+    ]
+    assert currents == [1, 2]
+
+
+def test_cli_ingest_binance_naive_since_interpreted_as_caracas(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """`--since 2026-04-19` arrives tz-naive from Typer; the CLI must localize
+    it to America/Caracas instead of letting sync_binance reject it
+    (regression: ValueError '--since must be timezone-aware')."""
+    from finances.config import CARACAS_TZ
+
+    monkeypatch.setattr("finances.cli.main.DB_PATH", tmp_path / "cli.db")
+    monkeypatch.setattr(
+        "finances.cli.main._make_binance_client", lambda: MagicMock()
+    )
+
+    captured: dict[str, Any] = {}
+
+    def fake_sync(conn, *, client, since, lookback_days, dry_run):
+        captured["since"] = since
+        return {
+            "rows_inserted": 0,
+            "rows_updated": 0,
+            "earn_positions": 0,
+            "errors": [],
+        }
+
+    monkeypatch.setattr("finances.ingest.binance.sync_binance", fake_sync)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app, ["ingest", "binance", "--since", "2026-04-19", "--dry-run"]
+    )
+    assert result.exit_code == 0, result.stdout
+    assert captured["since"] == datetime(2026, 4, 19, tzinfo=CARACAS_TZ)
+
+
+# ---------------------------------------------------------------------------
+# dry_run flag — no DB writes, no provenance, return shape preserved
+# ---------------------------------------------------------------------------
+
+def test_sync_binance_dry_run_persists_nothing(
+    in_memory_db: sqlite3.Connection,
+    mocked_binance_sdk: MagicMock,
+) -> None:
+    """dry_run=True executes the full pipeline but rolls back every write.
+
+    Returned shape is the same as the real run; ``rows_inserted`` counts what
+    *would* be inserted. ``transactions``, ``import_runs``, ``import_state``,
+    and ``earn_positions`` all remain untouched.
+    """
+    _seed_binance_accounts(in_memory_db)
+    _configure_sdk_with_sample_data(mocked_binance_sdk)
+
+    result = sync_binance(
+        in_memory_db, client=mocked_binance_sdk, lookback_days=35, dry_run=True
+    )
+
+    assert result["rows_inserted"] > 0, "dry-run should report would-be inserts"
+
+    txn_count = in_memory_db.execute(
+        "SELECT COUNT(*) FROM transactions WHERE source='binance'"
+    ).fetchone()[0]
+    assert txn_count == 0, "dry-run must not persist transactions"
+
+    runs_count = in_memory_db.execute(
+        "SELECT COUNT(*) FROM import_runs WHERE source='binance'"
+    ).fetchone()[0]
+    assert runs_count == 0, "dry-run must not persist import_runs rows"
+
+    state_count = in_memory_db.execute(
+        "SELECT COUNT(*) FROM import_state WHERE source='binance'"
+    ).fetchone()[0]
+    assert state_count == 0, "dry-run must not persist import_state rows"
+
+    earn_count = in_memory_db.execute(
+        "SELECT COUNT(*) FROM earn_positions"
+    ).fetchone()[0]
+    assert earn_count == 0, "dry-run must not persist earn_positions rows"
+
+
+def test_sync_binance_dry_run_after_real_run_does_not_double_count(
+    in_memory_db: sqlite3.Connection,
+    mocked_binance_sdk: MagicMock,
+) -> None:
+    """A real run followed by dry_run reports zero would-be inserts (idempotent)
+    and leaves the existing real-run rows intact."""
+    _seed_binance_accounts(in_memory_db)
+    _configure_sdk_with_sample_data(mocked_binance_sdk)
+
+    real = sync_binance(in_memory_db, client=mocked_binance_sdk, lookback_days=35)
+    assert real["rows_inserted"] > 0
+    real_txn_count = in_memory_db.execute(
+        "SELECT COUNT(*) FROM transactions WHERE source='binance'"
+    ).fetchone()[0]
+    assert real_txn_count > 0
+    real_runs_count = in_memory_db.execute(
+        "SELECT COUNT(*) FROM import_runs WHERE source='binance'"
+    ).fetchone()[0]
+    assert real_runs_count == 1
+
+    dry = sync_binance(
+        in_memory_db, client=mocked_binance_sdk, lookback_days=35, dry_run=True
+    )
+    assert dry["rows_inserted"] == 0, (
+        "second pass against same SDK data is fully duplicate; dry-run "
+        "should report 0 would-be inserts"
+    )
+
+    txn_count_after = in_memory_db.execute(
+        "SELECT COUNT(*) FROM transactions WHERE source='binance'"
+    ).fetchone()[0]
+    assert txn_count_after == real_txn_count, (
+        "dry-run must not corrupt or remove real-run data"
+    )
+
+    runs_count_after = in_memory_db.execute(
+        "SELECT COUNT(*) FROM import_runs WHERE source='binance'"
+    ).fetchone()[0]
+    assert runs_count_after == 1, "only the real run should leave provenance"

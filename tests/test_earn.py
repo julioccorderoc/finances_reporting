@@ -1,6 +1,6 @@
 """Tests for finances/domain/earn.py — Earn position snapshot reconciliation.
 
-EPIC-007 / ADR-003: every Binance sync pulls `simple_earn_flexible_position` and
+EPIC-007 / ADR-003: every Binance sync pulls `get_flexible_product_position` and
 reconciles it against the `earn_positions` table. The domain module handles the
 snapshot diff; the ingest module just calls it with parsed rows.
 """

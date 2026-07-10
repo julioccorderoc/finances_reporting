@@ -5,7 +5,7 @@
       "productId": "INT-PROD-USDT-001",
       "asset": "USDT",
       "totalAmount": "1500.00",
-      "apr": "0.0475"
+      "latestAnnualPercentageRate": "0.0475"
     }
   ]
 }
