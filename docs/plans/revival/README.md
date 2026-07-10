@@ -21,7 +21,7 @@ check the gate yourself — every prompt ends with a pass/fail gate).
 | 2 | BCV rate-gap fill from tasas-bcv-july-9.html | [02-rate-gap.md](02-rate-gap.md) | ✅ 2026-07-10 (validated: 104 rows, spot-checks exact, idempotent) |
 | 3 | Provincial catch-up + triage | [03-provincial-catchup.md](03-provincial-catchup.md) | ✅ ingest done 2026-07-10 (327 rows, 17 P2P pairs, HTML-XLS support added); ⬜ Julio's triage of 386 needs_review rows pending |
 | 4 | `finances html` static report | [04-static-report.md](04-static-report.md) | ✅ 2026-07-10 (validated: offline, charts render, numbers match services, auto-regen wired) |
-| 5 | `finances update` + desktop launcher + offline CSS | [05-ux-launcher.md](05-ux-launcher.md) | ⬜ |
+| 5 | `finances update` + desktop launcher + offline CSS | [05-ux-launcher.md](05-ux-launcher.md) | ✅ 2026-07-10 (validated end-to-end; validation surfaced + fixed 2 ingest bugs: enrichment clobber, amount-scale hash) |
 | 6 | Ceremony teardown (archive docs, 1-page CLAUDE.md) | [06-ceremony-teardown.md](06-ceremony-teardown.md) | ⬜ run last |
 
 Order: 2 → 3 → 4 → 5 → 6. (2/3 are data, 4/5 are product, 6 is cleanup.)
