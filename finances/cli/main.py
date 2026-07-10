@@ -81,6 +81,34 @@ def _make_binance_client() -> Any:
     return Spot(api_key=api_key, api_secret=api_secret)
 
 
+@app.command("update")
+def update_cmd(
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run/--no-dry-run",
+        help="Thread dry-run through every step; fetch and validate but write nothing.",
+    ),
+) -> None:
+    """Run the weekly ritual — bcv, p2p, binance, provincial — then regen report.html."""
+    from finances import config as _config
+    from finances.reports.update import render_summary, run_update
+
+    conn = get_connection(DB_PATH)
+    apply_migrations(conn)
+    try:
+        report = run_update(
+            conn,
+            make_binance_client=_make_binance_client,
+            inputs_dir=_config.INPUTS_DIR,
+            report_path=_config.REPORT_HTML_PATH,
+            dry_run=dry_run,
+        )
+    finally:
+        conn.close()
+
+    typer.echo(render_summary(report))
+
+
 @ingest_app.command("binance")
 def ingest_binance(
     since: datetime | None = typer.Option(
