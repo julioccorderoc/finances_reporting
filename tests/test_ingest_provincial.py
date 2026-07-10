@@ -959,3 +959,76 @@ class TestSameDayDuplicateTransactions:
         again = ingest_csv(seeded_db, csv_path)
         assert again.rows_inserted == 0, "re-ingest must still dedup to zero"
         assert again.rows_updated == 2
+
+
+class TestSourceRefScaleInvariance:
+    """'-2', '-2.0' and '-2.00' are the same money. The bank writes '-2,00',
+    the old weekly CSV exports write '-2' — both must hash identically or
+    re-ingests duplicate rows (found live: 205 phantom 'new' rows)."""
+
+    def test_amount_scale_does_not_change_hash(self) -> None:
+        from finances.ingest.provincial import compute_source_ref
+
+        dt = datetime(2026, 1, 17, tzinfo=CARACAS_TZ)
+        refs = {
+            compute_source_ref(
+                occurred_at=dt, amount=Decimal(a), description="COM. PAGO MOV PB"
+            )
+            for a in ("-2", "-2.0", "-2.00")
+        }
+        assert len(refs) == 1
+
+    def test_two_decimal_amounts_keep_legacy_hash(self) -> None:
+        """Amounts already written with 2 decimals (the backfill + xls path
+        that produced every pre-existing DB row) must keep their old hash,
+        or the migration would orphan the whole ledger."""
+        from finances.ingest.provincial import compute_source_ref
+
+        dt = datetime(2026, 1, 17, tzinfo=CARACAS_TZ)
+        ref = compute_source_ref(
+            occurred_at=dt, amount=Decimal("-2.00"), description="COM. PAGO MOV PB"
+        )
+        assert ref == "hash:c8721e6dc55318b0"  # verified against live DB row
+
+
+class TestReingestPreservesEnrichment:
+    """Re-ingesting a raw statement must NEVER destroy triage work: category,
+    needs_review resolution, transfer pairing, user_rate live on the row but
+    come from the user/pairing pass, not from the statement. (Found live:
+    a re-ingest wiped 490 categories, 391 user_rates, broke 46 transfers.)"""
+
+    def test_reingest_keeps_category_pairing_and_rate(
+        self, tmp_path: Path, seeded_db: sqlite3.Connection
+    ) -> None:
+        from finances.ingest.provincial import ingest_csv
+
+        csv_path = _write_csv(
+            tmp_path,
+            [_HEADER, "05/05/2026;MERCADO CENTRAL;-500,00;9.500,00"],
+        )
+        ingest_csv(seeded_db, csv_path)
+        row_id, = seeded_db.execute(
+            "SELECT id FROM transactions WHERE description='MERCADO CENTRAL'"
+        ).fetchone()
+
+        # Simulate triage + pairing enrichment.
+        cat_id = seeded_db.execute("SELECT id FROM categories LIMIT 1").fetchone()[0]
+        seeded_db.execute(
+            "UPDATE transactions SET category_id=?, needs_review=0, "
+            "user_rate='36.5', kind='transfer', transfer_id='tr-keep' WHERE id=?",
+            (cat_id, row_id),
+        )
+        seeded_db.commit()
+
+        ingest_csv(seeded_db, csv_path)
+
+        cat, review, rate, kind, tid = seeded_db.execute(
+            "SELECT category_id, needs_review, user_rate, kind, transfer_id "
+            "FROM transactions WHERE id=?",
+            (row_id,),
+        ).fetchone()
+        assert cat == cat_id, "re-ingest wiped category"
+        assert review == 0, "re-ingest re-flagged a triaged row"
+        assert rate == Decimal("36.5"), "re-ingest wiped user_rate"
+        assert kind == "transfer", "re-ingest flipped a paired row's kind"
+        assert tid == "tr-keep", "re-ingest broke the transfer pairing"

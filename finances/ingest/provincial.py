@@ -121,7 +121,12 @@ def compute_source_ref(
     deduplicating. Statement row order is stable across bank re-exports,
     which keeps N deterministic.
     """
-    payload = f"{occurred_at.isoformat()}|{format(amount, 'f')}|{description}"
+    # Canonicalize textual scale: '-2', '-2.0' and '-2.00' are the same money
+    # but format(_, 'f') would hash them differently (bank xls writes '-2,00',
+    # older weekly CSV exports write '-2'). Two decimals matches how every
+    # pre-existing row was hashed, so legacy refs stay stable.
+    canonical = amount.quantize(Decimal("0.01"))
+    payload = f"{occurred_at.isoformat()}|{format(canonical, 'f')}|{description}"
     if occurrence:
         payload += f"|occ:{occurrence}"
     digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
