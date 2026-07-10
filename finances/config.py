@@ -10,6 +10,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = PROJECT_ROOT / "finances.db"
 OUTPUT_DIR = PROJECT_ROOT / "output"
 DATA_DIR = PROJECT_ROOT / "data"
+# EPIC "Thing 4": default destination for the single self-contained static
+# report file (`finances html`). Gitignored at repo root.
+REPORT_HTML_PATH = PROJECT_ROOT / "report.html"
 CARACAS_TZ = ZoneInfo("America/Caracas")
 
 # EPIC-007: default lookback window for Binance incremental sync (5 weeks of

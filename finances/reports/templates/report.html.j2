@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Finances — {{ ctx.generated_at.strftime('%Y-%m-%d') }}</title>
+  <style>
+    :root {
+      --bg: #f8fafc; --panel: #ffffff; --border: #e5e7eb;
+      --text: #0f172a; --muted: #64748b; --chip: #f1f5f9;
+      --accent: #0ea5e9; --pos: #16a34a; --neg: #dc2626;
+      --warn-bg: #fffbeb; --warn-border: #fbbf24; --warn-text: #92400e;
+      --alert-bg: #fff1f2; --alert-border: #f43f5e; --alert-text: #9f1239;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f172a; --panel: #1e293b; --border: #334155;
+        --text: #e2e8f0; --muted: #94a3b8; --chip: #334155;
+        --accent: #38bdf8; --pos: #4ade80; --neg: #f87171;
+        --warn-bg: #422006; --warn-border: #a16207; --warn-text: #fde68a;
+        --alert-bg: #4c0519; --alert-border: #e11d48; --alert-text: #fecdd3;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    .wrap { max-width: 64rem; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+    h1 { font-size: 1.1rem; margin: 0; font-weight: 600; }
+    h2 { font-size: 0.95rem; margin: 2rem 0 0.75rem; font-weight: 600; }
+    .muted { color: var(--muted); }
+    .panel {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 0.6rem; padding: 1rem;
+    }
+    .netfig { font-size: 2rem; font-weight: 700; letter-spacing: -0.02em; }
+    .pos { color: var(--pos); } .neg { color: var(--neg); }
+    .row-between { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; align-items: baseline; justify-content: space-between; }
+
+    /* Banners */
+    .banner {
+      margin-top: 1rem; padding: 0.6rem 0.9rem; border-radius: 0.5rem;
+      border: 1px solid var(--warn-border); background: var(--warn-bg); color: var(--warn-text);
+      font-size: 0.9rem;
+    }
+    .banner.alert { border-color: var(--alert-border); background: var(--alert-bg); color: var(--alert-text); }
+
+    /* Chips */
+    .chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+    .chip {
+      display: inline-flex; gap: 0.35rem; align-items: baseline;
+      padding: 0.2rem 0.55rem; border-radius: 999px;
+      background: var(--chip); font-size: 0.8rem;
+    }
+    .chip.stale { background: var(--warn-bg); color: var(--warn-text); border: 1px solid var(--warn-border); }
+
+    /* KPI tiles */
+    .kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.75rem; margin-top: 1rem; }
+    @media (max-width: 640px) { .kpis { grid-template-columns: 1fr; } }
+    .kpi .label { font-size: 0.8rem; color: var(--muted); }
+    .kpi .value { font-size: 1.4rem; font-weight: 600; margin-top: 0.15rem; }
+    .kpi.alert { border-color: var(--alert-border); background: var(--alert-bg); }
+    .kpi.alert .value { color: var(--alert-text); }
+
+    /* Account tiles */
+    .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 0.6rem; }
+    .tile { background: var(--panel); border: 1px solid var(--border); border-radius: 0.5rem; padding: 0.75rem 0.9rem; }
+    .tile .name { font-weight: 600; }
+    .tile .sub { font-size: 0.82rem; color: var(--muted); }
+    .tile .amt { font-size: 1.05rem; font-weight: 600; margin-top: 0.3rem; }
+
+    /* Two-column category breakdown */
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+    @media (max-width: 640px) { .two-col { grid-template-columns: 1fr; } }
+    .kv { display: flex; justify-content: space-between; gap: 0.5rem; padding: 0.3rem 0; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
+    .kv:last-child { border-bottom: 0; }
+    .kv .amt { font-variant-numeric: tabular-nums; }
+
+    /* Charts */
+    .chart-wrap { position: relative; height: 20rem; }
+    @media (max-width: 640px) { .chart-wrap { height: 15rem; } }
+
+    /* Card-row list (no HTML tables) — subgrid keeps columns aligned. */
+    .cards { display: grid; grid-template-columns: 7rem 8rem 1fr 9rem 8rem 5rem; gap: 0.4rem 0.6rem; margin-top: 0.5rem; }
+    @media (max-width: 900px) { .cards { grid-template-columns: 6rem 1fr 8rem; } }
+    @media (max-width: 640px) { .cards { display: block; } }
+    .card-row {
+      display: grid; grid-column: 1 / -1; grid-template-columns: subgrid;
+      align-items: baseline; padding: 0.45rem 0.6rem;
+      border: 1px solid var(--border); border-radius: 0.5rem; background: var(--panel);
+    }
+    @media (max-width: 640px) {
+      .card-row { display: flex; flex-direction: column; gap: 0.15rem; }
+    }
+    .card-row .date { color: var(--muted); font-size: 0.82rem; font-variant-numeric: tabular-nums; }
+    .card-row .desc { word-break: break-word; overflow-wrap: anywhere; }
+    .card-row .amt { text-align: right; font-variant-numeric: tabular-nums; }
+    @media (max-width: 640px) { .card-row .amt { text-align: left; } }
+    .card-row .usd { color: var(--muted); font-size: 0.8rem; }
+    .tag { display: inline-block; padding: 0.05rem 0.4rem; border-radius: 999px; background: var(--chip); font-size: 0.72rem; color: var(--muted); }
+    .dot-review { color: var(--warn-text); font-weight: 700; }
+    .bcv { color: var(--warn-text); font-size: 0.75rem; }
+    @media (max-width: 900px) { .hide-md { display: none; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+
+    <!-- 1. Header ------------------------------------------------------- -->
+    <header class="panel">
+      <div class="row-between">
+        <div>
+          <div class="muted" style="font-size:0.8rem;">Net worth (USDT headline)</div>
+          <div class="netfig {{ 'neg' if ctx.net_worth_usd < 0 else '' }}">{{ ctx.net_worth_usd | money }}</div>
+        </div>
+        <div class="muted" style="text-align:right; font-size:0.82rem;">
+          Generated {{ ctx.generated_at.strftime('%Y-%m-%d %H:%M') }}
+        </div>
+      </div>
+
+      {% if ctx.missing_pairs %}
+      <div class="banner">Missing rate for: {{ ctx.missing_pairs | join(', ') }} — those balances are excluded from net worth.</div>
+      {% endif %}
+
+      <h2 style="margin-top:1.2rem;">Data freshness</h2>
+      {% if ctx.stale_sources %}
+      <div class="banner">Stale &gt; {{ stale_days }} days: {{ ctx.stale_sources | join(', ') }}. The ritual is weekly — time to ingest.</div>
+      {% endif %}
+      <div class="chips" style="margin-top:0.6rem;">
+        {% for f in ctx.freshness %}
+        <span class="chip {{ 'stale' if f.stale else '' }}">
+          <strong>{{ f.source }}</strong>
+          <span>{% if f.last_txn_date %}{{ f.last_txn_date.isoformat() }} ({{ f.days_old }}d){% else %}never{% endif %}</span>
+        </span>
+        {% else %}
+        <span class="muted">No transactions yet.</span>
+        {% endfor %}
+      </div>
+    </header>
+
+    <!-- Per-account balances ------------------------------------------- -->
+    <h2>Accounts</h2>
+    <div class="tiles">
+      {% for a in ctx.accounts %}
+      <div class="tile">
+        <div class="name">{{ a.name }}</div>
+        <div class="sub">{{ a.balance_native }} {{ a.currency }}</div>
+        <div class="amt">{{ a.balance_usdt | money }}</div>
+      </div>
+      {% else %}
+      <div class="muted">No accounts.</div>
+      {% endfor %}
+    </div>
+
+    <!-- 2. Monthly income / expense / net ------------------------------ -->
+    <h2>Monthly income / expense / net — last 12 months</h2>
+    <div class="kpis">
+      <div class="kpi panel">
+        <div class="label">This month income</div>
+        <div class="value pos">{{ ctx.month_income_usd | money }}</div>
+      </div>
+      <div class="kpi panel">
+        <div class="label">This month spend</div>
+        <div class="value neg">{{ ctx.month_expense_usd | money }}</div>
+      </div>
+      {% set month_net = ctx.month_income_usd + ctx.month_expense_usd %}
+      <div class="kpi panel">
+        <div class="label">This month net</div>
+        <div class="value {{ 'neg' if month_net < 0 else 'pos' }}">{{ month_net | money }}</div>
+      </div>
+    </div>
+    <div class="panel" style="margin-top:0.75rem;">
+      <div class="chart-wrap"><canvas id="monthlyChart"></canvas></div>
+    </div>
+
+    <!-- 3. Category breakdown ------------------------------------------ -->
+    <h2>Category breakdown (expenses)</h2>
+    <div class="two-col">
+      <div class="panel">
+        <div class="row-between"><strong>{{ ctx.current_month }}</strong><span class="muted">current</span></div>
+        {% for c in ctx.category_current %}
+        <div class="kv"><span>{{ c.category }}</span><span class="amt">{{ c.total_usd | money }}</span></div>
+        {% else %}
+        <div class="muted" style="margin-top:0.5rem;">No expenses.</div>
+        {% endfor %}
+      </div>
+      <div class="panel">
+        <div class="row-between"><strong>{{ ctx.prev_month }}</strong><span class="muted">previous</span></div>
+        {% for c in ctx.category_prev %}
+        <div class="kv"><span>{{ c.category }}</span><span class="amt">{{ c.total_usd | money }}</span></div>
+        {% else %}
+        <div class="muted" style="margin-top:0.5rem;">No expenses.</div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- 4. Rate trend -------------------------------------------------- -->
+    <h2>Rate trend — BCV vs P2P, last {{ 90 }} days</h2>
+    <div class="panel">
+      <div class="chart-wrap"><canvas id="ratesChart"></canvas></div>
+    </div>
+
+    <!-- 5. Needs review + recent --------------------------------------- -->
+    <h2>Needs review</h2>
+    {% if ctx.needs_review_count > 0 %}
+    <div class="kpi panel alert" style="max-width:16rem;">
+      <div class="label">Transactions awaiting triage</div>
+      <div class="value">{{ ctx.needs_review_count }}</div>
+    </div>
+    {% else %}
+    <div class="panel muted">All clear — nothing needs review.</div>
+    {% endif %}
+
+    <h2>Recent transactions</h2>
+    <div class="cards">
+      {% for t in ctx.recent %}
+      <div class="card-row">
+        <span class="date">{{ t.occurred_at.strftime('%Y-%m-%d') }}</span>
+        <span class="tag hide-md">{{ t.account }}</span>
+        <span class="desc">{{ t.description or '(no description)' }}
+          {% if t.category %}<span class="tag">{{ t.category }}</span>{% endif %}
+        </span>
+        <span class="amt">
+          {{ t.amount_native }} {{ t.currency }}
+          <span class="usd">{{ t.amount_usd | money }}</span>
+        </span>
+        <span class="tag hide-md">{{ t.kind }}</span>
+        <span class="amt">
+          {% if t.needs_review %}<span class="dot-review" title="needs review">●</span>{% endif %}
+          {% if t.is_bcv_fallback %}<span class="bcv" title="BCV fallback rate">BCV</span>{% endif %}
+        </span>
+      </div>
+      {% else %}
+      <div class="muted">No recent transactions.</div>
+      {% endfor %}
+    </div>
+
+  </div>
+
+  <!-- Vendored Chart.js, inlined verbatim (license banners stripped). -->
+  <script>{{ chartjs_source | safe }}</script>
+  <script>
+    const REPORT_DATA = {{ chart_data_json | safe }};
+    (function () {
+      if (typeof Chart === "undefined") { return; }
+      const dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+      Chart.defaults.color = dark ? "#94a3b8" : "#64748b";
+      Chart.defaults.borderColor = dark ? "rgba(148,163,184,0.15)" : "rgba(100,116,139,0.15)";
+      const pos = dark ? "#4ade80" : "#16a34a";
+      const neg = dark ? "#f87171" : "#dc2626";
+      const accent = dark ? "#38bdf8" : "#0ea5e9";
+      const bcv = dark ? "#fbbf24" : "#b45309";
+
+      const m = REPORT_DATA.monthly;
+      const mc = document.getElementById("monthlyChart");
+      if (mc && m && m.labels.length) {
+        new Chart(mc, {
+          type: "bar",
+          data: {
+            labels: m.labels,
+            datasets: [
+              { label: "Income", data: m.income, backgroundColor: pos },
+              { label: "Expense", data: m.expense, backgroundColor: neg },
+              { label: "Net", data: m.net, type: "line", borderColor: accent, backgroundColor: accent, tension: 0.25, fill: false }
+            ]
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            scales: { y: { beginAtZero: true } },
+            plugins: { legend: { position: "bottom" } }
+          }
+        });
+      }
+
+      const r = REPORT_DATA.rates;
+      const rc = document.getElementById("ratesChart");
+      const palette = [accent, bcv, pos, neg];
+      if (rc && r && r.labels.length) {
+        new Chart(rc, {
+          type: "line",
+          data: {
+            labels: r.labels,
+            datasets: r.series.map(function (s, i) {
+              return {
+                label: s.label, data: s.data,
+                borderColor: palette[i % palette.length],
+                backgroundColor: palette[i % palette.length],
+                spanGaps: true, tension: 0.2, pointRadius: 0
+              };
+            })
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { position: "bottom" } }
+          }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>
