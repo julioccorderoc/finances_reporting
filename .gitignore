@@ -23,6 +23,13 @@ finances.db
 finances.db.*
 finances.db-*
 finances.db-journal
+finances-backup-*.db
+
+# Generated static report (finances html)
+report.html
+
+# Claude Code local state (agent worktrees hold stray DB copies)
+.claude/
 
 # EPIC-012 cleanup workflow — user's personal batch-review CSV
 needs_review.csv
