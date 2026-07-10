@@ -106,16 +106,24 @@ def compute_source_ref(
     occurred_at: datetime,
     amount: Decimal,
     description: str,
+    occurrence: int = 0,
 ) -> str:
     """Return a deterministic ``"hash:<16-hex>"`` source_ref per ADR-010.
 
     The Provincial CSV does not expose a stable per-row reference, so we
     hash the tuple ``(occurred_at, amount, description)`` to produce a
-    source_ref that survives re-ingest. Collisions within the same day
-    on identical amount + description are indistinguishable on the bank
-    statement and must be resolved upstream if encountered in practice.
+    source_ref that survives re-ingest.
+
+    ``occurrence`` disambiguates genuinely distinct same-day transactions
+    with identical amount + description (e.g. one payment split in two):
+    the Nth twin within a statement gets ``occurrence=N``. ``occurrence=0``
+    produces the exact legacy payload, so every pre-existing row keeps
+    deduplicating. Statement row order is stable across bank re-exports,
+    which keeps N deterministic.
     """
     payload = f"{occurred_at.isoformat()}|{format(amount, 'f')}|{description}"
+    if occurrence:
+        payload += f"|occ:{occurrence}"
     digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
     return f"hash:{digest[:16]}"
 
@@ -185,12 +193,82 @@ def _normalize_header(name: str) -> str:
     return name.strip().lower().replace("ó", "o").replace("é", "e")
 
 
-def iter_raw_rows(csv_path: Path) -> Iterator[RawProvincialRow]:
-    """Yield :class:`RawProvincialRow` for each data row of ``csv_path``.
+def _locate_columns(header: list[str]) -> tuple[int, int, int, int | None]:
+    """Map a normalized header to (fecha, descripcion, monto, saldo?) indices."""
+    norm = [_normalize_header(h) for h in header]
+    try:
+        fecha_idx = norm.index("fecha")
+        desc_idx = norm.index("descripcion")
+        monto_idx = norm.index("monto")
+    except ValueError as exc:
+        raise ValueError(
+            f"Provincial export missing required columns; got {header!r}"
+        ) from exc
+    saldo_idx: int | None
+    try:
+        saldo_idx = norm.index("saldo")
+    except ValueError:
+        saldo_idx = None
+    return fecha_idx, desc_idx, monto_idx, saldo_idx
 
-    Blank trailing lines and rows where every mapped column is empty are
-    silently skipped.
+
+def _rows_to_models(
+    header: list[str], data_rows: Iterable[list[str]]
+) -> Iterator[RawProvincialRow]:
+    """Shared tail of both readers: header mapping, blank-row skip, model."""
+    fecha_idx, desc_idx, monto_idx, saldo_idx = _locate_columns(header)
+
+    for row in data_rows:
+        if not row:
+            continue
+
+        def _cell(idx: int | None) -> str:
+            if idx is None or idx >= len(row):
+                return ""
+            return row[idx].strip()
+
+        fecha = _cell(fecha_idx)
+        desc = _cell(desc_idx)
+        monto = _cell(monto_idx)
+        saldo = _cell(saldo_idx)
+
+        if not fecha and not desc and not monto:
+            continue  # blank spacer row
+
+        yield RawProvincialRow(
+            fecha=fecha,
+            descripcion=desc,
+            monto=monto,
+            saldo=saldo or None,
+        )
+
+
+def _iter_html_rows(path: Path) -> Iterator[RawProvincialRow]:
+    """Read the bank's web export: an HTML table masquerading as ``.xls``.
+
+    The export is a single <table> whose first row is the header
+    (Fecha / Descripción / Monto / Saldo) — same columns, same Venezuelan
+    number and date formats as the CSV path, so everything downstream of
+    the container (validation, source_ref hashing, dedup) is shared.
     """
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(path.read_text(encoding="utf-8-sig"), "html.parser")
+    table = soup.find("table")
+    if table is None:
+        raise ValueError(f"Provincial export has no <table>: {path.name}")
+    rows = table.find_all("tr")
+    if not rows:
+        return
+    header = [c.get_text(strip=True) for c in rows[0].find_all(["td", "th"])]
+    data = (
+        [c.get_text(strip=True) for c in tr.find_all(["td", "th"])]
+        for tr in rows[1:]
+    )
+    yield from _rows_to_models(header, data)
+
+
+def _iter_csv_rows(csv_path: Path) -> Iterator[RawProvincialRow]:
     # ``utf-8-sig`` strips a leading BOM when banking exports include one.
     with csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.reader(handle, delimiter=_CSV_DELIMITER)
@@ -198,46 +276,23 @@ def iter_raw_rows(csv_path: Path) -> Iterator[RawProvincialRow]:
             header = next(reader)
         except StopIteration:
             return
-        norm = [_normalize_header(h) for h in header]
+        yield from _rows_to_models(header, reader)
 
-        try:
-            fecha_idx = norm.index("fecha")
-            desc_idx = norm.index("descripcion")
-            monto_idx = norm.index("monto")
-        except ValueError as exc:
-            raise ValueError(
-                f"Provincial CSV missing required columns; got {header!r}"
-            ) from exc
 
-        saldo_idx: int | None
-        try:
-            saldo_idx = norm.index("saldo")
-        except ValueError:
-            saldo_idx = None
+def iter_raw_rows(csv_path: Path) -> Iterator[RawProvincialRow]:
+    """Yield :class:`RawProvincialRow` for each data row of ``csv_path``.
 
-        for row in reader:
-            if not row:
-                continue
-
-            def _cell(idx: int | None) -> str:
-                if idx is None or idx >= len(row):
-                    return ""
-                return row[idx].strip()
-
-            fecha = _cell(fecha_idx)
-            desc = _cell(desc_idx)
-            monto = _cell(monto_idx)
-            saldo = _cell(saldo_idx)
-
-            if not fecha and not desc and not monto:
-                continue  # blank spacer row
-
-            yield RawProvincialRow(
-                fecha=fecha,
-                descripcion=desc,
-                monto=monto,
-                saldo=saldo or None,
-            )
+    Accepts both statement containers the bank produces: semicolon CSV and
+    the web-export ``.xls`` that is really an HTML table (sniffed by
+    content, not extension). Blank trailing lines and rows where every
+    mapped column is empty are silently skipped.
+    """
+    with csv_path.open("r", encoding="utf-8-sig", errors="replace") as handle:
+        head = handle.read(512).lstrip().lower()
+    if head.startswith(("<html", "<!doctype")):
+        yield from _iter_html_rows(csv_path)
+    else:
+        yield from _iter_csv_rows(csv_path)
 
 
 # ---------------------------------------------------------------------------
@@ -303,6 +358,9 @@ def ingest_csv(
 
         conn.execute("BEGIN")
         try:
+            # Nth same-statement twin of an identical (date, amount,
+            # description) tuple gets occurrence=N so both rows survive.
+            seen_tuples: dict[tuple[str, str, str], int] = {}
             for raw in iter_raw_rows(csv_path):
                 report.rows_seen += 1
 
@@ -312,10 +370,15 @@ def ingest_csv(
                     category_id = categorizer(raw.descripcion)
                 needs_review = category_id is None
 
+                twin_key = (raw.fecha, format(raw.monto, "f"), raw.descripcion)
+                occurrence = seen_tuples.get(twin_key, 0)
+                seen_tuples[twin_key] = occurrence + 1
+
                 source_ref = compute_source_ref(
                     occurred_at=occurred_at,
                     amount=raw.monto,
                     description=raw.descripcion,
+                    occurrence=occurrence,
                 )
 
                 txn = Transaction(

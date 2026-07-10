@@ -818,3 +818,144 @@ def test_provincial_ingest_dry_run_after_real_run_does_not_double_count(
         "SELECT COUNT(*) FROM import_runs WHERE source = 'provincial'"
     ).fetchone()[0]
     assert runs_after == real_runs, "dry-run must not add an import_runs row"
+
+
+# ---------------------------------------------------------------------------
+# Bank HTML "XLS" exports (the bank's web export is an HTML table with an
+# Excel MIME hint, not CSV and not real Excel)
+# ---------------------------------------------------------------------------
+
+_HTML_EXPORT = (
+    '<html xmlns:o="urn:schemas-microsoft-com:office:office" '
+    'xmlns:x="urn:schemas-microsoft-com:office:excel" '
+    'xmlns="http://www.w3.org/TR/REC-html40">'
+    '<meta http-equiv="content-type" '
+    'content="application/vnd.ms-excel; charset=UTF-8">'
+    "<head></head><body><table>"
+    "<tr><td>Fecha</td><td>Descripción</td><td>Monto</td><td>Saldo</td></tr>"
+    "<tr><td>09/07/2026</td><td>MI SUPER CA</td><td>-700,22</td><td>14.803,64</td></tr>"
+    "<tr><td>08/07/2026</td><td>PAGO RECIBIDO</td><td>1.250,00</td><td>15.503,86</td></tr>"
+    "<tr><td></td><td></td><td></td><td></td></tr>"
+    "</table></body></html>"
+)
+
+
+def _write_html_export(
+    tmp_path: Path, *, name: str = "provincial-july.xls", html: str | None = None
+) -> Path:
+    target = tmp_path / name
+    # Real exports are one giant line, no terminators — keep it that way.
+    target.write_text(html if html is not None else _HTML_EXPORT, encoding="utf-8")
+    return target
+
+
+class TestHtmlExportReader:
+    """iter_raw_rows must accept the bank's fake-XLS HTML container and
+    yield the exact same RawProvincialRow stream the CSV path yields."""
+
+    def test_parses_bank_html_xls(self, tmp_path: Path) -> None:
+        from finances.ingest.provincial import iter_raw_rows
+
+        path = _write_html_export(tmp_path)
+        rows = list(iter_raw_rows(path))
+        assert len(rows) == 2  # blank spacer row skipped
+        assert rows[0].fecha == "09/07/2026"
+        assert rows[0].descripcion == "MI SUPER CA"
+        assert rows[0].monto == Decimal("-700.22")
+        assert rows[0].saldo == Decimal("14803.64")
+        assert rows[1].monto == Decimal("1250.00")
+
+    def test_missing_required_column_raises(self, tmp_path: Path) -> None:
+        html = (
+            "<html><body><table>"
+            "<tr><td>Fecha</td><td>Descripción</td><td>Saldo</td></tr>"
+            "<tr><td>09/07/2026</td><td>X</td><td>1,00</td></tr>"
+            "</table></body></html>"
+        )
+        from finances.ingest.provincial import iter_raw_rows
+
+        path = _write_html_export(tmp_path, html=html)
+        with pytest.raises(ValueError, match="missing required columns"):
+            list(iter_raw_rows(path))
+
+    def test_html_without_table_raises(self, tmp_path: Path) -> None:
+        from finances.ingest.provincial import iter_raw_rows
+
+        path = _write_html_export(tmp_path, html="<html><body>nada</body></html>")
+        with pytest.raises(ValueError, match="no <table>"):
+            list(iter_raw_rows(path))
+
+    def test_ingest_html_export_end_to_end(
+        self, tmp_path: Path, seeded_db: sqlite3.Connection
+    ) -> None:
+        """Same pipeline as CSV: validation, dedup source_ref, import_runs."""
+        from finances.ingest.provincial import ingest_csv
+
+        path = _write_html_export(tmp_path)
+        report = ingest_csv(seeded_db, path)
+        assert report.rows_seen == 2
+        assert report.rows_inserted == 2
+
+        again = ingest_csv(seeded_db, path)
+        assert again.rows_inserted == 0, "re-ingest must dedup to zero"
+
+    def test_source_ref_identical_across_containers(self, tmp_path: Path) -> None:
+        """The same transaction must hash to the same source_ref whether it
+        arrived via CSV or via the HTML export — overlap dedup depends on it."""
+        from finances.ingest.provincial import compute_source_ref, iter_raw_rows
+
+        html_rows = list(iter_raw_rows(_write_html_export(tmp_path)))
+        csv_path = _write_csv(
+            tmp_path,
+            [
+                _HEADER,
+                "09/07/2026;MI SUPER CA;-700,22;14.803,64",
+            ],
+        )
+        csv_rows = list(iter_raw_rows(csv_path))
+        h, c = html_rows[0], csv_rows[0]
+        assert compute_source_ref(
+            occurred_at=h.to_datetime(), amount=h.monto, description=h.descripcion
+        ) == compute_source_ref(
+            occurred_at=c.to_datetime(), amount=c.monto, description=c.descripcion
+        )
+
+
+class TestSameDayDuplicateTransactions:
+    """Two genuinely distinct transactions with identical (date, description,
+    amount) — e.g. the same transfer split in two — must BOTH survive ingest.
+    Real case: inputs 2026-05-20 had two identical -30.207,81 transfers."""
+
+    def test_occurrence_disambiguates_hash(self) -> None:
+        from finances.ingest.provincial import compute_source_ref
+
+        base = dict(
+            occurred_at=datetime(2026, 5, 20, tzinfo=CARACAS_TZ),
+            amount=Decimal("-30207.81"),
+            description="DR OB V23807457 172BANCA",
+        )
+        first = compute_source_ref(**base)
+        again = compute_source_ref(**base, occurrence=0)
+        second = compute_source_ref(**base, occurrence=1)
+        assert first == again, "occurrence=0 must equal the legacy hash"
+        assert first != second
+
+    def test_ingest_keeps_both_twins_and_stays_idempotent(
+        self, tmp_path: Path, seeded_db: sqlite3.Connection
+    ) -> None:
+        from finances.ingest.provincial import ingest_csv
+
+        csv_path = _write_csv(
+            tmp_path,
+            [
+                _HEADER,
+                "20/05/2026;DR OB V23807457 172BANCA;-30.207,81;50.000,00",
+                "20/05/2026;DR OB V23807457 172BANCA;-30.207,81;19.792,19",
+            ],
+        )
+        report = ingest_csv(seeded_db, csv_path)
+        assert report.rows_inserted == 2, "twin transactions must both insert"
+
+        again = ingest_csv(seeded_db, csv_path)
+        assert again.rows_inserted == 0, "re-ingest must still dedup to zero"
+        assert again.rows_updated == 2
