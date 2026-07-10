@@ -9,7 +9,7 @@ must be double-click or one command. Binance API is geo-blocked without VPN.
 
 ## Task — three pieces
 
-### A. `finances update` — the monthly ritual as one command
+### A. `finances update` — the weekly ritual as one command
 
 Runs, in order, each step isolated (one failing step doesn't stop the rest):
 1. `bcv` rate scrape

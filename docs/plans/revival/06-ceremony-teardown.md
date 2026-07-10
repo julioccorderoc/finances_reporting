@@ -23,7 +23,7 @@ reference only, superseded by CLAUDE.md invariants on <date>".
 - Remove `CLAUDE.md` and `ERRORS.md` from `.gitignore` (keep `MEMORY.md`
   ignored — it's personal auto-memory). Commit CLAUDE.md from now on.
 - Rewrite CLAUDE.md to fit ONE page:
-  - What this is (2 lines) + the monthly ritual (3 lines: CSV → VPN →
+  - What this is (2 lines) + the weekly ritual (3 lines: CSV → VPN →
     `finances update`; edit via `Finances.command`; view via `report.html`).
   - **Invariants** (the only rules that survive — they protect data):
     1. SQLite is the only source of truth; `report.html` and Sheets are

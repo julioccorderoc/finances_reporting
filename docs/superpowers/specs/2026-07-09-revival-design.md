@@ -31,7 +31,7 @@ made every change slower than the old spreadsheet. The code itself works:
 
 - Look at money → double-click `report.html` (offline, self-contained).
 - Change something → double-click `Finances.command` → browser viewer → close.
-- Monthly ritual (~10 min): drop bank CSV in `inputs/`, VPN on, `finances update`.
+- Weekly ritual (~10 min): drop bank CSV in `inputs/`, VPN on, `finances update`.
   Prints per-source summary + how many rows need triage. Regenerates report.html.
 - `report.html` regenerates after every successful ingest and after edit sessions.
 

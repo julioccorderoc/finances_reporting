@@ -29,7 +29,8 @@ root, already gitignored) that renders a single self-contained file.
 
 1. Header: net worth in USD (headline rate = USDT/P2P per the resolver — never
    BCV), per-account balances, generated-at timestamp + data freshness (last
-   transaction date per source; stale >35 days → visible warning).
+   transaction date per source; stale >10 days → visible warning — the
+   ritual is weekly).
 2. Monthly income / expense / net — last 12 months, bar chart + numbers.
 3. Category breakdown — current month + previous month.
 4. Rate trend — BCV vs P2P, last 90 days, line chart.
