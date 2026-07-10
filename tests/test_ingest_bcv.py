@@ -92,37 +92,85 @@ def test_raw_bcv_row_forbids_extra_fields() -> None:
 
 
 @pytest.mark.snapshot
-def test_parse_bcv_html_parses_full_snapshot() -> None:
+def test_parse_bcv_html_parses_homepage_snapshot() -> None:
+    """Homepage publishes one snapshot per day → exactly 1 row, USD+EUR only."""
     rows = parse_bcv_html(_snapshot())
-    assert len(rows) == 67
-    assert rows[0].as_of_date == date(2026, 4, 17)
-    assert rows[0].usd == Decimal("480.25")
-    assert rows[0].eur == Decimal("565.41")
-    assert rows[1].as_of_date == date(2026, 4, 16)
-    assert rows[1].usd == Decimal("479.77")
-    assert rows[1].eur == Decimal("565.98")
-    for r in rows:
-        assert isinstance(r.usd, Decimal) and r.usd > 0
-        assert isinstance(r.eur, Decimal) and r.eur > 0
+    assert len(rows) == 1
+    assert rows[0].as_of_date == date(2026, 4, 28)
+    assert rows[0].usd == Decimal("485.22510000")
+    assert rows[0].eur == Decimal("569.29520082")
+    assert isinstance(rows[0].usd, Decimal) and rows[0].usd > 0
+    assert isinstance(rows[0].eur, Decimal) and rows[0].eur > 0
 
 
-def test_parse_bcv_html_raises_on_missing_tbody() -> None:
+def test_parse_bcv_html_ignores_decoy_date_spans() -> None:
+    """The fixture carries decoy date-display-single spans (news/archive
+    blocks) BEFORE the rates widget, mirroring the live homepage. The parser
+    must anchor to the widget's own 'Fecha Valor' span, not document order."""
+    html = _snapshot()
+    assert html.count('class="date-display-single"') >= 3, (
+        "fixture must contain decoy date spans for this test to mean anything"
+    )
+    rows = parse_bcv_html(html)
+    assert rows[0].as_of_date == date(2026, 4, 28)  # not 2026-05-01 (decoy)
+
+
+def test_assert_plausible_as_of_date_accepts_recent() -> None:
+    from finances.ingest.bcv import assert_plausible_as_of_date
+
+    assert_plausible_as_of_date(date(2026, 7, 8), today=date(2026, 7, 10))
+    assert_plausible_as_of_date(date(2026, 7, 11), today=date(2026, 7, 10))
+
+
+def test_assert_plausible_as_of_date_rejects_stale() -> None:
+    """A live scrape yielding a date weeks away means the parser latched onto
+    the wrong DOM element — must raise, never store (rule-007)."""
+    from finances.ingest.bcv import assert_plausible_as_of_date
+
+    with pytest.raises(BcvParseError):
+        assert_plausible_as_of_date(date(2026, 5, 1), today=date(2026, 7, 10))
+
+
+def test_ingest_bcv_live_fetch_rejects_implausible_date(
+    seeded_db: sqlite3.Connection, mocker
+) -> None:
+    """Live-fetch path (html=None): a mis-anchored/stale value date must
+    error the run and write nothing, not silently store a wrong-dated rate."""
+    stale = _snapshot()  # fixture value date 2026-04-28, far from today
+    mocker.patch("finances.ingest.bcv.fetch_bcv_html", return_value=stale)
+
+    with pytest.raises(BcvParseError):
+        ingest_bcv(seeded_db)
+
+    count = seeded_db.execute(
+        "SELECT count(*) FROM rates WHERE source='bcv'"
+    ).fetchone()[0]
+    assert count == 0
+    run = seeded_db.execute(
+        "SELECT status FROM import_runs WHERE source='bcv' ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    assert run is not None and run[0] == "error"
+
+
+def test_parse_bcv_html_raises_when_rate_blocks_missing() -> None:
+    """Mangled fixture has no #dolar/#euro blocks → BcvParseError."""
     with pytest.raises(BcvParseError):
         parse_bcv_html(_mangled())
 
 
-def test_parse_bcv_html_raises_on_empty_tbody() -> None:
-    html = "<html><body><table><tbody></tbody></table></body></html>"
+def test_parse_bcv_html_raises_on_missing_date_span() -> None:
+    html = "<html><body><div id='dolar'><strong>1,00</strong></div></body></html>"
     with pytest.raises(BcvParseError):
         parse_bcv_html(html)
 
 
-def test_parse_bcv_html_raises_when_no_valid_rows() -> None:
+def test_parse_bcv_html_raises_on_missing_dolar_block() -> None:
+    """USD is mandatory — missing #dolar trips the error path."""
     html = (
-        "<html><body><table><tbody>"
-        "<tr><td>only-one</td></tr>"
-        "<tr><td>two</td><td>cells</td></tr>"
-        "</tbody></table></body></html>"
+        "<html><body>"
+        "<span class='date-display-single' content='2026-04-28T00:00:00-04:00'>x</span>"
+        "<div id='euro'><strong>569,29520082</strong></div>"
+        "</body></html>"
     )
     with pytest.raises(BcvParseError):
         parse_bcv_html(html)
@@ -167,23 +215,24 @@ def test_fetch_bcv_html_raises_on_http_error(mocker) -> None:
 
 
 def test_ingest_bcv_happy_path(seeded_db: sqlite3.Connection) -> None:
+    """Homepage snapshot is one day → 2 rate rows (USD + EUR)."""
     inserted = ingest_bcv(seeded_db, html=_snapshot())
-    assert inserted == 134
+    assert inserted == 2
 
     total = seeded_db.execute(
         "SELECT COUNT(*) FROM rates WHERE source='bcv'"
     ).fetchone()[0]
-    assert total == 134
+    assert total == 2
 
     usd_count = seeded_db.execute(
         "SELECT COUNT(*) FROM rates WHERE source='bcv' AND base='USD'"
     ).fetchone()[0]
-    assert usd_count == 67
+    assert usd_count == 1
 
     eur_count = seeded_db.execute(
         "SELECT COUNT(*) FROM rates WHERE source='bcv' AND base='EUR'"
     ).fetchone()[0]
-    assert eur_count == 67
+    assert eur_count == 1
 
     run = seeded_db.execute(
         "SELECT source, status, rows_inserted, error FROM import_runs "
@@ -192,7 +241,7 @@ def test_ingest_bcv_happy_path(seeded_db: sqlite3.Connection) -> None:
     assert run is not None
     assert run["source"] == "bcv"
     assert run["status"] == "success"
-    assert run["rows_inserted"] == 134
+    assert run["rows_inserted"] == 2
     assert run["error"] is None
 
     state = seeded_db.execute(
@@ -204,13 +253,13 @@ def test_ingest_bcv_happy_path(seeded_db: sqlite3.Connection) -> None:
 def test_ingest_bcv_idempotent_same_day(seeded_db: sqlite3.Connection) -> None:
     first = ingest_bcv(seeded_db, html=_snapshot())
     second = ingest_bcv(seeded_db, html=_snapshot())
-    assert first == 134
+    assert first == 2
     assert second == 0
 
     total = seeded_db.execute(
         "SELECT COUNT(*) FROM rates WHERE source='bcv'"
     ).fetchone()[0]
-    assert total == 134
+    assert total == 2
 
     runs = seeded_db.execute(
         "SELECT status FROM import_runs WHERE source='bcv' ORDER BY id ASC"
@@ -298,3 +347,53 @@ def test_ingest_bcv_preserves_existing_rates_on_failure(
     ).fetchone()
     assert row is not None
     assert Decimal(str(row["rate"])) == Decimal("999")
+
+
+def test_ingest_bcv_dry_run_persists_nothing(seeded_db: sqlite3.Connection) -> None:
+    """dry_run=True validates and reports counts without writing to the DB.
+
+    Returned int is the number of rate rows that *would* be inserted; the
+    rates, import_runs, and import_state tables remain untouched.
+    """
+    would_insert = ingest_bcv(seeded_db, html=_snapshot(), dry_run=True)
+    assert would_insert == 2
+
+    rates_count = seeded_db.execute(
+        "SELECT COUNT(*) FROM rates WHERE source='bcv'"
+    ).fetchone()[0]
+    assert rates_count == 0, "dry-run must not persist rate rows"
+
+    runs_count = seeded_db.execute(
+        "SELECT COUNT(*) FROM import_runs WHERE source='bcv'"
+    ).fetchone()[0]
+    assert runs_count == 0, "dry-run must not persist import_runs rows"
+
+    state_count = seeded_db.execute(
+        "SELECT COUNT(*) FROM import_state WHERE source='bcv'"
+    ).fetchone()[0]
+    assert state_count == 0, "dry-run must not persist import_state rows"
+
+
+def test_ingest_bcv_dry_run_after_real_run_does_not_double_count(
+    seeded_db: sqlite3.Connection,
+) -> None:
+    """A real run followed by dry_run shows accurate would-be inserts (zero
+    on idempotent re-run) and leaves the existing real-run rows intact."""
+    real_inserted = ingest_bcv(seeded_db, html=_snapshot())
+    assert real_inserted == 2
+
+    would_insert_again = ingest_bcv(seeded_db, html=_snapshot(), dry_run=True)
+    assert would_insert_again == 0, (
+        "second pass against same snapshot is fully duplicate; dry-run "
+        "should report 0 would-be inserts"
+    )
+
+    total = seeded_db.execute(
+        "SELECT COUNT(*) FROM rates WHERE source='bcv'"
+    ).fetchone()[0]
+    assert total == 2, "dry-run must not corrupt real-run data"
+
+    runs = seeded_db.execute(
+        "SELECT COUNT(*) FROM import_runs WHERE source='bcv'"
+    ).fetchone()[0]
+    assert runs == 1, "only the real run should leave provenance"

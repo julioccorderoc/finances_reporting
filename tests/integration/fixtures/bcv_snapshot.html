@@ -1,20 +1,37 @@
-<table>
-    <thead>
-        <tr>
-            <th>Dia</th>
-            <th>USD</th>
-            <th>EURO</th>
-        </tr>
-    </thead>
-    <tbody>
-        <tr>
-            <td> Domingo, 15 de marzo de 2026 </td>
-            <td>
-                <div> <span> Bs.S&nbsp;148,50 </span> </div>
-            </td>
-            <td>
-                <div> <span> Bs.S&nbsp;170,25 </span> </div>
-            </td>
-        </tr>
-    </tbody>
-</table>
+<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="utf-8"><title>BCV homepage snapshot (integration fixture)</title></head>
+<body>
+<!-- Decoy dated blocks: the live BCV homepage renders several
+     date-display-single spans (news teasers, publication archives) BEFORE
+     the rates widget. The parser must not anchor to these. -->
+<div class="views-row noticia">
+  <h4>Noticia destacada</h4>
+  <span class="date-display-single" property="dc:date" datatype="xsd:dateTime" content="2026-05-01T00:00:00-04:00">Mayo - 2026</span>
+</div>
+<div class="views-field archivo">
+  <span class="date-display-single" content="2026-03-08T00:00:00-04:00">08/03/2026</span>
+</div>
+<div class="views-row row">
+  <div id="euro" class="col-sm-12 col-xs-12 ">
+    <div class="field-content">
+      <div class="row recuadrotsmc">
+        <div class="col-sm-6 col-xs-6"><span> EUR </span></div>
+        <div class="col-sm-6 col-xs-6 centrado"><strong> 170,25000000 </strong></div>
+      </div>
+    </div>
+  </div>
+  <div id="dolar" class="col-sm-12 col-xs-12 ">
+    <div class="field-content">
+      <div class="row recuadrotsmc">
+        <div class="col-sm-6 col-xs-6"><span> USD</span></div>
+        <div class="col-sm-6 col-xs-6 centrado"><strong> 148,50000000 </strong></div>
+      </div>
+    </div>
+  </div>
+  <div class="pull-right dinpro center">
+    Fecha Valor: <span class="date-display-single" property="dc:date" datatype="xsd:dateTime" content="2026-03-15T00:00:00-04:00">Domingo, 15 Marzo 2026</span>
+  </div>
+</div>
+</body>
+</html>
