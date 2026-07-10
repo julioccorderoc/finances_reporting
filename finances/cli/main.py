@@ -7,7 +7,7 @@ from typing import Any
 
 import typer
 
-from finances.config import DB_PATH, binance_credentials
+from finances.config import CARACAS_TZ, DB_PATH, binance_credentials
 from finances.db.connection import get_connection
 from finances.db.migrate import apply_migrations
 
@@ -43,7 +43,10 @@ def ingest_binance(
     since: datetime | None = typer.Option(
         None,
         "--since",
-        help="ISO timestamp to start ingest from (overrides lookback and stored state).",
+        help=(
+            "ISO timestamp to start ingest from (overrides lookback and stored "
+            "state). Naive values are interpreted as America/Caracas."
+        ),
     ),
     lookback_days: int = typer.Option(
         35,
@@ -58,6 +61,9 @@ def ingest_binance(
 ) -> None:
     """Incrementally sync Binance endpoints into the ledger (EPIC-007)."""
     from finances.ingest.binance import sync_binance
+
+    if since is not None and since.tzinfo is None:
+        since = since.replace(tzinfo=CARACAS_TZ)
 
     conn = get_connection(DB_PATH)
     apply_migrations(conn)

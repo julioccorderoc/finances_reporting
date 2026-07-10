@@ -166,6 +166,7 @@ def ingest_p2p_rates(
     fiat: str = "VES",
     rows: int = DEFAULT_TOP_N,
     client: httpx.Client | None = None,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     """Fetch BUY+SELL P2P medians and upsert buy/sell/midpoint rows.
 
@@ -181,6 +182,13 @@ def ingest_p2p_rates(
     the happy path, or ``status='error'`` with an exception summary and
     re-raise on failure.
 
+    When ``dry_run=True``, the function performs the same fetch / median
+    computation pipeline and returns a result whose ``rows_written`` lists
+    only the rates that would be *net-new* inserts (i.e. no existing row
+    at ``(as_of_date, base, quote, source)``). The transaction is rolled
+    back, so nothing is written to ``rates``, ``import_runs``, or
+    ``import_state``.
+
     Args:
         conn: Open sqlite3 connection with the schema migrations applied.
         as_of_date: Date to stamp on the rate rows. Defaults to today (UTC).
@@ -188,6 +196,8 @@ def ingest_p2p_rates(
         fiat: Quote currency code (default ``"VES"``).
         rows: Top-N adverts to fetch per side.
         client: Optional ``httpx.Client`` for DI; otherwise one is created.
+        dry_run: When True, validate and report would-be inserts without
+            persisting anything (no rates, no import_runs, no import_state).
 
     Returns:
         A dict with keys ``as_of_date``, ``buy_median``, ``sell_median``,
@@ -197,7 +207,7 @@ def ingest_p2p_rates(
     Raises:
         RuntimeError: either BUY or SELL side returned zero adverts.
     """
-    run_id = import_state.start_run(conn, SOURCE)
+    run_id = None if dry_run else import_state.start_run(conn, SOURCE)
     try:
         if as_of_date is None:
             as_of_date = datetime.now(tz=timezone.utc).date()
@@ -217,27 +227,50 @@ def ingest_p2p_rates(
         base_code = asset.upper()
         quote_code = fiat.upper()
 
-        rows_written: list[Rate] = []
-        for src, value in (
-            ("binance_p2p_median_buy", buy_median),
-            ("binance_p2p_median_sell", sell_median),
-            ("binance_p2p_median", midpoint),
-        ):
-            rate = Rate(
-                as_of_date=as_of_date,
-                base=base_code,
-                quote=quote_code,
-                rate=value,
-                source=src,
-            )
-            rows_written.append(rates_repo.upsert(conn, rate))
+        conn.execute("BEGIN")
+        try:
+            rows_written: list[Rate] = []
+            for src, value in (
+                ("binance_p2p_median_buy", buy_median),
+                ("binance_p2p_median_sell", sell_median),
+                ("binance_p2p_median", midpoint),
+            ):
+                rate = Rate(
+                    as_of_date=as_of_date,
+                    base=base_code,
+                    quote=quote_code,
+                    rate=value,
+                    source=src,
+                )
+                if dry_run:
+                    # Count only net-new inserts: rows that don't already
+                    # exist at this (date, base, quote, source) key.
+                    existing = rates_repo.get(
+                        conn,
+                        as_of_date=as_of_date,
+                        base=base_code,
+                        quote=quote_code,
+                        source=src,
+                    )
+                    if existing is None:
+                        rows_written.append(rate)
+                else:
+                    rows_written.append(rates_repo.upsert(conn, rate))
+            if dry_run:
+                conn.execute("ROLLBACK")
+            else:
+                conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
 
-        import_state.finish_run(
-            conn,
-            run_id,
-            status="success",
-            rows_inserted=len(rows_written),
-        )
+        if not dry_run:
+            import_state.finish_run(
+                conn,
+                run_id,
+                status="success",
+                rows_inserted=len(rows_written),
+            )
         return {
             "as_of_date": as_of_date,
             "buy_median": buy_median,
@@ -248,10 +281,11 @@ def ingest_p2p_rates(
             "rows_written": rows_written,
         }
     except Exception as exc:
-        error_msg = f"{type(exc).__name__}: {exc}"[:4000]
-        import_state.finish_run(
-            conn, run_id, status="error", error=error_msg
-        )
+        if not dry_run:
+            error_msg = f"{type(exc).__name__}: {exc}"[:4000]
+            import_state.finish_run(
+                conn, run_id, status="error", error=error_msg
+            )
         raise
 
 
