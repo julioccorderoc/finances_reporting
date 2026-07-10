@@ -31,6 +31,49 @@ def _root() -> None:
     """Finances reporting CLI."""
 
 
+def _regenerate_default_report() -> None:
+    """Regenerate the default ``report.html`` after a successful ingest.
+
+    Best-effort (Thing 4, rule 2): any failure is logged to stderr and
+    swallowed so it never fails the ingest that triggered it. Read-only —
+    :func:`export_html` issues SELECTs only.
+    """
+    from finances import config as _config
+    from finances.reports.html_export import export_html
+
+    try:
+        conn = get_connection(_config.DB_PATH)
+        try:
+            export_html(conn, _config.REPORT_HTML_PATH)
+        finally:
+            conn.close()
+    except Exception as exc:  # noqa: BLE001 - warn-only by design
+        typer.echo(f"warning: report.html regen failed: {exc}", err=True)
+
+
+@app.command("html")
+def html_cmd(
+    output: Path = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Destination file. Defaults to report.html at the repo root.",
+    ),
+) -> None:
+    """Render the single self-contained static report file (Thing 4)."""
+    from finances import config as _config
+    from finances.reports.html_export import export_html
+
+    out = output if output is not None else _config.REPORT_HTML_PATH
+    conn = get_connection(_config.DB_PATH)
+    apply_migrations(conn)
+    try:
+        result = export_html(conn, out)
+    finally:
+        conn.close()
+    typer.echo(f"html: wrote {result}")
+
+
 def _make_binance_client() -> Any:
     from binance.spot import Spot
 
@@ -87,6 +130,8 @@ def ingest_binance(
     )
     for err in result["errors"]:
         typer.echo(f"  err: {err}", err=True)
+    if not dry_run and not result["errors"]:
+        _regenerate_default_report()
     if result["errors"]:
         raise typer.Exit(code=1)
 
@@ -146,6 +191,8 @@ def ingest_provincial(
         )
         for err in rec.errors:
             typer.echo(f"    err: {err}", err=True)
+    if not dry_run:
+        _regenerate_default_report()
 
 
 @ingest_app.command("bcv")
@@ -167,6 +214,8 @@ def ingest_bcv(
         conn.close()
     prefix = "bcv (dry-run): would insert" if dry_run else "bcv: inserted"
     typer.echo(f"{prefix} {inserted} rate rows")
+    if not dry_run:
+        _regenerate_default_report()
 
 
 @ingest_app.command("p2p-rates")
@@ -220,6 +269,8 @@ def ingest_p2p_rates_cmd(
         f"midpoint={result['midpoint']} "
         f"(n_buy={result['buy_adverts_used']}, n_sell={result['sell_adverts_used']})"
     )
+    if not dry_run:
+        _regenerate_default_report()
 
 
 def _parse_cash_amount(raw: str) -> Decimal:
@@ -322,6 +373,7 @@ def cash_add(
     if recent:
         hints = ", ".join(c.name for c in recent)
         typer.echo(f"Recent categories on this account: {hints}")
+    _regenerate_default_report()
 
 
 @app.command("backfill")
@@ -382,6 +434,8 @@ def backfill(
         )
     for err in report.errors:
         typer.echo(f"  err: {err}", err=True)
+    if not dry_run and not report.errors:
+        _regenerate_default_report()
     if report.errors:
         raise typer.Exit(code=1)
 
