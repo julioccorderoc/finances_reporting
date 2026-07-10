@@ -44,6 +44,15 @@ VPN_HINT = (
 )
 
 
+def _fmt_earn(earn: Any) -> str:
+    """Render the Binance earn-refresh result — a dict or a plain int — briefly."""
+    if isinstance(earn, dict):
+        ins = earn.get("inserted", 0)
+        closed = earn.get("closed", 0)
+        return f"{ins} opened / {closed} closed"
+    return str(earn)
+
+
 def _looks_geo_blocked(text: str) -> bool:
     """Heuristic: does this error message read like a 451 or network failure?"""
     t = text.lower()
@@ -174,7 +183,7 @@ def _step_binance(
         else:
             outcome.summary = (
                 f"{outcome.inserted} new, {outcome.updated} updated, "
-                f"{res.get('earn_positions', 0)} earn"
+                f"{_fmt_earn(res.get('earn_positions', 0))} earn"
             )
     except Exception as exc:  # noqa: BLE001 - isolate the step
         outcome.status = "error"
