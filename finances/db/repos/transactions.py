@@ -127,6 +127,12 @@ def upsert_by_source_ref(conn: sqlite3.Connection, txn: Transaction) -> dict[str
 
     Returns {"rows_inserted": 0|1, "rows_updated": 0|1, "id": int}. A second
     identical call returns rows_inserted=0.
+
+    The UPDATE branch overwrites statement-sourced fields (amount,
+    description, dates...) but PRESERVES enrichment the statement cannot
+    know: category_id, transfer_id, user_rate, a resolved needs_review, and
+    the kind of a paired row. Re-ingesting raw data must never undo triage
+    or pairing work.
     """
     if txn.source_ref is None:
         raise ValueError("upsert_by_source_ref requires a non-null source_ref")
@@ -155,14 +161,21 @@ def upsert_by_source_ref(conn: sqlite3.Connection, txn: Transaction) -> dict[str
         ON CONFLICT(source, source_ref) DO UPDATE SET
             account_id   = excluded.account_id,
             occurred_at  = excluded.occurred_at,
-            kind         = excluded.kind,
+            -- A paired row's kind came from the pairing pass; a raw
+            -- statement re-ingest must not flip it back.
+            kind         = CASE WHEN transactions.transfer_id IS NOT NULL
+                                THEN transactions.kind ELSE excluded.kind END,
             amount       = excluded.amount,
             currency     = excluded.currency,
             description  = excluded.description,
-            category_id  = excluded.category_id,
-            transfer_id  = excluded.transfer_id,
-            user_rate    = excluded.user_rate,
-            needs_review = excluded.needs_review,
+            -- Enrichment (triage category, pairing, user rate) lives on the
+            -- row but is not sourced from raw statements: keep existing
+            -- values unless the incoming row actually carries one.
+            category_id  = COALESCE(excluded.category_id, transactions.category_id),
+            transfer_id  = COALESCE(excluded.transfer_id, transactions.transfer_id),
+            user_rate    = COALESCE(excluded.user_rate, transactions.user_rate),
+            needs_review = CASE WHEN transactions.needs_review = 0 THEN 0
+                                ELSE excluded.needs_review END,
             updated_at   = CURRENT_TIMESTAMP
         """,
         params,

@@ -201,6 +201,73 @@ def test_dashboard_route_renders(tmp_path) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _seed_db_with_txn(tmp_path) -> "object":
+    """Migrated tmp DB holding one transaction so the export has data."""
+    from datetime import UTC, datetime
+    from decimal import Decimal
+
+    from finances.db.connection import get_connection
+    from finances.db.migrate import apply_migrations
+    from finances.db.repos import accounts as accounts_repo
+    from finances.db.repos import transactions as transactions_repo
+    from finances.domain.models import (
+        Account,
+        AccountKind,
+        Transaction,
+        TransactionKind,
+    )
+
+    db_path = tmp_path / "shutdown.db"
+    conn = get_connection(db_path)
+    apply_migrations(conn)
+    try:
+        acct = accounts_repo.insert(
+            conn, Account(name="Cash USD", kind=AccountKind.CASH, currency="USD")
+        )
+        transactions_repo.insert(
+            conn,
+            Transaction(
+                account_id=acct.id,
+                occurred_at=datetime.now(tz=UTC),
+                kind=TransactionKind.EXPENSE,
+                amount=Decimal("4.20"),
+                currency="USD",
+                description="shutdown seed",
+                source="cash_cli",
+                source_ref="shutdown-seed-1",
+            ),
+        )
+    finally:
+        conn.close()
+    return db_path
+
+
+def test_server_shutdown_regenerates_report(tmp_path, monkeypatch) -> None:
+    """On server shutdown the static report.html is regenerated (Thing 5B).
+
+    The .command launcher relies on this so the double-clickable static file
+    reflects any edits made during the serve session.
+    """
+    from finances import config
+    from finances.web.app import create_app
+    from finances.web.settings import WebSettings
+
+    db_path = _seed_db_with_txn(tmp_path)
+    report = tmp_path / "report.html"
+    monkeypatch.setattr(config, "REPORT_HTML_PATH", report)
+
+    app = create_app(WebSettings(host="127.0.0.1", db_path=db_path))
+    assert not report.exists()
+
+    # Entering/exiting the TestClient context fires FastAPI startup/shutdown.
+    with TestClient(app) as client:
+        assert client.get("/health").status_code == 200
+        assert not report.exists()  # nothing written mid-session
+
+    # Only after the context exits (shutdown) does the report appear.
+    assert report.exists() and report.stat().st_size > 0
+
+
 def test_serve_cli_command_validates_lan_token() -> None:
     from finances.cli.main import app as cli_app
 

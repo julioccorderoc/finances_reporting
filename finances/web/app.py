@@ -16,6 +16,9 @@ Foundation contract:
 
 from __future__ import annotations
 
+import sys
+from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -33,9 +36,47 @@ STATIC_DIR = WEB_PACKAGE_DIR / "static"
 TEMPLATES_DIR = WEB_PACKAGE_DIR / "templates"
 
 
+def _regen_report_on_shutdown(settings: WebSettings) -> None:
+    """Regenerate the static ``report.html`` from the current DB (Thing 5B).
+
+    Best-effort: the double-click launcher (``Finances.command``) relies on
+    the static file reflecting any write-back edits made during the serve
+    session, but a regen failure must never crash server teardown. Read-only —
+    :func:`export_html` issues SELECTs only.
+    """
+    from finances import config
+    from finances.db.connection import get_connection
+    from finances.reports.html_export import export_html
+
+    try:
+        conn = get_connection(settings.db_path)
+        try:
+            export_html(conn, config.REPORT_HTML_PATH)
+        finally:
+            conn.close()
+    except Exception as exc:  # noqa: BLE001 - warn-only by design
+        print(
+            f"warning: report.html regen on shutdown failed: {exc}",
+            file=sys.stderr,
+        )
+
+
 def create_app(settings: WebSettings) -> FastAPI:
     """Construct a FastAPI app wired with templates, static, routers, auth."""
-    app = FastAPI(title="finances viewer", version="0.1.0", docs_url=None, redoc_url=None)
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        yield
+        # Shutdown: refresh the static report so it mirrors this session's edits.
+        _regen_report_on_shutdown(settings)
+
+    app = FastAPI(
+        title="finances viewer",
+        version="0.1.0",
+        docs_url=None,
+        redoc_url=None,
+        lifespan=lifespan,
+    )
     app.state.settings = settings
 
     app.state.templates = Jinja2Templates(directory=str(TEMPLATES_DIR))

@@ -5,8 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}Finances{% endblock %}</title>
 
-    <!-- Tailwind CSS via Play CDN. The only CDN allowed (ADR-012). -->
-    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Tailwind CSS compiled offline from the used utility classes
+         (tailwind/ build config; regenerate per tailwind/README.md). No CDN —
+         the viewer stays fully styled with Wi-Fi off (Thing 5C). -->
+    <link rel="stylesheet" href="/static/css/tailwind.css">
 
     <!-- Vendored client libraries (offline-capable, version pinned in
          finances/web/static/vendor/VERSIONS.txt). -->
