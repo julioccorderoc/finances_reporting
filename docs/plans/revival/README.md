@@ -7,7 +7,7 @@ Goal: finances easier than the spreadsheet. Design + decisions:
 
 Open a **fresh** Claude Code session in this repo and say:
 
-> Execute docs/plans/revival/0X-<name>.md
+> Execute `docs/plans/revival/0X-{name}.md`
 
 One thing per session. No bundling ("while I'm in here" is banned).
 After each session, report results back to the orchestrator session (or just
@@ -18,7 +18,7 @@ check the gate yourself — every prompt ends with a pass/fail gate).
 | # | Thing | File | Status |
 |---|-------|------|--------|
 | 1 | Commit backlog (April diff + Binance live-API fixes) | — | ✅ done 2026-07-09, in planning session |
-| 2 | BCV rate-gap fill from tasas-bcv-july-9.html | [02-rate-gap.md](02-rate-gap.md) | ⬜ |
+| 2 | BCV rate-gap fill from tasas-bcv-july-9.html | [02-rate-gap.md](02-rate-gap.md) | ✅ 2026-07-10 (validated: 104 rows, spot-checks exact, idempotent) |
 | 3 | Provincial CSV catch-up + triage | [03-provincial-catchup.md](03-provincial-catchup.md) | ⬜ needs bank CSVs downloaded first |
 | 4 | `finances html` static report | [04-static-report.md](04-static-report.md) | ⬜ |
 | 5 | `finances update` + desktop launcher + offline CSS | [05-ux-launcher.md](05-ux-launcher.md) | ⬜ |
