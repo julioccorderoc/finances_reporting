@@ -23,7 +23,7 @@ finances.db
 finances.db.*
 finances.db-*
 finances.db-journal
-finances-backup-*.db
+finances-backup-*.db*
 
 # Generated static report (finances html)
 report.html
