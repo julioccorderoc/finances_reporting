@@ -294,7 +294,8 @@ def test_earn_reward_row_to_transaction_is_interest_income_on_earn() -> None:
 # RawBinancePayRow
 # ---------------------------------------------------------------------------
 
-def test_pay_row_incoming_is_income() -> None:
+def test_pay_row_positive_amount_is_income() -> None:
+    # Binance Pay API returns a *signed* amount: positive = money in.
     row = RawBinancePayRow(
         orderId="PAY-1",
         orderType="C2C",
@@ -302,23 +303,29 @@ def test_pay_row_incoming_is_income() -> None:
         currency="USDT",
         transactionTime=1_700_000_000_000,
     )
-    txn = row.to_transaction(spot_account_id=1, direction="incoming")
+    txn = row.to_transaction(spot_account_id=1)
     assert txn.kind == TransactionKind.INCOME
     assert txn.amount == Decimal("5.00")
     assert txn.source_ref == "pay:PAY-1"
+    assert "(incoming)" in txn.description
 
 
-def test_pay_row_outgoing_is_expense() -> None:
+def test_pay_row_negative_amount_is_expense() -> None:
+    # Regression (2026-07-11): a C2C *send* carries orderType="C2C" (never
+    # starts with "PAY") but a negative amount — money leaving the account.
+    # The old orderType heuristic mislabeled every send as income. The sign of
+    # ``amount`` is the source of truth: negative => expense.
     row = RawBinancePayRow(
         orderId="PAY-2",
         orderType="C2C",
-        amount="5.00",
+        amount="-5.00",
         currency="USDT",
         transactionTime=1_700_000_000_000,
     )
-    txn = row.to_transaction(spot_account_id=1, direction="outgoing")
+    txn = row.to_transaction(spot_account_id=1)
     assert txn.kind == TransactionKind.EXPENSE
     assert txn.amount == Decimal("-5.00")
+    assert "(outgoing)" in txn.description
 
 
 # ---------------------------------------------------------------------------
