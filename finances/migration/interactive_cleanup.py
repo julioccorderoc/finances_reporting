@@ -217,6 +217,7 @@ def export_needs_review(
     if legacy_dir is not None:
         fieldnames.extend(_LEGACY_EXPORT_FIELDS)
 
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
     with csv_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()

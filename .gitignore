@@ -37,6 +37,7 @@ report.html
 # EPIC-012 cleanup workflow — user's personal batch-review CSV
 needs_review.csv
 needs_review_*.csv
+exports/
 
 # Test artifacts
 .coverage
