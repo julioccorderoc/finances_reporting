@@ -1,17 +1,23 @@
 #!/usr/bin/env bash
 #
-# Finances.command — double-click this in Finder to open the finances viewer.
+# finances.command — double-click this in Finder: the ONE entry point.
+# (Finder hides the .command suffix and shows it as "finances"; the suffix
+# is what makes macOS execute it on double-click.)
 #
 # What it does (deliberately dumb — plain bash, no launchd, no daemons):
 #   1. cd into the repo (wherever this file lives),
 #   2. start `finances serve` if the port is free, else just reuse the running one,
-#   3. open the browser at the viewer,
-#   4. on exit (Ctrl-C or closing the window), regenerate report.html so the
+#   3. open the browser at the viewer right away — never wait on network syncs,
+#   4. THEN run `finances update` as a background job in this terminal, so the
+#      per-source summary prints while you're already browsing; if it fails
+#      (offline, VPN off for Binance), the launcher keeps going,
+#   5. on exit (Ctrl-C or closing the window), regenerate report.html so the
 #      static file reflects any edits made this session.
 #
 # The server's own shutdown hook also regenerates report.html; the EXIT trap
 # below is a harmless belt-and-suspenders for the cases where it can't (e.g. a
-# hard window close before the server finishes teardown).
+# hard window close before the server finishes teardown). `finances update`
+# regenerates report.html too and is safe alongside the server (SQLite WAL).
 
 set -euo pipefail
 
@@ -50,6 +56,16 @@ trap regen_report EXIT
 
 # Open the browser once the server has had a moment to bind.
 ( sleep 2; open "$URL" >/dev/null 2>&1 || true ) &
+
+# Sync every source in the background AFTER the browser opens; the per-source
+# summary prints into this terminal while you browse. A failure here (offline,
+# VPN off) never kills the launcher — the summary itself says what went wrong.
+(
+  sleep 3
+  echo ""
+  echo "── Syncing sources (finances update) — summary prints here while you browse ──"
+  uv run finances update || echo "finances update failed — the viewer still works with existing data."
+) &
 
 echo "Starting Finances viewer at ${URL}"
 echo "Press Ctrl-C (or close this window) to stop — report.html is refreshed on exit."

@@ -329,9 +329,27 @@ def test_render_summary_is_plain_language(
     text = render_summary(result)
 
     assert "needs review" in text.lower()
-    assert "Finances.command" in text
+    assert "finances.command" in text
+    assert "Finances.command" not in text
     for src in ("bcv", "p2p", "binance", "provincial"):
         assert src in text.lower()
+
+
+def test_render_summary_zero_needs_review_names_launcher(tmp_path) -> None:
+    from finances.reports.update import UpdateReport, render_summary
+
+    report = UpdateReport(
+        outcomes=[],
+        needs_review_total=0,
+        freshness=[],
+        dry_run=False,
+        report_regenerated=True,
+        report_path=tmp_path / "report.html",
+    )
+    text = render_summary(report)
+
+    assert "finances.command" in text
+    assert "Finances.command" not in text
 
 
 # ---------------------------------------------------------------------------

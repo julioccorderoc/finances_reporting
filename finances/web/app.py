@@ -39,7 +39,7 @@ TEMPLATES_DIR = WEB_PACKAGE_DIR / "templates"
 def _regen_report_on_shutdown(settings: WebSettings) -> None:
     """Regenerate the static ``report.html`` from the current DB (Thing 5B).
 
-    Best-effort: the double-click launcher (``Finances.command``) relies on
+    Best-effort: the double-click launcher (``finances.command``) relies on
     the static file reflecting any write-back edits made during the serve
     session, but a regen failure must never crash server teardown. Read-only —
     :func:`export_html` issues SELECTs only.

@@ -315,11 +315,11 @@ def render_summary(report: UpdateReport) -> str:
     if report.needs_review_total:
         lines.append(
             f"Needs review: {report.needs_review_total} row(s) waiting for "
-            "triage — run Finances.command to sort them."
+            "triage — run finances.command to sort them."
         )
     else:
         lines.append(
-            "Needs review: 0 rows — nothing waiting. (triage via Finances.command)"
+            "Needs review: 0 rows — nothing waiting. (triage via finances.command)"
         )
 
     if report.freshness:
