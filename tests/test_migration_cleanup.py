@@ -343,3 +343,25 @@ def test_import_cleanup_csv_unknown_category_raises(
 
     with pytest.raises(ValueError, match="category"):
         import_cleanup_csv(db_with_review_rows, dest)
+
+
+def test_export_needs_review_creates_parent_dir(
+    db_with_review_rows, tmp_path
+) -> None:
+    """Default destination lives in exports/ now — writer must mkdir it."""
+    from finances.migration.interactive_cleanup import export_needs_review
+
+    dest = tmp_path / "exports" / "needs_review.csv"
+    count = export_needs_review(db_with_review_rows, dest)
+
+    assert dest.exists()
+    assert count >= 1
+
+
+def test_cleanup_export_default_path_outside_root() -> None:
+    """Root cleanup 2026-07-11: generated exports land in exports/, not repo root."""
+    from pathlib import Path
+
+    from finances.cli import main as cli_main
+
+    assert cli_main.DEFAULT_CLEANUP_EXPORT == Path("exports/needs_review.csv")
