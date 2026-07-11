@@ -22,6 +22,8 @@ from pathlib import Path
 from finances.config import DB_PATH
 from finances.ingest.provincial import compute_source_ref
 
+BACKUP_HINT = 'sqlite3 finances.db ".backup backups/finances-backup-$(date +%Y%m%d).db"'
+
 
 def canonicalize(conn: sqlite3.Connection, *, apply: bool) -> tuple[int, int]:
     rows = conn.execute(
@@ -56,7 +58,7 @@ def canonicalize(conn: sqlite3.Connection, *, apply: bool) -> tuple[int, int]:
 
     if not apply:
         print("(dry-run) re-run with --apply to write. Back up first:")
-        print('  sqlite3 finances.db ".backup finances-backup-$(date +%Y%m%d).db"')
+        print(f"  {BACKUP_HINT}")
         return len(rows), len(changes)
 
     new_refs = {new for _, _, new in changes}

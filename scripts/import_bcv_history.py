@@ -28,7 +28,7 @@ Usage
 
 Before ``--apply``, back up the DB::
 
-    sqlite3 finances.db ".backup finances-backup-$(date +%Y%m%d).db"
+    sqlite3 finances.db ".backup backups/finances-backup-$(date +%Y%m%d).db"
 """
 from __future__ import annotations
 
@@ -52,8 +52,9 @@ from finances.ingest.bcv import (
 )
 
 QUOTE = "VES"
-DEFAULT_HTML = "tasas-bcv-july-9.html"
+DEFAULT_HTML = "data/tasas-bcv-july-9.html"
 DEFAULT_DB = "finances.db"
+BACKUP_HINT = 'sqlite3 finances.db ".backup backups/finances-backup-$(date +%Y%m%d).db"'
 
 
 def _cell_currency(cell) -> str:
@@ -212,7 +213,7 @@ def main(argv: list[str] | None = None) -> int:
     _report(result, apply=args.apply)
     if not args.apply:
         print("\n(dry-run) re-run with --apply to write. Back up first:")
-        print('  sqlite3 finances.db ".backup finances-backup-$(date +%Y%m%d).db"')
+        print(f"  {BACKUP_HINT}")
     return 0
 
 
