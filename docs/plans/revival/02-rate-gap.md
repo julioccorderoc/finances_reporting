@@ -5,7 +5,7 @@
 Personal finances ledger, SQLite (`finances.db`), Python 3.13 + uv, Typer CLI.
 The `rates` table has daily BCV exchange rates ending 2026-04-17 — then a gap.
 Live scraper only captures "today", so the gap can't be re-fetched. The owner
-saved `tasas-bcv-july-9.html` (repo root): daily BCV rates for USD and EUR,
+saved `tasas-bcv-july-9.html` (now at `data/tasas-bcv-july-9.html`): daily BCV rates for USD and EUR,
 2026-01-02 → 2026-07-10, Spanish dates ("Viernes, 10 de julio de 2026"),
 Venezuelan decimal format ("Bs.S 709,69" = 709.69), one block per day.
 
@@ -28,7 +28,7 @@ that file and inserts the missing daily rates through the existing rates repo.
    HTML, 3-4 day blocks incl. an accented weekday and a `▼` day). Then implement.
 5. Script supports `--dry-run` (default!) printing count + first/last/sample
    rows; `--apply` to write.
-6. Before `--apply`: `sqlite3 finances.db ".backup finances-backup-$(date +%Y%m%d).db"`.
+6. Before `--apply`: `sqlite3 finances.db ".backup backups/finances-backup-$(date +%Y%m%d).db"`.
 7. EUR rows: import them too only if the schema/model already supports the
    pair cleanly; otherwise USD only and say so in the report. Do not extend
    the schema for this.

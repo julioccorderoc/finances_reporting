@@ -15,8 +15,11 @@ wheels/
 
 # local files
 inputs/
-output/
 data/
+
+# DB backups + archived pre-revival working artifacts (root cleanup 2026-07-11)
+backups/
+archive/
 
 # SQLite database
 finances.db
@@ -34,19 +37,15 @@ report.html
 # EPIC-012 cleanup workflow — user's personal batch-review CSV
 needs_review.csv
 needs_review_*.csv
-slices/
 
 # Test artifacts
 .coverage
 .coverage.*
 htmlcov/
 .pytest_cache/
+.hypothesis/
 
 # Claude auto-memory (local only)
 CLAUDE.md
 ERRORS.md
 MEMORY.md
-review/
-
-# others
-prompts/
