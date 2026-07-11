@@ -22,7 +22,7 @@ Ingest every new CSV, verify pairing and dedup, then hand off to triage.
 
 1. **Read first**: `finances/ingest/provincial.py` (expected CSV columns +
    date format validator) and `finances/cli/main.py` ingest section.
-2. Backup: `sqlite3 finances.db ".backup finances-backup-$(date +%Y%m%d).db"`.
+2. Backup: `sqlite3 finances.db ".backup backups/finances-backup-$(date +%Y%m%d).db"`.
 3. Per file: `uv run finances ingest provincial <file> --dry-run` first
    (check the exact CLI signature — read the code). Sane numbers → real run.
 4. If the bank changed its CSV format (dry-run validation errors): extend the

@@ -50,8 +50,8 @@ reference only, superseded by CLAUDE.md invariants on {date}".
   verified fully merged). Just confirm `git worktree list` shows only the
   main worktree; if new ones appeared, remove them the same way (verify
   merged + no uncommitted work first).
-- Stray DB copies at repo root (`finances.db.bak-*`, old backups >30 days) —
-  list, then delete.
+- Old backups: all DB copies live in `backups/` (root cleanup 2026-07-11).
+  List `backups/`, delete anything >30 days old.
 - `pandas` appears unused: verify `grep -rn "import pandas\|from pandas" finances/ tests/`
   is empty → remove from pyproject.toml, `uv lock`, run tests.
 - Any other dead deps the same way (verify by grep before removing).
@@ -69,5 +69,6 @@ reference only, superseded by CLAUDE.md invariants on {date}".
       plans. Nothing else at top level.
 - [ ] New CLAUDE.md ≤ 60 lines, committed (not gitignored).
 - [ ] `git worktree list` → only the main worktree.
-- [ ] No stray `.db` files at repo root except `finances.db` (+ current backup).
+- [ ] No stray `.db` files at repo root except `finances.db` (+ live -shm/-wal
+      sidecars); backups only under `backups/`.
 - [ ] `uv run pytest -q` green; `uv pip install -e .` still works.
