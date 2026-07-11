@@ -158,6 +158,70 @@ def test_seed_includes_at_least_one_rule_per_common_pattern(
     assert count >= 5, f"expected ≥5 active seeded rules, got {count}"
 
 
+def test_going_out_category_is_seeded(in_memory_db: sqlite3.Connection) -> None:
+    """Migration 007 adds the `Going Out` expense category (eating out /
+    drinks), distinct from `Groceries`."""
+    row = in_memory_db.execute(
+        "SELECT id FROM categories WHERE kind='expense' AND name='Going Out'"
+    ).fetchone()
+    assert row is not None
+
+
+@pytest.mark.parametrize(
+    "description",
+    [
+        "COM. PAGO MOV PB",
+        "COM.MTTO.CTA.",
+        "COM.EM.EDO.CTA",
+        "COM.RZO.PAG.MOVIL",
+        "COM.REF.BANC.",
+        "REVERSO CARGO",
+    ],
+)
+def test_bank_fee_strings_categorize_as_fees(
+    in_memory_db: sqlite3.Connection, description: str
+) -> None:
+    """Migration 007 fee rules map the real Provincial commission strings to
+    Fees — regression for the needs_review pile-up on abbreviated fee memos
+    (COM. PAGO MOV PB, COM.MTTO.CTA., REVERSO CARGO, …) that the seed's
+    `COM\\. PAGO MOVIL` / `COM\\. MANTENIMIENTO` patterns never matched."""
+    (fees_id,) = in_memory_db.execute(
+        "SELECT id FROM categories WHERE kind='expense' AND name='Fees'"
+    ).fetchone()
+    match = suggest(
+        in_memory_db,
+        CategorizationRequest(description=description, source="provincial"),
+    )
+    assert match is not None, f"{description!r} should match a fee rule"
+    assert match.category_id == fees_id
+
+
+@pytest.mark.parametrize(
+    "description",
+    [
+        "COMERCIAL LA 11  C A",
+        "COM NASHIRA ESTIVANELI",
+        "COMERCIAL ZL C A",
+    ],
+)
+def test_merchant_names_do_not_match_fee_rules(
+    in_memory_db: sqlite3.Connection, description: str
+) -> None:
+    """Fee patterns are anchored on `COM\\.` / the literal `REVERSO CARGO`, so
+    merchant names that merely start with COM/COMERCIAL are never mislabeled as
+    Fees."""
+    (fees_id,) = in_memory_db.execute(
+        "SELECT id FROM categories WHERE kind='expense' AND name='Fees'"
+    ).fetchone()
+    match = suggest(
+        in_memory_db,
+        CategorizationRequest(description=description, source="provincial"),
+    )
+    assert match is None or match.category_id != fees_id, (
+        f"{description!r} must not categorize as Fees"
+    )
+
+
 # ---------------------------------------------------------------------------
 # `suggest()` — happy paths.
 # ---------------------------------------------------------------------------
