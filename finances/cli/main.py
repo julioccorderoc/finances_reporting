@@ -468,10 +468,13 @@ def backfill(
         raise typer.Exit(code=1)
 
 
+DEFAULT_CLEANUP_EXPORT = Path("exports/needs_review.csv")
+
+
 @app.command("cleanup-export")
 def cleanup_export(
     to: Path = typer.Option(
-        Path("needs_review.csv"),
+        DEFAULT_CLEANUP_EXPORT,
         "--to",
         help="CSV destination. Review + fill `category` column in Sheets, then cleanup-apply.",
     ),
