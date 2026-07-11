@@ -200,3 +200,11 @@ def test_dry_run_then_apply_inserts_full_set(
     mod.import_history(in_memory_db, rows, apply=False)
     result = mod.import_history(in_memory_db, rows, apply=True)
     assert result.inserted == 10
+
+
+def test_default_paths_use_clean_root_layout() -> None:
+    """Root cleanup 2026-07-11: source HTML lives in data/, backups in backups/."""
+    assert mod.DEFAULT_HTML == "data/tasas-bcv-july-9.html"
+    assert mod.BACKUP_HINT.startswith(
+        'sqlite3 finances.db ".backup backups/finances-backup-'
+    )
