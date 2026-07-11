@@ -306,23 +306,23 @@ class RawBinancePayRow(_RawBase):
     def _dec(cls, v: Any) -> Decimal:
         return _coerce_decimal(v)
 
-    def to_transaction(
-        self,
-        *,
-        spot_account_id: int,
-        direction: Literal["incoming", "outgoing"],
-    ) -> Transaction:
-        if direction == "incoming":
-            kind = TransactionKind.INCOME
-            amount = self.amount
-        else:
+    def to_transaction(self, *, spot_account_id: int) -> Transaction:
+        # Binance Pay's transaction history returns a *signed* ``amount``:
+        # positive = money in (income), negative = money out (expense). Trust
+        # the sign — not ``orderType``. A C2C *send* carries a negative amount
+        # but an orderType of "C2C" (never "PAY..."), so the previous
+        # orderType heuristic mislabeled every send as income.
+        if self.amount < 0:
             kind = TransactionKind.EXPENSE
-            amount = -self.amount
+            direction = "outgoing"
+        else:
+            kind = TransactionKind.INCOME
+            direction = "incoming"
         return Transaction(
             account_id=spot_account_id,
             occurred_at=_from_ms(self.transactionTime),
             kind=kind,
-            amount=amount,
+            amount=self.amount,
             currency=self.currency.upper(),
             description=f"Binance Pay {self.orderType} ({direction})",
             source=SOURCE,
@@ -658,14 +658,13 @@ def _ingest_pay(
         errors.append(f"pay: {exc}")
         return
     for item in _unpack_rows(response):
-        direction = "outgoing" if str(item.get("orderType", "")).startswith("PAY") else "incoming"
         try:
             row = RawBinancePayRow.model_validate(item)
         except Exception as exc:  # noqa: BLE001
             errors.append(f"pay: {exc}")
             continue
         result = transactions_repo.upsert_by_source_ref(
-            conn, row.to_transaction(spot_account_id=spot_id, direction=direction)
+            conn, row.to_transaction(spot_account_id=spot_id)
         )
         stats["rows_inserted"] += result["rows_inserted"]
         stats["rows_updated"] += result["rows_updated"]
