@@ -19,7 +19,7 @@ made every change slower than the old spreadsheet. The code itself works:
 
 | # | Decision | Choice |
 |---|----------|--------|
-| D1 | HTML model | **Combo**: static `report.html` for viewing + double-click `Finances.command` launcher for edit sessions in the existing viewer. Static file cannot write to the DB (browser sandbox); edits need the server alive. |
+| D1 | HTML model | **Combo**: static `report.html` for viewing + double-click `finances.command` launcher for edit sessions in the existing viewer. Static file cannot write to the DB (browser sandbox); edits need the server alive. |
 | D2 | Live sources | All four stay: Provincial CSV, Binance API, cash CLI, Sheets mirror. |
 | D3 | Rate gap Apr–Jul 2026 | One-time import from owner-provided `tasas-bcv-july-9.html` (daily BCV USD+EUR, Jan 2 → Jul 10 2026). No third-party API. |
 | D4 | Process docs | Archive everything to `docs/archive/`; replace CLAUDE.md with a 1-page version (invariants + commands only). No epics, no ADR-first, no TDD-commit-ordering. Tests must still pass. |
@@ -30,7 +30,7 @@ made every change slower than the old spreadsheet. The code itself works:
 ## End state
 
 - Look at money → double-click `report.html` (offline, self-contained).
-- Change something → double-click `Finances.command` → browser viewer → close.
+- Change something → double-click `finances.command` → browser viewer → close.
 - Weekly ritual (~10 min): drop bank CSV in `inputs/`, VPN on, `finances update`.
   Prints per-source summary + how many rows need triage. Regenerates report.html.
 - `report.html` regenerates after every successful ingest and after edit sessions.
@@ -47,7 +47,7 @@ made every change slower than the old spreadsheet. The code itself works:
    (`03-provincial-catchup.md`)
 4. **Static report** — `finances html` → self-contained report.html reusing
    web services. Auto-regen post-ingest. (`04-static-report.md`)
-5. **One-command UX** — `finances update` wrapper, `Finances.command` launcher,
+5. **One-command UX** — `finances update` wrapper, `finances.command` launcher,
    vendor CSS offline, regen after edit sessions. (`05-ux-launcher.md`)
 6. **Ceremony teardown** — archive docs, 1-page CLAUDE.md (un-gitignored),
    remove stale worktrees/stray DB copies/dead deps. (`06-ceremony-teardown.md`)

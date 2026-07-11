@@ -23,7 +23,7 @@ check the gate yourself — every prompt ends with a pass/fail gate).
 | 4 | `finances html` static report | [04-static-report.md](04-static-report.md) | ✅ 2026-07-10 (validated: offline, charts render, numbers match services, auto-regen wired) |
 | 5 | `finances update` + desktop launcher + offline CSS | [05-ux-launcher.md](05-ux-launcher.md) | ✅ 2026-07-10 (validated end-to-end; validation surfaced + fixed 2 ingest bugs: enrichment clobber, amount-scale hash) |
 | 6 | Ceremony teardown (archive docs, 1-page CLAUDE.md) | [06-ceremony-teardown.md](06-ceremony-teardown.md) | ⬜ run last |
-| 7 | One entry point: Finances.start.command replaces the two files | [07-one-launcher.md](07-one-launcher.md) | ⬜ run before 6 |
+| 7 | One entry point: finances.command replaces the two files | [07-one-launcher.md](07-one-launcher.md) | ✅ implemented 2026-07-11 (launcher renamed + update-in-background, hints/tests/docs updated, pytest + grep gates pass); ⬜ Julio's Finder double-click validation pending |
 
 Order: 2 → 3 → 4 → 5 → 6. (2/3 are data, 4/5 are product, 6 is cleanup.)
 3 can slip anywhere before 6; it's the only one needing Julio's input

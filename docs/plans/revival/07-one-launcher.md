@@ -1,4 +1,4 @@
-# Thing 7 — one entry point: `Finances.start.command`
+# Thing 7 — one entry point: `finances.command`
 
 ## Context (assume no prior knowledge)
 
@@ -16,8 +16,8 @@ the normal flow.
 
 ## Task
 
-Replace `Finances.command` with a single launcher `Finances.start.command`
-(Finder shows it as "Finances.start"; the `.command` suffix is what makes
+Replace `Finances.command` with a single launcher `finances.command`
+(Finder shows it as "finances"; the `.command` suffix is what makes
 macOS execute it on double-click — do not fight this, just name it so).
 
 On double-click it must, in this order:
@@ -63,7 +63,7 @@ Then:
 ## Gate
 
 - [ ] Exactly ONE user-facing launcher file at repo root
-      (`Finances.start.command`, executable). `Finances.command` gone.
+      (`finances.command`, executable). `Finances.command` gone.
 - [ ] Double-click in Finder: browser opens the viewer within ~2s, update
       summary appears in the terminal while browsing, Ctrl-C exits cleanly
       and report.html's mtime is fresh.

@@ -21,13 +21,13 @@ Runs, in order, each step isolated (one failing step doesn't stop the rest):
 5. regenerate `report.html`
 
 Ends with a plain-language summary block: per-source inserted/updated/errors,
-needs_review total ("N rows waiting for triage — run Finances.command"), and
+needs_review total ("N rows waiting for triage — run finances.command"), and
 data freshness per source. Add `--dry-run` that passes dry-run through to
 every step.
 
-### B. `Finances.command` — double-click edit sessions
+### B. `finances.command` — double-click edit sessions
 
-A small executable script committed at repo root (`Finances.command`, chmod +x):
+A small executable script committed at repo root (`finances.command`, chmod +x):
 - cd into the repo, start `finances serve` if the port is free (else reuse),
 - open the browser at the viewer,
 - on exit (Ctrl-C / window close), regenerate `report.html` so the static
@@ -58,7 +58,7 @@ change: `grep -rn "cdn\|https://" finances/web/templates/` → only local refs.
 - [ ] `uv run finances update --dry-run` runs end-to-end, prints summary,
       writes nothing.
 - [ ] `uv run finances update` works; report.html regenerated.
-- [ ] Double-click `Finances.command` in Finder → browser opens viewer →
+- [ ] Double-click `finances.command` in Finder → browser opens viewer →
       Ctrl-C → report.html mtime updated.
 - [ ] Viewer renders styled with Wi-Fi off.
 - [ ] `uv run pytest -q` green.
