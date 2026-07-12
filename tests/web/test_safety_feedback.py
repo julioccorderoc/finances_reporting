@@ -307,3 +307,69 @@ def test_modal_category_control_has_autofocus(
     txn_id = _txn_id(seeded_web_db, "prov-1")
     body = client.get(f"/_partial/transactions/{txn_id}/modal").text
     assert "autofocus" in body
+
+
+# ---------------------------------------------------------------------------
+# Task 4 — triage modal: same dirty tracking, remove control, focus.
+# ---------------------------------------------------------------------------
+
+
+def test_triage_modal_no_hardcoded_set_sentinels(
+    seeded_web_db: sqlite3.Connection, web_client_factory
+) -> None:
+    client = web_client_factory()
+    txn_id = _txn_id(seeded_web_db, "prov-1")
+    body = client.get(f"/_partial/triage/{txn_id}/modal").text
+
+    assert 'name="set_category" value="true"' not in body
+    assert 'name="set_user_rate" value="true"' not in body
+    assert "catDirty" in body
+    assert "rateDirty" in body
+
+
+def test_triage_edit_untouched_fields_do_not_wipe(
+    seeded_web_db: sqlite3.Connection, web_client_factory
+) -> None:
+    """Server-contract pin for the triage edit endpoint: the untouched
+    dirty-tracked payload must clear nothing (passes pre-impl; guards
+    the payload shape the new template emits)."""
+    client = web_client_factory()
+    txn_id = _txn_id(seeded_web_db, "prov-3")  # has category AND user_rate
+    before = transactions_repo.get_by_id(seeded_web_db, txn_id)
+    assert before is not None
+    assert before.category_id is not None
+    assert before.user_rate is not None
+
+    resp = client.post(
+        f"/_partial/triage/{txn_id}/edit",
+        data={
+            "set_category": "false",
+            "category_id": "",
+            "set_user_rate": "false",
+            "user_rate": "",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+
+    after = transactions_repo.get_by_id(seeded_web_db, txn_id)
+    assert after is not None
+    assert after.category_id == before.category_id
+    assert after.user_rate == before.user_rate
+
+
+def test_triage_modal_has_remove_category_control_when_categorized(
+    seeded_web_db: sqlite3.Connection, web_client_factory
+) -> None:
+    client = web_client_factory()
+    txn_id = _txn_id(seeded_web_db, "prov-1")  # categorized (Groceries)
+    body = client.get(f"/_partial/triage/{txn_id}/modal").text
+    assert "remove category" in body
+
+
+def test_triage_modal_category_control_has_autofocus(
+    seeded_web_db: sqlite3.Connection, web_client_factory
+) -> None:
+    client = web_client_factory()
+    txn_id = _txn_id(seeded_web_db, "prov-1")
+    body = client.get(f"/_partial/triage/{txn_id}/modal").text
+    assert "autofocus" in body
