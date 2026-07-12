@@ -658,3 +658,19 @@
   }
 }
 /* === END toasts === */
+
+/* === remove-category control (WP2) ===================================== */
+.remove-category-btn {
+  align-self: flex-start;       /* .tx-modal-form is a flex column */
+  font-size: 0.75rem;
+  color: #be123c;               /* rose-700 */
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.remove-category-btn:hover {
+  color: #9f1239;               /* rose-800 */
+}
+/* === END remove-category control === */

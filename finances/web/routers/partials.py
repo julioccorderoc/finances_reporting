@@ -159,11 +159,12 @@ def monthly_mobile_partial(
 #        the HX-Trigger: closeModal response header so the Alpine
 #        listener on <body> can clear the host div.
 #
-# Form encoding choice (Phase 3 plan, simpler-of-two):
-#   The modal *always* sets ``set_category=true`` and ``set_user_rate=true``
-#   so submitting an empty string clears that field. There is no per-field
-#   "set_*" checkbox in the rendered HTML — but the API still accepts the
-#   ``set_*=false`` shape from JSON callers via the same Pydantic model.
+# Form encoding choice (WP2 / ux-overhaul §2):
+#   The modals dirty-track their controls with Alpine and submit
+#   ``set_category=true`` / ``set_user_rate=true`` only for fields the
+#   user actually touched; clearing a category is the explicit
+#   "× remove category" control. The API still accepts any ``set_*``
+#   combination from JSON callers via the same Pydantic model.
 # ---------------------------------------------------------------------------
 
 
