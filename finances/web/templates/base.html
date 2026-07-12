@@ -23,10 +23,38 @@
     x-data="{}"
     @close-modal.window="document.getElementById('tx-modal-host').replaceChildren()"
     @htmx:after-on-load.window="
-      const trigger = $event.detail && $event.detail.xhr && $event.detail.xhr.getResponseHeader('HX-Trigger');
-      if (trigger && trigger.split(',').map(s => s.trim()).includes('closeModal')) {
-        window.dispatchEvent(new CustomEvent('close-modal'));
+      const raw = $event.detail && $event.detail.xhr && $event.detail.xhr.getResponseHeader('HX-Trigger');
+      if (raw) {
+        let names = [];
+        let toast = null;
+        try {
+          const parsed = JSON.parse(raw);
+          names = Object.keys(parsed);
+          toast = parsed.toast || null;
+        } catch (err) {
+          names = raw.split(',').map(s => s.trim());
+        }
+        if (names.includes('closeModal')) {
+          window.dispatchEvent(new CustomEvent('close-modal'));
+        }
+        if (toast) {
+          window.dispatchEvent(new CustomEvent('show-toast', { detail: toast }));
+        }
       }
+    "
+    @htmx:response-error.window="
+      const xhr = $event.detail && $event.detail.xhr;
+      let message = 'Request failed';
+      if (xhr) {
+        message = 'Error ' + xhr.status;
+        try {
+          const parsed = JSON.parse(xhr.responseText);
+          if (parsed && parsed.detail) {
+            message = typeof parsed.detail === 'string' ? parsed.detail : JSON.stringify(parsed.detail);
+          }
+        } catch (err) {}
+      }
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: { level: 'error', message: message } }));
     "
   >
     <nav class="bg-white border-b border-slate-200">
@@ -53,5 +81,35 @@
        fired by the HX-Trigger: closeModal response header on save and
        by the modal's Cancel/Escape handlers. #}
     <div id="tx-modal-host"></div>
+
+    {# Toast host (WP2 / ux-overhaul §2). Server saves put a "toast" key
+       in the JSON HX-Trigger header; the <body> listener above re-emits
+       it as the window-level "show-toast" CustomEvent, and the global
+       htmx:response-error listener raises error toasts. Toasts
+       auto-dismiss after 4 s. #}
+    <div
+      id="toast-host"
+      class="toast-host"
+      aria-live="polite"
+      x-data="{ toasts: [], nextId: 1 }"
+      @show-toast.window="
+        const t = {
+          id: nextId++,
+          level: ($event.detail && $event.detail.level === 'error') ? 'error' : 'success',
+          message: ($event.detail && $event.detail.message) || 'Done'
+        };
+        toasts.push(t);
+        setTimeout(() => { toasts = toasts.filter(x => x.id !== t.id) }, 4000);
+      "
+    >
+      <template x-for="t in toasts" :key="t.id">
+        <div
+          class="toast"
+          :class="t.level === 'error' ? 'toast-error' : 'toast-success'"
+          role="status"
+          x-text="t.message"
+        ></div>
+      </template>
+    </div>
   </body>
 </html>
