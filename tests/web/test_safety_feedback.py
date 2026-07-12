@@ -200,3 +200,110 @@ def test_pair_confirm_hx_trigger_carries_toast_json(
     payload = json.loads(resp.headers["HX-Trigger"])
     assert payload["closeModal"] is True
     assert payload["toast"] == {"level": "success", "message": "Pair confirmed"}
+
+
+# ---------------------------------------------------------------------------
+# Task 3 — transactions edit modal: dirty tracking, remove control, focus.
+#
+# The wipe bug is a TEMPLATE bug (hard-coded set_category=true sentinels);
+# apply_edit already honors set_*=false. So the template-marker tests below
+# are the red ones; the endpoint tests pin the (already-correct) server
+# contract that the new untouched-form payload relies on.
+# ---------------------------------------------------------------------------
+
+
+def test_modal_no_hardcoded_set_sentinels(
+    seeded_web_db: sqlite3.Connection, web_client_factory
+) -> None:
+    client = web_client_factory()
+    txn_id = _txn_id(seeded_web_db, "prov-1")
+    body = client.get(f"/_partial/transactions/{txn_id}/modal").text
+
+    # The old always-true sentinels are gone...
+    assert 'name="set_category" value="true"' not in body
+    assert 'name="set_user_rate" value="true"' not in body
+    # ...replaced by Alpine dirty-tracking bindings.
+    assert "catDirty" in body
+    assert "rateDirty" in body
+
+
+def test_modal_untouched_fields_do_not_wipe(
+    seeded_web_db: sqlite3.Connection, web_client_factory
+) -> None:
+    """Payload an untouched dirty-tracked form now submits: both set_*
+    false, both values empty. Nothing may be cleared."""
+    client = web_client_factory()
+    txn_id = _txn_id(seeded_web_db, "prov-3")  # has category AND user_rate
+    before = transactions_repo.get_by_id(seeded_web_db, txn_id)
+    assert before is not None
+    assert before.category_id is not None
+    assert before.user_rate is not None
+
+    resp = client.post(
+        f"/_partial/transactions/{txn_id}/edit",
+        data={
+            "set_category": "false",
+            "category_id": "",
+            "set_user_rate": "false",
+            "user_rate": "",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+
+    after = transactions_repo.get_by_id(seeded_web_db, txn_id)
+    assert after is not None
+    assert after.category_id == before.category_id
+    assert after.user_rate == before.user_rate
+
+
+def test_modal_has_remove_category_control_when_categorized(
+    seeded_web_db: sqlite3.Connection, web_client_factory
+) -> None:
+    client = web_client_factory()
+    txn_id = _txn_id(seeded_web_db, "prov-1")  # categorized (Groceries)
+    body = client.get(f"/_partial/transactions/{txn_id}/modal").text
+    assert "remove category" in body
+
+
+def test_modal_hides_remove_category_control_when_uncategorized(
+    seeded_web_db: sqlite3.Connection, web_client_factory
+) -> None:
+    client = web_client_factory()
+    txn_id = _txn_id(seeded_web_db, "cash-1")  # no category
+    body = client.get(f"/_partial/transactions/{txn_id}/modal").text
+    assert "remove category" not in body
+
+
+def test_modal_explicit_remove_payload_clears_category(
+    seeded_web_db: sqlite3.Connection, web_client_factory
+) -> None:
+    """Payload the '× remove category' control produces: set_category=true
+    with an empty category_id. This — and only this — clears."""
+    client = web_client_factory()
+    txn_id = _txn_id(seeded_web_db, "prov-1")
+    before = transactions_repo.get_by_id(seeded_web_db, txn_id)
+    assert before is not None and before.category_id is not None
+
+    resp = client.post(
+        f"/_partial/transactions/{txn_id}/edit",
+        data={
+            "set_category": "true",
+            "category_id": "",
+            "set_user_rate": "false",
+            "user_rate": "",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+
+    after = transactions_repo.get_by_id(seeded_web_db, txn_id)
+    assert after is not None
+    assert after.category_id is None
+
+
+def test_modal_category_control_has_autofocus(
+    seeded_web_db: sqlite3.Connection, web_client_factory
+) -> None:
+    client = web_client_factory()
+    txn_id = _txn_id(seeded_web_db, "prov-1")
+    body = client.get(f"/_partial/transactions/{txn_id}/modal").text
+    assert "autofocus" in body
