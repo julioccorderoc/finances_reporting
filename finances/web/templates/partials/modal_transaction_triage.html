@@ -77,11 +77,12 @@
       hx-post="/_partial/triage/{{ txn.id }}/edit"
       hx-target="#triage-queue"
       hx-swap="innerHTML"
-      x-data="{ catDirty: false, rateDirty: false }"
+      x-data="{ catDirty: false, rateDirty: false, notesDirty: false }"
       x-init="$nextTick(() => { const el = $root.querySelector('[name=category_id]'); if (el) el.focus(); })"
     >
       <input type="hidden" name="set_category" value="false" :value="catDirty ? 'true' : 'false'">
       <input type="hidden" name="set_user_rate" value="false" :value="rateDirty ? 'true' : 'false'">
+      <input type="hidden" name="set_notes" value="false" :value="notesDirty ? 'true' : 'false'">
 
       <label class="block" @change="catDirty = true">
         <span class="text-xs uppercase tracking-wide text-slate-500">Category</span>
@@ -110,6 +111,16 @@
         <span class="text-[11px] text-slate-500">
           empty = clear (re-derives needs_review)
         </span>
+      </label>
+
+      <label class="block" @input="notesDirty = true">
+        <span class="text-xs uppercase tracking-wide text-slate-500">Notes</span>
+        <textarea
+          name="notes"
+          rows="2"
+          class="mt-1 w-full border border-slate-300 rounded px-2 py-1 text-sm"
+          placeholder="private note — survives re-ingest"
+        >{{ txn.notes if txn.notes is not none else '' }}</textarea>
       </label>
 
       <div class="tx-modal-actions">
