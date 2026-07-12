@@ -102,6 +102,7 @@ class TransactionCard(BaseModel):
     kind: str
     category_name: str | None
     needs_review: bool
+    notes: str | None = None
 
 
 class TransactionsPage(BaseModel):
@@ -179,9 +180,12 @@ def _build_where(f: TransactionsFilter) -> tuple[str, list[Any]]:
         where.append("t.needs_review = 0")
 
     if f.q:
-        where.append("t.description LIKE ?")
+        # Free-text search covers the statement description AND the manual
+        # note (WP3). NULL notes are fine: NULL LIKE x is NULL, OR handles it.
+        where.append("(t.description LIKE ? OR t.notes LIKE ?)")
         # Bind the wildcard pattern as a parameter, never interpolated.
-        params.append(f"%{f.q}%")
+        pattern = f"%{f.q}%"
+        params.extend([pattern, pattern])
 
     sql = " AND ".join(where) if where else "1 = 1"
     return sql, params
@@ -210,6 +214,7 @@ def _row_to_transaction(row: sqlite3.Row) -> Transaction:
         source=row["source"],
         source_ref=row["source_ref"],
         needs_review=bool(row["needs_review"]),
+        notes=row["notes"],
     )
 
 
@@ -246,6 +251,7 @@ def _project_card(
             kind=txn.kind.value,
             category_name=category_name,
             needs_review=txn.needs_review,
+            notes=txn.notes,
         )
 
     rate, source = rates_engine.resolve(conn, txn)
@@ -263,6 +269,7 @@ def _project_card(
             kind=txn.kind.value,
             category_name=category_name,
             needs_review=True,
+            notes=txn.notes,
         )
 
     amount_usd = txn.amount / rate
@@ -280,6 +287,7 @@ def _project_card(
         kind=txn.kind.value,
         category_name=category_name,
         needs_review=txn.needs_review,
+        notes=txn.notes,
     )
 
 
@@ -309,7 +317,7 @@ def query_transactions(
         SELECT
             t.id, t.account_id, t.occurred_at, t.kind, t.amount, t.currency,
             t.description, t.category_id, t.transfer_id, t.user_rate,
-            t.source, t.source_ref, t.needs_review,
+            t.source, t.source_ref, t.needs_review, t.notes,
             a.name AS account_name,
             c.name AS category_name
         FROM transactions t
