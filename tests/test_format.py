@@ -173,5 +173,9 @@ def test_month_from_date() -> None:
     assert fmt_month(date(2025, 12, 1)) == "Dec 2025"
 
 
+def test_month_from_datetime() -> None:
+    assert fmt_month(datetime(2025, 12, 1, 23, 59, tzinfo=UTC)) == "Dec 2025"
+
+
 def test_month_none_em_dash() -> None:
     assert fmt_month(None) == EM_DASH
