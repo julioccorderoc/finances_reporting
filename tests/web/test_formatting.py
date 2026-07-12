@@ -95,3 +95,49 @@ def test_macros_render_grouped_amount_and_weekday_date(
     assert "-1,234.56" in body
     # format_date → fmt_date: weekday + year (2024 != current year).
     assert "Mon, Jan 15, 2024" in body
+
+
+# ---------------------------------------------------------------------------
+# Task 4 — /monthly pivot + mobile formatting sweep.
+# ---------------------------------------------------------------------------
+
+
+def test_pivot_month_labels_and_totals_formatted(
+    web_db: sqlite3.Connection, web_client_factory
+) -> None:
+    _seed_negative_usd_expense(
+        web_db, amount=Decimal("-2345.67"), source_ref="fmt-monthly-1"
+    )
+    client = web_client_factory()
+    resp = client.get(
+        "/monthly",
+        params={
+            "layout": "desktop",
+            "range_preset": "custom",
+            "since": "2024-01",
+            "until": "2024-02",
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.text
+    assert "Jan 2024" in body                # pivot header via fmt_month
+    assert "Feb 2024" in body
+    assert 'data-month="2024-01"' in body    # machine-readable key untouched
+    assert "-2,345.67" in body               # cell + column total via fmt_number
+
+
+def test_mobile_month_nav_and_total_formatted(
+    web_db: sqlite3.Connection, web_client_factory
+) -> None:
+    _seed_negative_usd_expense(
+        web_db, amount=Decimal("-2345.67"), source_ref="fmt-monthly-2"
+    )
+    client = web_client_factory()
+    resp = client.get(
+        "/monthly", params={"layout": "mobile", "month": "2024-01"}
+    )
+    assert resp.status_code == 200
+    body = resp.text
+    assert "Jan 2024" in body                # centre month label via fmt_month
+    assert "-$2,345.67" in body              # month total via fmt_money
+    assert "$-2,345.67" not in body          # sign never after the symbol
