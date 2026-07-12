@@ -286,6 +286,7 @@ class TransactionFactory(ModelFactory[Transaction]):
     user_rate = None
     description = None
     needs_review = False
+    notes = None
     kind = TransactionKind.EXPENSE
     currency = "USD"
     source = "test"
