@@ -8,22 +8,15 @@
 {# --- formatting helpers ------------------------------------------------- #}
 
 {%- macro format_amount(value, places=2) -%}
-{#- Decimal/float -> human-readable string. None becomes em dash. -#}
-{%- if value is none -%}
-&mdash;
-{%- else -%}
-{{ "%.{}f".format(places) | format(value) }}
-{%- endif -%}
+{#- Decimal/float -> grouped, sign-preserving string (finances.format).
+    None -> em dash. -#}
+{{ value | fmt_number(places) }}
 {%- endmacro -%}
 
 {%- macro format_date(dt) -%}
-{%- if dt is none -%}
-&mdash;
-{%- elif dt.strftime is defined -%}
-{{ dt.strftime("%Y-%m-%d") }}
-{%- else -%}
-{{ dt }}
-{%- endif -%}
+{#- date/datetime/ISO string -> "Mon, Jul 7" (finances.format).
+    None -> em dash. -#}
+{{ dt | fmt_date }}
 {%- endmacro -%}
 
 {# --- badges ------------------------------------------------------------- #}
