@@ -19,7 +19,15 @@ finances.db.
 
 from __future__ import annotations
 
+import json
 import sqlite3
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
+
+import pytest
+
+from finances.db.repos import transactions as transactions_repo
+from finances.domain.models import Transaction, TransactionKind
 
 
 # ---------------------------------------------------------------------------
@@ -67,3 +75,128 @@ def test_app_css_has_toast_styles(
     assert ".toast-host" in resp.text
     assert ".toast-success" in resp.text
     assert ".toast-error" in resp.text
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers (Tasks 2-4).
+# ---------------------------------------------------------------------------
+
+
+def _txn_id(conn: sqlite3.Connection, source_ref: str) -> int:
+    row = conn.execute(
+        "SELECT id FROM transactions WHERE source_ref = ?", (source_ref,)
+    ).fetchone()
+    assert row is not None, f"missing seeded txn {source_ref}"
+    return int(row["id"])
+
+
+@pytest.fixture
+def pair_candidates(seeded_web_db: sqlite3.Connection) -> tuple[int, int]:
+    """Insert an unpaired Provincial deposit + matching Binance sell.
+
+    Mirrors the pair shape proven in tests/web/test_triage.py:
+    expected VES = abs(sell amount) * user_rate = 1000 * 36.50 = 36500.
+    The sell leg uses a REAL negative amount (expense sign convention —
+    do not copy seeded_web_db's positive-amount wart).
+    """
+    prov_row = seeded_web_db.execute(
+        "SELECT id FROM accounts WHERE name = 'Provincial'"
+    ).fetchone()
+    bin_row = seeded_web_db.execute(
+        "SELECT id FROM accounts WHERE name = 'Binance Spot'"
+    ).fetchone()
+    assert prov_row is not None and bin_row is not None
+    yesterday = datetime.now(tz=UTC) - timedelta(days=1)
+
+    transactions_repo.insert(
+        seeded_web_db,
+        Transaction(
+            account_id=int(prov_row["id"]),
+            occurred_at=yesterday,
+            kind=TransactionKind.INCOME,
+            amount=Decimal("36500.00"),
+            currency="VES",
+            description="ABONO P2P sell",
+            source="provincial",
+            source_ref="wp2-bank-deposit-1",
+        ),
+    )
+    transactions_repo.insert(
+        seeded_web_db,
+        Transaction(
+            account_id=int(bin_row["id"]),
+            occurred_at=yesterday,
+            kind=TransactionKind.EXPENSE,
+            amount=Decimal("-1000.00"),
+            currency="USDT",
+            description="P2P sell USDT",
+            user_rate=Decimal("36.50"),
+            source="binance",
+            source_ref="wp2-binance-sell-1",
+        ),
+    )
+    return (
+        _txn_id(seeded_web_db, "wp2-bank-deposit-1"),
+        _txn_id(seeded_web_db, "wp2-binance-sell-1"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Task 2 — HX-Trigger carries the toast JSON payload.
+# ---------------------------------------------------------------------------
+
+
+def test_edit_endpoint_hx_trigger_carries_toast_json(
+    seeded_web_db: sqlite3.Connection, web_client_factory
+) -> None:
+    client = web_client_factory()
+    txn_id = _txn_id(seeded_web_db, "prov-1")
+
+    resp = client.post(
+        f"/_partial/transactions/{txn_id}/edit",
+        data={
+            "set_category": "false",
+            "category_id": "",
+            "set_user_rate": "true",
+            "user_rate": "36.5",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    payload = json.loads(resp.headers["HX-Trigger"])
+    assert payload["closeModal"] is True
+    assert payload["toast"] == {"level": "success", "message": "Saved"}
+
+
+def test_triage_edit_hx_trigger_carries_toast_and_advance(
+    seeded_web_db: sqlite3.Connection, web_client_factory
+) -> None:
+    client = web_client_factory()
+    txn_id = _txn_id(seeded_web_db, "prov-needs-review")
+
+    resp = client.post(
+        f"/_partial/triage/{txn_id}/edit",
+        data={
+            "set_category": "false",
+            "category_id": "",
+            "set_user_rate": "true",
+            "user_rate": "36.5",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    payload = json.loads(resp.headers["HX-Trigger"])
+    assert payload["closeModal"] is True
+    assert payload["advanceQueue"] is True
+    assert payload["toast"] == {"level": "success", "message": "Saved"}
+
+
+def test_pair_confirm_hx_trigger_carries_toast_json(
+    pair_candidates: tuple[int, int], web_client_factory
+) -> None:
+    deposit_id, sell_id = pair_candidates
+    client = web_client_factory()
+
+    resp = client.post(f"/_partial/triage/pair/{deposit_id}/{sell_id}/confirm")
+    assert resp.status_code == 200, resp.text
+    payload = json.loads(resp.headers["HX-Trigger"])
+    assert payload["closeModal"] is True
+    assert payload["toast"] == {"level": "success", "message": "Pair confirmed"}
