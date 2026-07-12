@@ -11,6 +11,7 @@ sync state every 60 seconds. Phase 2c adds
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from decimal import Decimal, InvalidOperation
 
@@ -200,6 +201,20 @@ def _parse_form_bool(value: str | None) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _hx_trigger_json(*events: str, toast_message: str) -> str:
+    """Build an ``HX-Trigger`` header value: named events + a success toast.
+
+    htmx accepts a JSON object in ``HX-Trigger``: each key is dispatched
+    as an event, its value as the event detail. The base.html <body>
+    listener re-dispatches ``closeModal`` as the ``close-modal`` window
+    event and ``toast`` as ``show-toast`` (WP2 toast contract; error
+    toasts come from the global htmx:responseError listener instead).
+    """
+    payload: dict[str, object] = {name: True for name in events}
+    payload["toast"] = {"level": "success", "message": toast_message}
+    return json.dumps(payload)
+
+
 @router.get("/transactions/{txn_id}/modal", include_in_schema=False)
 def transactions_modal_partial(
     request: Request,
@@ -288,7 +303,7 @@ def transactions_edit_partial(
         "partials/card_transaction.html",
         {"card": card},
     )
-    response.headers["HX-Trigger"] = "closeModal"
+    response.headers["HX-Trigger"] = _hx_trigger_json("closeModal", toast_message="Saved")
     return response
 
 
@@ -420,7 +435,9 @@ def triage_edit_partial(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     response = _render_queue_partial(request, conn)
-    response.headers["HX-Trigger"] = "closeModal, advanceQueue"
+    response.headers["HX-Trigger"] = _hx_trigger_json(
+        "closeModal", "advanceQueue", toast_message="Saved"
+    )
     return response
 
 
@@ -506,7 +523,9 @@ def triage_pair_confirm_partial(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     response = _render_queue_partial(request, conn)
-    response.headers["HX-Trigger"] = "closeModal"
+    response.headers["HX-Trigger"] = _hx_trigger_json(
+        "closeModal", toast_message="Pair confirmed"
+    )
     return response
 
 
