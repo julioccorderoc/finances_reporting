@@ -1,0 +1,177 @@
+"""Unit contract for finances.format (UX overhaul WP1).
+
+Written before the implementation per rule-011. Pins the four shared
+formatting functions every surface (viewer, static report, CLI) must
+agree on. Real expense amounts are NEGATIVE (project sign convention),
+so negative cases are first-class here.
+
+Weekday facts used below (verified against the proleptic Gregorian
+calendar): 2026-07-06, 2025-07-07, 2024-01-15 are Mondays;
+2025-12-31 is a Wednesday; 2026-01-01 is a Thursday.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, date, datetime
+from decimal import Decimal
+
+from finances.format import fmt_date, fmt_money, fmt_month, fmt_number
+
+EM_DASH = "—"  # em dash "—" (the None placeholder)
+
+
+# ---------------------------------------------------------------------------
+# fmt_number
+# ---------------------------------------------------------------------------
+
+
+def test_number_negative_decimal_grouped() -> None:
+    assert fmt_number(Decimal("-1234.56")) == "-1,234.56"
+
+
+def test_number_positive_pads_places() -> None:
+    assert fmt_number(Decimal("1234.5")) == "1,234.50"
+
+
+def test_number_over_one_million() -> None:
+    assert fmt_number(Decimal("-1234567.891")) == "-1,234,567.89"
+
+
+def test_number_zero() -> None:
+    assert fmt_number(Decimal("0")) == "0.00"
+
+
+def test_number_negative_zero_normalized() -> None:
+    # A tiny negative that rounds to zero must not render "-0.00".
+    assert fmt_number(Decimal("-0.001")) == "0.00"
+
+
+def test_number_none_em_dash() -> None:
+    assert fmt_number(None) == EM_DASH
+
+
+def test_number_float_input() -> None:
+    assert fmt_number(-1234.56) == "-1,234.56"
+
+
+def test_number_int_input() -> None:
+    assert fmt_number(1_000_000) == "1,000,000.00"
+
+
+def test_number_places_four() -> None:
+    # /rates uses 4 decimal places (rates_latest_per_pair.html).
+    assert fmt_number(Decimal("36.5"), places=4) == "36.5000"
+
+
+def test_number_places_zero() -> None:
+    assert fmt_number(Decimal("-1234.56"), places=0) == "-1,235"
+
+
+def test_number_half_up_rounding() -> None:
+    assert fmt_number(Decimal("2.005")) == "2.01"
+
+
+# ---------------------------------------------------------------------------
+# fmt_money
+# ---------------------------------------------------------------------------
+
+
+def test_money_sign_before_symbol() -> None:
+    assert fmt_money(Decimal("-1200")) == "-$1,200.00"
+
+
+def test_money_positive() -> None:
+    assert fmt_money(Decimal("3450")) == "$3,450.00"
+
+
+def test_money_over_one_million() -> None:
+    assert fmt_money(Decimal("-1234567.89")) == "-$1,234,567.89"
+
+
+def test_money_zero() -> None:
+    assert fmt_money(Decimal("0")) == "$0.00"
+
+
+def test_money_none_em_dash() -> None:
+    assert fmt_money(None) == EM_DASH
+
+
+def test_money_label_currency_sign_first() -> None:
+    assert fmt_money(Decimal("-45231.10"), symbol="Bs. ") == "-Bs. 45,231.10"
+
+
+def test_money_never_dollar_minus() -> None:
+    for value in (Decimal("-0.01"), Decimal("-1"), Decimal("-999999.99")):
+        assert "$-" not in fmt_money(value)
+
+
+# ---------------------------------------------------------------------------
+# fmt_date
+# ---------------------------------------------------------------------------
+
+_TODAY = date(2026, 7, 11)
+
+
+def test_date_same_year_no_year_suffix() -> None:
+    assert fmt_date(date(2026, 7, 6), today=_TODAY) == "Mon, Jul 6"
+
+
+def test_date_other_year_appends_year() -> None:
+    assert fmt_date(date(2025, 7, 7), today=_TODAY) == "Mon, Jul 7, 2025"
+
+
+def test_date_year_boundary_previous_year() -> None:
+    # Dec 31 viewed on Jan 1 of the next year → year suffix required.
+    assert (
+        fmt_date(date(2025, 12, 31), today=date(2026, 1, 1))
+        == "Wed, Dec 31, 2025"
+    )
+
+
+def test_date_year_boundary_next_year() -> None:
+    # Jan 1 viewed on Dec 31 of the previous year → year suffix required.
+    assert (
+        fmt_date(date(2026, 1, 1), today=date(2025, 12, 31))
+        == "Thu, Jan 1, 2026"
+    )
+
+
+def test_date_accepts_datetime() -> None:
+    dt = datetime(2024, 1, 15, 23, 59, tzinfo=UTC)
+    assert fmt_date(dt, today=_TODAY) == "Mon, Jan 15, 2024"
+
+
+def test_date_accepts_iso_string() -> None:
+    assert fmt_date("2024-01-15", today=_TODAY) == "Mon, Jan 15, 2024"
+
+
+def test_date_none_em_dash() -> None:
+    assert fmt_date(None) == EM_DASH
+
+
+def test_date_default_today_omits_current_year() -> None:
+    # Default today comes from finances.config.CARACAS_TZ; today's own date
+    # never carries a year suffix, so exactly one comma appears.
+    label = fmt_date(datetime.now(tz=UTC).date())
+    assert label.count(",") == 1
+
+
+# ---------------------------------------------------------------------------
+# fmt_month
+# ---------------------------------------------------------------------------
+
+
+def test_month_from_string() -> None:
+    assert fmt_month("2026-07") == "Jul 2026"
+
+
+def test_month_from_string_january() -> None:
+    assert fmt_month("2024-01") == "Jan 2024"
+
+
+def test_month_from_date() -> None:
+    assert fmt_month(date(2025, 12, 1)) == "Dec 2025"
+
+
+def test_month_none_em_dash() -> None:
+    assert fmt_month(None) == EM_DASH
