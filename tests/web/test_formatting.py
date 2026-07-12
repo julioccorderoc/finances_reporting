@@ -73,3 +73,25 @@ def test_fmt_filters_registered_on_app_templates(web_db_path: Path) -> None:
     assert filters["fmt_money"] is fmt_money
     assert filters["fmt_date"] is fmt_date
     assert filters["fmt_month"] is fmt_month
+
+
+# ---------------------------------------------------------------------------
+# Task 3 — _macros.html format_amount/format_date delegate to the filters.
+# ---------------------------------------------------------------------------
+
+
+def test_macros_render_grouped_amount_and_weekday_date(
+    web_db: sqlite3.Connection, web_client_factory
+) -> None:
+    _seed_negative_usd_expense(web_db)
+    client = web_client_factory()
+    resp = client.get(
+        "/transactions",
+        params={"date_from": "2024-01-01", "date_to": "2024-01-31"},
+    )
+    assert resp.status_code == 200
+    body = resp.text
+    # format_amount → fmt_number: grouped, sign preserved (native column).
+    assert "-1,234.56" in body
+    # format_date → fmt_date: weekday + year (2024 != current year).
+    assert "Mon, Jan 15, 2024" in body
