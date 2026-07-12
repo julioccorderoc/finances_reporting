@@ -25,6 +25,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from finances.format import fmt_date, fmt_money, fmt_month, fmt_number
 from finances.web.auth import BearerTokenMiddleware
 from finances.web.routers import api as api_router
 from finances.web.routers import pages as pages_router
@@ -80,6 +81,16 @@ def create_app(settings: WebSettings) -> FastAPI:
     app.state.settings = settings
 
     app.state.templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+    # Shared display filters (UX overhaul WP1) — the SAME four names are
+    # the cross-plan contract; templates use them directly and via macros.
+    app.state.templates.env.filters.update(
+        {
+            "fmt_number": fmt_number,
+            "fmt_money": fmt_money,
+            "fmt_date": fmt_date,
+            "fmt_month": fmt_month,
+        }
+    )
 
     app.mount(
         "/static",
