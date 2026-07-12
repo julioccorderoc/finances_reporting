@@ -141,3 +141,49 @@ def test_mobile_month_nav_and_total_formatted(
     assert "Jan 2024" in body                # centre month label via fmt_month
     assert "-$2,345.67" in body              # month total via fmt_money
     assert "$-2,345.67" not in body          # sign never after the symbol
+
+
+# ---------------------------------------------------------------------------
+# Task 5 — sign before symbol on $-prefixed USD sites.
+# ---------------------------------------------------------------------------
+
+
+def test_transactions_list_usd_sign_before_symbol(
+    web_db: sqlite3.Connection, web_client_factory
+) -> None:
+    _seed_negative_usd_expense(web_db, source_ref="fmt-sign-1")
+    client = web_client_factory()
+    resp = client.get(
+        "/transactions",
+        params={"date_from": "2024-01-01", "date_to": "2024-01-31"},
+    )
+    assert resp.status_code == 200
+    body = resp.text
+    assert "-$1,234.56" in body
+    assert "$-1,234.56" not in body
+
+
+def test_transaction_modal_usd_sign_before_symbol(
+    web_db: sqlite3.Connection, web_client_factory
+) -> None:
+    _seed_negative_usd_expense(web_db, source_ref="fmt-sign-2")
+    txn_id = web_db.execute(
+        "SELECT id FROM transactions WHERE source_ref = 'fmt-sign-2'"
+    ).fetchone()["id"]
+    client = web_client_factory()
+    resp = client.get(f"/_partial/transactions/{txn_id}/modal")
+    assert resp.status_code == 200
+    assert "-$1,234.56" in resp.text
+    assert "$-1,234.56" not in resp.text
+
+
+def test_accounts_page_usd_sign_before_symbol(
+    web_db: sqlite3.Connection, web_client_factory
+) -> None:
+    _seed_negative_usd_expense(web_db, source_ref="fmt-sign-3")
+    client = web_client_factory()
+    resp = client.get("/accounts")
+    assert resp.status_code == 200
+    body = resp.text
+    assert "-$1,234.56" in body      # balance_usdt via fmt_money
+    assert "$-1,234.56" not in body
