@@ -8,22 +8,15 @@
 {# --- formatting helpers ------------------------------------------------- #}
 
 {%- macro format_amount(value, places=2) -%}
-{#- Decimal/float -> human-readable string. None becomes em dash. -#}
-{%- if value is none -%}
-&mdash;
-{%- else -%}
-{{ "%.{}f".format(places) | format(value) }}
-{%- endif -%}
+{#- Decimal/float -> grouped, sign-preserving string (finances.format).
+    None -> em dash. -#}
+{{ value | fmt_number(places) }}
 {%- endmacro -%}
 
 {%- macro format_date(dt) -%}
-{%- if dt is none -%}
-&mdash;
-{%- elif dt.strftime is defined -%}
-{{ dt.strftime("%Y-%m-%d") }}
-{%- else -%}
-{{ dt }}
-{%- endif -%}
+{#- date/datetime/ISO string -> "Mon, Jul 7" (finances.format).
+    None -> em dash. -#}
+{{ dt | fmt_date }}
 {%- endmacro -%}
 
 {# --- badges ------------------------------------------------------------- #}
@@ -194,10 +187,8 @@
   class="pivot-cell tabular-nums {% if fallback_amount and fallback_amount != 0 %}has-bcv-fallback{% endif %} {% if needs_review_count and needs_review_count > 0 %}has-needs-review{% endif %}"
   data-bcv-fallback="{{ 'true' if fallback_amount and fallback_amount != 0 else 'false' }}"
   data-needs-review-count="{{ needs_review_count or 0 }}"
-  title="USD {{ '%.2f' | format(amount or 0) }}{% if fallback_amount and fallback_amount != 0 %} (+ {{ '%.2f' | format(fallback_amount) }} BCV fallback){% endif %}{% if needs_review_count and needs_review_count > 0 %} · {{ needs_review_count }} needs review{% endif %}"
+  title="USD {{ (amount or 0) | fmt_number }}{% if fallback_amount and fallback_amount != 0 %} (+ {{ fallback_amount | fmt_number }} BCV fallback){% endif %}{% if needs_review_count and needs_review_count > 0 %} · {{ needs_review_count }} needs review{% endif %}"
 >
-  {%- if amount is none -%}&mdash;
-  {%- else -%}{{ '%.2f' | format(amount) }}
-  {%- endif -%}
+  {{ amount | fmt_number }}
 </span>
 {%- endmacro -%}

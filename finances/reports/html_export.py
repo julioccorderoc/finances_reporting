@@ -32,6 +32,7 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from pydantic import BaseModel, ConfigDict
 
+from finances.format import fmt_date, fmt_money, fmt_month, fmt_number
 from finances.reports import monthly as monthly_report
 from finances.web.services.dashboard import build_recent_activity
 from finances.web.services.monthly_view import (
@@ -349,18 +350,6 @@ def build_report_context(
 # ---------------------------------------------------------------------------
 
 
-def _format_money(value: Decimal | None) -> str:
-    """Format a Decimal as ``$X,XXX.XX`` (or ``-$…``); ``None`` → em dash."""
-    if value is None:
-        return "—"
-    quant = value.quantize(Decimal("0.01"))
-    sign = "-" if quant < 0 else ""
-    int_part, _, frac_part = format(abs(quant), "f").partition(".")
-    frac_part = (frac_part + "00")[:2]
-    grouped = "{:,}".format(int(int_part))
-    return f"{sign}${grouped}.{frac_part}"
-
-
 _ENV: Environment | None = None
 
 
@@ -373,7 +362,14 @@ def _jinja_env() -> Environment:
             trim_blocks=True,
             lstrip_blocks=True,
         )
-        env.filters["money"] = _format_money
+        env.filters.update(
+            {
+                "fmt_number": fmt_number,
+                "fmt_money": fmt_money,
+                "fmt_date": fmt_date,
+                "fmt_month": fmt_month,
+            }
+        )
         _ENV = env
     return _ENV
 
@@ -398,7 +394,7 @@ def _chart_data_json(context: ReportContext) -> str:
 
     payload = {
         "monthly": {
-            "labels": [f.month for f in context.monthly_flows],
+            "labels": [fmt_month(f.month) for f in context.monthly_flows],
             "income": [float(f.income_usd) for f in context.monthly_flows],
             "expense": [float(f.expense_usd) for f in context.monthly_flows],
             "net": [float(f.net_usd) for f in context.monthly_flows],

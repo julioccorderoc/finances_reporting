@@ -16,7 +16,7 @@
   {# Header row: blank corner + month labels. #}
   <div class="pivot-head first">Category</div>
   {% for m in pivot.months %}
-    <div class="pivot-head" data-month="{{ m }}">{{ m }}</div>
+    <div class="pivot-head" data-month="{{ m }}">{{ m | fmt_month }}</div>
   {% endfor %}
 
   {# Body rows. #}
@@ -44,7 +44,7 @@
   <div class="pivot-footer first">Total</div>
   {% for m in pivot.months %}
     <div class="pivot-footer" data-col-total="{{ m }}">
-      {{ '%.2f' | format(pivot.totals.column_total_usd[m]) }}
+      {{ pivot.totals.column_total_usd[m] | fmt_number }}
     </div>
   {% endfor %}
 </section>

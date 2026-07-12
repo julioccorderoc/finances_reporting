@@ -33,7 +33,7 @@
       {% if card.balance_usdt is none %}
         &mdash;
       {% else %}
-        ${{ format_amount(card.balance_usdt) }} <span class="not-italic">USDT</span>
+        {{ card.balance_usdt | fmt_money }} <span class="not-italic">USDT</span>
       {% endif %}
     </div>
   </div>

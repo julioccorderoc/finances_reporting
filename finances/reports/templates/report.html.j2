@@ -112,7 +112,7 @@
       <div class="row-between">
         <div>
           <div class="muted" style="font-size:0.8rem;">Net worth (USDT headline)</div>
-          <div class="netfig {{ 'neg' if ctx.net_worth_usd < 0 else '' }}">{{ ctx.net_worth_usd | money }}</div>
+          <div class="netfig {{ 'neg' if ctx.net_worth_usd < 0 else '' }}">{{ ctx.net_worth_usd | fmt_money }}</div>
         </div>
         <div class="muted" style="text-align:right; font-size:0.82rem;">
           Generated {{ ctx.generated_at.strftime('%Y-%m-%d %H:%M') }}
@@ -131,7 +131,7 @@
         {% for f in ctx.freshness %}
         <span class="chip {{ 'stale' if f.stale else '' }}">
           <strong>{{ f.source }}</strong>
-          <span>{% if f.last_txn_date %}{{ f.last_txn_date.isoformat() }} ({{ f.days_old }}d){% else %}never{% endif %}</span>
+          <span>{% if f.last_txn_date %}{{ f.last_txn_date | fmt_date }} ({{ f.days_old }}d){% else %}never{% endif %}</span>
         </span>
         {% else %}
         <span class="muted">No transactions yet.</span>
@@ -145,8 +145,8 @@
       {% for a in ctx.accounts %}
       <div class="tile">
         <div class="name">{{ a.name }}</div>
-        <div class="sub">{{ a.balance_native }} {{ a.currency }}</div>
-        <div class="amt">{{ a.balance_usdt | money }}</div>
+        <div class="sub">{{ a.balance_native | fmt_number }} {{ a.currency }}</div>
+        <div class="amt">{{ a.balance_usdt | fmt_money }}</div>
       </div>
       {% else %}
       <div class="muted">No accounts.</div>
@@ -158,16 +158,16 @@
     <div class="kpis">
       <div class="kpi panel">
         <div class="label">This month income</div>
-        <div class="value pos">{{ ctx.month_income_usd | money }}</div>
+        <div class="value pos">{{ ctx.month_income_usd | fmt_money }}</div>
       </div>
       <div class="kpi panel">
         <div class="label">This month spend</div>
-        <div class="value neg">{{ ctx.month_expense_usd | money }}</div>
+        <div class="value neg">{{ ctx.month_expense_usd | fmt_money }}</div>
       </div>
       {% set month_net = ctx.month_income_usd + ctx.month_expense_usd %}
       <div class="kpi panel">
         <div class="label">This month net</div>
-        <div class="value {{ 'neg' if month_net < 0 else 'pos' }}">{{ month_net | money }}</div>
+        <div class="value {{ 'neg' if month_net < 0 else 'pos' }}">{{ month_net | fmt_money }}</div>
       </div>
     </div>
     <div class="panel" style="margin-top:0.75rem;">
@@ -178,17 +178,17 @@
     <h2>Category breakdown (expenses)</h2>
     <div class="two-col">
       <div class="panel">
-        <div class="row-between"><strong>{{ ctx.current_month }}</strong><span class="muted">current</span></div>
+        <div class="row-between"><strong>{{ ctx.current_month | fmt_month }}</strong><span class="muted">current</span></div>
         {% for c in ctx.category_current %}
-        <div class="kv"><span>{{ c.category }}</span><span class="amt">{{ c.total_usd | money }}</span></div>
+        <div class="kv"><span>{{ c.category }}</span><span class="amt">{{ c.total_usd | fmt_money }}</span></div>
         {% else %}
         <div class="muted" style="margin-top:0.5rem;">No expenses.</div>
         {% endfor %}
       </div>
       <div class="panel">
-        <div class="row-between"><strong>{{ ctx.prev_month }}</strong><span class="muted">previous</span></div>
+        <div class="row-between"><strong>{{ ctx.prev_month | fmt_month }}</strong><span class="muted">previous</span></div>
         {% for c in ctx.category_prev %}
-        <div class="kv"><span>{{ c.category }}</span><span class="amt">{{ c.total_usd | money }}</span></div>
+        <div class="kv"><span>{{ c.category }}</span><span class="amt">{{ c.total_usd | fmt_money }}</span></div>
         {% else %}
         <div class="muted" style="margin-top:0.5rem;">No expenses.</div>
         {% endfor %}
@@ -216,14 +216,14 @@
     <div class="cards">
       {% for t in ctx.recent %}
       <div class="card-row">
-        <span class="date">{{ t.occurred_at.strftime('%Y-%m-%d') }}</span>
+        <span class="date">{{ t.occurred_at | fmt_date }}</span>
         <span class="tag hide-md">{{ t.account }}</span>
         <span class="desc">{{ t.description or '(no description)' }}
           {% if t.category %}<span class="tag">{{ t.category }}</span>{% endif %}
         </span>
         <span class="amt">
-          {{ t.amount_native }} {{ t.currency }}
-          <span class="usd">{{ t.amount_usd | money }}</span>
+          {{ t.amount_native | fmt_number }} {{ t.currency }}
+          <span class="usd">{{ t.amount_usd | fmt_money }}</span>
         </span>
         <span class="tag hide-md">{{ t.kind }}</span>
         <span class="amt">

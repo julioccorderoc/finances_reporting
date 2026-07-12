@@ -40,7 +40,7 @@
       <div class="mt-1 text-lg font-semibold tabular-nums">
         {{ format_amount(card.amount_native) }} <span class="text-sm text-slate-500">{{ card.currency }}</span>
         {% if card.amount_usd is not none %}
-          <span class="ml-2 text-sm text-slate-500">${{ format_amount(card.amount_usd) }}</span>
+          <span class="ml-2 text-sm text-slate-500">{{ card.amount_usd | fmt_money }}</span>
         {% else %}
           <span class="ml-2 text-sm text-slate-400">&mdash;</span>
         {% endif %}
