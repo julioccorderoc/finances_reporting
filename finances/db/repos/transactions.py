@@ -67,6 +67,7 @@ def _row_to_transaction(row: sqlite3.Row) -> Transaction:
         source=row["source"],
         source_ref=row["source_ref"],
         needs_review=bool(row["needs_review"]),
+        notes=row["notes"],
     )
 
 
@@ -75,8 +76,9 @@ def insert(conn: sqlite3.Connection, txn: Transaction) -> Transaction:
         """
         INSERT INTO transactions (
             account_id, occurred_at, kind, amount, currency, description,
-            category_id, transfer_id, user_rate, source, source_ref, needs_review
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            category_id, transfer_id, user_rate, source, source_ref,
+            needs_review, notes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             txn.account_id,
@@ -91,6 +93,7 @@ def insert(conn: sqlite3.Connection, txn: Transaction) -> Transaction:
             txn.source,
             txn.source_ref,
             1 if txn.needs_review else 0,
+            txn.notes,
         ),
     )
     return txn.model_copy(update={"id": cur.lastrowid})
@@ -100,7 +103,8 @@ def get_by_id(conn: sqlite3.Connection, transaction_id: int) -> Transaction | No
     row = conn.execute(
         """
         SELECT id, account_id, occurred_at, kind, amount, currency, description,
-               category_id, transfer_id, user_rate, source, source_ref, needs_review
+               category_id, transfer_id, user_rate, source, source_ref,
+               needs_review, notes
         FROM transactions WHERE id = ?
         """,
         (transaction_id,),
@@ -114,7 +118,8 @@ def get_by_source_ref(
     row = conn.execute(
         """
         SELECT id, account_id, occurred_at, kind, amount, currency, description,
-               category_id, transfer_id, user_rate, source, source_ref, needs_review
+               category_id, transfer_id, user_rate, source, source_ref,
+               needs_review, notes
         FROM transactions WHERE source = ? AND source_ref = ?
         """,
         (source, source_ref),
@@ -130,7 +135,7 @@ def upsert_by_source_ref(conn: sqlite3.Connection, txn: Transaction) -> dict[str
 
     The UPDATE branch overwrites statement-sourced fields (amount,
     description, dates...) but PRESERVES enrichment the statement cannot
-    know: category_id, transfer_id, user_rate, a resolved needs_review, and
+    know: category_id, transfer_id, user_rate, notes, a resolved needs_review, and
     the kind of a paired row. Re-ingesting raw data must never undo triage
     or pairing work.
     """
@@ -151,13 +156,15 @@ def upsert_by_source_ref(conn: sqlite3.Connection, txn: Transaction) -> dict[str
         txn.source,
         txn.source_ref,
         1 if txn.needs_review else 0,
+        txn.notes,
     )
     conn.execute(
         """
         INSERT INTO transactions (
             account_id, occurred_at, kind, amount, currency, description,
-            category_id, transfer_id, user_rate, source, source_ref, needs_review
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            category_id, transfer_id, user_rate, source, source_ref,
+            needs_review, notes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(source, source_ref) DO UPDATE SET
             account_id   = excluded.account_id,
             occurred_at  = excluded.occurred_at,
@@ -174,6 +181,10 @@ def upsert_by_source_ref(conn: sqlite3.Connection, txn: Transaction) -> dict[str
             category_id  = COALESCE(excluded.category_id, transactions.category_id),
             transfer_id  = COALESCE(excluded.transfer_id, transactions.transfer_id),
             user_rate    = COALESCE(excluded.user_rate, transactions.user_rate),
+            -- Notes are manual-only enrichment (viewer edit modal). Stronger
+            -- than the category/rate pattern: an EXISTING note always wins;
+            -- an incoming note only fills a row that has none (00-design §4).
+            notes        = COALESCE(transactions.notes, excluded.notes),
             needs_review = CASE WHEN transactions.needs_review = 0 THEN 0
                                 ELSE excluded.needs_review END,
             updated_at   = CURRENT_TIMESTAMP
@@ -199,7 +210,8 @@ def list_by_account(
 ) -> list[Transaction]:
     sql = """
         SELECT id, account_id, occurred_at, kind, amount, currency, description,
-               category_id, transfer_id, user_rate, source, source_ref, needs_review
+               category_id, transfer_id, user_rate, source, source_ref,
+               needs_review, notes
         FROM transactions WHERE account_id = ?
         ORDER BY occurred_at DESC, id DESC
     """
@@ -223,6 +235,7 @@ def update(
     category_id: int | None | _Unset = _UNSET,
     user_rate: Decimal | None | _Unset = _UNSET,
     needs_review: bool | _Unset = _UNSET,
+    notes: str | None | _Unset = _UNSET,
 ) -> Transaction:
     """Patch a single transaction's mutable fields.
 
@@ -252,6 +265,10 @@ def update(
     if not isinstance(needs_review, _Unset):
         sets.append("needs_review = ?")
         params.append(1 if needs_review else 0)
+
+    if not isinstance(notes, _Unset):
+        sets.append("notes = ?")
+        params.append(notes)
 
     sets.append("updated_at = ?")
     params.append(datetime.now(tz=UTC).isoformat())
