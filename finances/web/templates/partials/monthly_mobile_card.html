@@ -14,9 +14,9 @@
       {% endif %}
     </span>
     <span class="text-sm tabular-nums font-mono text-slate-900">
-      ${{ '%.2f' | format(category.total_usd) }}
+      {{ category.total_usd | fmt_money }}
       {% if category.fallback_usd and category.fallback_usd != 0 %}
-        <span class="text-[10px] text-amber-600 ml-1">(+{{ '%.2f' | format(category.fallback_usd) }} bcv)</span>
+        <span class="text-[10px] text-amber-600 ml-1">(+{{ category.fallback_usd | fmt_number }} bcv)</span>
       {% endif %}
     </span>
   </div>
