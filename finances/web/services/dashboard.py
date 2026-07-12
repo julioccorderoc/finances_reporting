@@ -18,6 +18,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
 from finances.db.repos import accounts as accounts_repo
+from finances.format import fmt_money
 from finances.reports import monthly as monthly_report
 from finances.web.services.net_worth import (
     NetWorth,
@@ -60,23 +61,6 @@ class KpiTiles(BaseModel):
     needs_review: KpiTile
 
 
-def _format_money(value: Decimal) -> str:
-    """Format a Decimal as ``$X,XXX.XX`` using locale-free thousands grouping."""
-    quant = value.quantize(Decimal("0.01"))
-    sign = "-" if quant < 0 else ""
-    abs_val = abs(quant)
-    int_part, _, frac_part = format(abs_val, "f").partition(".")
-    if not frac_part:
-        frac_part = "00"
-    elif len(frac_part) == 1:
-        frac_part = frac_part + "0"
-    else:
-        frac_part = frac_part[:2]
-    # Group integer part with commas.
-    grouped = "{:,}".format(int(int_part))
-    return f"{sign}${grouped}.{frac_part}"
-
-
 _BANK_KINDS = frozenset({"bank"})
 _CRYPTO_KINDS = frozenset({"crypto_spot", "crypto_funding", "crypto_earn"})
 _CASH_KINDS = frozenset({"cash"})
@@ -99,9 +83,9 @@ def _net_worth_hint(conn: sqlite3.Connection, nw: NetWorth) -> str:
         elif kind in _CASH_KINDS:
             cash += c.contribution_usdt
     return (
-        f"Bank {_format_money(bank)} · "
-        f"Crypto {_format_money(crypto)} · "
-        f"Cash {_format_money(cash)}"
+        f"Bank {fmt_money(bank)} · "
+        f"Crypto {fmt_money(crypto)} · "
+        f"Cash {fmt_money(cash)}"
     )
 
 
@@ -113,7 +97,7 @@ def _build_net_worth_tile(conn: sqlite3.Connection, today: date) -> KpiTile:
         hint = f"{hint} — missing: {', '.join(nw.missing_pairs)}"
     return KpiTile(
         label="Net worth",
-        value=_format_money(nw.total_usdt),
+        value=fmt_money(nw.total_usdt),
         hint=hint,
         severity=severity,
     )
@@ -143,13 +127,13 @@ def _build_month_kind_tile(
     )
     hint_parts: list[str] = []
     if fallback != 0:
-        hint_parts.append(f"BCV-only fallback {_format_money(fallback)}")
+        hint_parts.append(f"BCV-only fallback {fmt_money(fallback)}")
     if needs_review:
         hint_parts.append(f"{needs_review} need review")
     hint = " · ".join(hint_parts) if hint_parts else None
     return KpiTile(
         label=label,
-        value=_format_money(total),
+        value=fmt_money(total),
         hint=hint,
     )
 
