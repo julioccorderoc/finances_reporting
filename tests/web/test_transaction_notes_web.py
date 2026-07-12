@@ -102,3 +102,95 @@ def test_api_transactions_q_searches_notes(
     assert body["total"] == 1
     assert body["rows"][0]["id"] == txn_id
     assert body["rows"][0]["notes"] == "vacation fund"
+
+
+# ---------------------------------------------------------------------------
+# Task 4 — TransactionEditRequest / apply_edit / PATCH api.
+# ---------------------------------------------------------------------------
+
+
+def test_apply_edit_sets_notes(seeded_web_db: sqlite3.Connection) -> None:
+    from finances.web.services.transactions_write import (
+        TransactionEditRequest,
+        apply_edit,
+    )
+
+    txn_id = _txn_id_by_source_ref(seeded_web_db, "prov-1")
+    card = apply_edit(
+        seeded_web_db,
+        txn_id=txn_id,
+        req=TransactionEditRequest(set_notes=True, notes="paid back in cash"),
+    )
+    assert card.notes == "paid back in cash"
+
+    after = transactions_repo.get_by_id(seeded_web_db, txn_id)
+    assert after is not None
+    assert after.notes == "paid back in cash"
+
+
+def test_apply_edit_clears_notes_with_none(
+    seeded_web_db: sqlite3.Connection,
+) -> None:
+    from finances.web.services.transactions_write import (
+        TransactionEditRequest,
+        apply_edit,
+    )
+
+    txn_id = _txn_id_by_source_ref(seeded_web_db, "prov-1")
+    transactions_repo.update(seeded_web_db, id=txn_id, notes="stale note")
+
+    card = apply_edit(
+        seeded_web_db,
+        txn_id=txn_id,
+        req=TransactionEditRequest(set_notes=True, notes=None),
+    )
+    assert card.notes is None
+
+    after = transactions_repo.get_by_id(seeded_web_db, txn_id)
+    assert after is not None
+    assert after.notes is None
+
+
+def test_apply_edit_without_set_notes_leaves_note(
+    seeded_web_db: sqlite3.Connection,
+) -> None:
+    from decimal import Decimal
+
+    from finances.web.services.transactions_write import (
+        TransactionEditRequest,
+        apply_edit,
+    )
+
+    txn_id = _txn_id_by_source_ref(seeded_web_db, "prov-1")
+    transactions_repo.update(seeded_web_db, id=txn_id, notes="do not touch")
+
+    apply_edit(
+        seeded_web_db,
+        txn_id=txn_id,
+        req=TransactionEditRequest(set_user_rate=True, user_rate=Decimal("36.5")),
+    )
+
+    after = transactions_repo.get_by_id(seeded_web_db, txn_id)
+    assert after is not None
+    assert after.notes == "do not touch"
+
+
+def test_patch_endpoint_notes_round_trip(
+    seeded_web_db: sqlite3.Connection, web_client_factory
+) -> None:
+    client: TestClient = web_client_factory()
+    txn_id = _txn_id_by_source_ref(seeded_web_db, "prov-3")
+
+    resp = client.patch(
+        f"/api/transactions/{txn_id}",
+        json={"set_notes": True, "notes": "receipt in the drawer"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["notes"] == "receipt in the drawer"
+
+    # Round trip: the note is persisted AND findable via q.
+    resp2 = client.get(
+        "/api/transactions", params={"q": "drawer", "date_from": "2000-01-01"}
+    )
+    assert resp2.status_code == 200
+    assert [r["id"] for r in resp2.json()["rows"]] == [txn_id]
