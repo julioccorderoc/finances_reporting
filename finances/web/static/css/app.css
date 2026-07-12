@@ -616,3 +616,61 @@
 }
 
 /* === END Phase 5 mobile polish === */
+
+/* === toasts (WP2 / ux-overhaul §2) ====================================
+ * Fixed stack, bottom-right on desktop, full-width bottom on phones.
+ * Only custom classes here — the compiled Tailwind sheet is static, so
+ * no new utility classes may be introduced in templates.
+ */
+.toast-host {
+  position: fixed;
+  bottom: 1rem;
+  right: 1rem;
+  z-index: 100;                 /* above .tx-modal-overlay (z-index 50) */
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: flex-end;
+  pointer-events: none;         /* host never blocks clicks... */
+}
+
+.toast {
+  max-width: 22rem;
+  padding: 0.625rem 1rem;
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+  color: #ffffff;
+  box-shadow: 0 8px 24px -8px rgba(15, 23, 42, 0.4);
+  pointer-events: auto;         /* ...but toasts themselves do */
+}
+
+.toast-success { background: #0f766e; }  /* teal-700 */
+.toast-error   { background: #be123c; }  /* rose-700 */
+
+@media (max-width: 640px) {
+  .toast-host {
+    left: 1rem;
+    right: 1rem;
+    align-items: stretch;
+  }
+  .toast {
+    max-width: 100%;
+  }
+}
+/* === END toasts === */
+
+/* === remove-category control (WP2) ===================================== */
+.remove-category-btn {
+  align-self: flex-start;       /* .tx-modal-form is a flex column */
+  font-size: 0.75rem;
+  color: #be123c;               /* rose-700 */
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.remove-category-btn:hover {
+  color: #9f1239;               /* rose-800 */
+}
+/* === END remove-category control === */

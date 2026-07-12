@@ -5,9 +5,12 @@
    on the POST handler, which fires a window event the base.html
    <body x-data> listener listens for to clear the host div.
 
-   Encoding choice: ``set_category=true`` and ``set_user_rate=true``
-   are always submitted; the user clears a field by submitting an
-   empty value. Documented in routers/partials.py.
+   Encoding choice (WP2 / ux-overhaul §2): ``set_category`` and
+   ``set_user_rate`` are dirty-tracked hidden inputs bound to Alpine
+   state — they submit ``true`` only when the user actually changed
+   that control. Clearing a category is the explicit "× remove
+   category" button, never a side effect of an untouched select.
+   Documented in routers/partials.py.
 
    What is editable: ``category_id``, ``user_rate``.
    What is read-only: everything else (description, amount, account,
@@ -98,17 +101,29 @@
       hx-post="/_partial/transactions/{{ txn.id }}/edit"
       hx-target="[data-tx-id='{{ txn.id }}']"
       hx-swap="outerHTML"
+      x-data="{ catDirty: false, rateDirty: false }"
+      x-init="$nextTick(() => { const el = $root.querySelector('[name=category_id]'); if (el) el.focus(); })"
     >
-      {# Always-set sentinels: empty value clears the field. #}
-      <input type="hidden" name="set_category" value="true">
-      <input type="hidden" name="set_user_rate" value="true">
+      {# Dirty-tracked sentinels (WP2): submit true only when the user
+         actually touched the matching control. An untouched empty
+         select can no longer silently clear an existing category. #}
+      <input type="hidden" name="set_category" value="false" :value="catDirty ? 'true' : 'false'">
+      <input type="hidden" name="set_user_rate" value="false" :value="rateDirty ? 'true' : 'false'">
 
-      <label class="block">
+      <label class="block" @change="catDirty = true">
         <span class="text-xs uppercase tracking-wide text-slate-500">Category</span>
-        {{ category_select("category_id", categories, selected=txn.category_id) }}
+        {{ category_select("category_id", categories, selected=txn.category_id, autofocus=True) }}
       </label>
 
-      <label class="block">
+      {% if txn.category_id is not none %}
+        <button
+          type="button"
+          class="remove-category-btn"
+          @click="$root.querySelector('[name=category_id]').value = ''; catDirty = true"
+        >&times; remove category</button>
+      {% endif %}
+
+      <label class="block" @input="rateDirty = true">
         <span class="text-xs uppercase tracking-wide text-slate-500">User rate</span>
         <input
           type="text"

@@ -68,22 +68,35 @@
       <p class="text-sm text-slate-800 whitespace-pre-wrap break-words">{{ txn.description or '—' }}</p>
     </section>
 
-    {# Editable form: Save & next variant. #}
+    {# Editable form: Save & next variant. Dirty-tracked sentinels (WP2):
+       submit true only when the user actually touched the matching
+       control — an untouched empty select can no longer silently clear
+       an existing category. #}
     <form
       class="tx-modal-form"
       hx-post="/_partial/triage/{{ txn.id }}/edit"
       hx-target="#triage-queue"
       hx-swap="innerHTML"
+      x-data="{ catDirty: false, rateDirty: false }"
+      x-init="$nextTick(() => { const el = $root.querySelector('[name=category_id]'); if (el) el.focus(); })"
     >
-      <input type="hidden" name="set_category" value="true">
-      <input type="hidden" name="set_user_rate" value="true">
+      <input type="hidden" name="set_category" value="false" :value="catDirty ? 'true' : 'false'">
+      <input type="hidden" name="set_user_rate" value="false" :value="rateDirty ? 'true' : 'false'">
 
-      <label class="block">
+      <label class="block" @change="catDirty = true">
         <span class="text-xs uppercase tracking-wide text-slate-500">Category</span>
-        {{ category_select("category_id", categories, selected=txn.category_id) }}
+        {{ category_select("category_id", categories, selected=txn.category_id, autofocus=True) }}
       </label>
 
-      <label class="block">
+      {% if txn.category_id is not none %}
+        <button
+          type="button"
+          class="remove-category-btn"
+          @click="$root.querySelector('[name=category_id]').value = ''; catDirty = true"
+        >&times; remove category</button>
+      {% endif %}
+
+      <label class="block" @input="rateDirty = true">
         <span class="text-xs uppercase tracking-wide text-slate-500">User rate</span>
         <input
           type="text"

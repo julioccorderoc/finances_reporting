@@ -11,6 +11,7 @@ sync state every 60 seconds. Phase 2c adds
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from decimal import Decimal, InvalidOperation
 
@@ -158,11 +159,12 @@ def monthly_mobile_partial(
 #        the HX-Trigger: closeModal response header so the Alpine
 #        listener on <body> can clear the host div.
 #
-# Form encoding choice (Phase 3 plan, simpler-of-two):
-#   The modal *always* sets ``set_category=true`` and ``set_user_rate=true``
-#   so submitting an empty string clears that field. There is no per-field
-#   "set_*" checkbox in the rendered HTML — but the API still accepts the
-#   ``set_*=false`` shape from JSON callers via the same Pydantic model.
+# Form encoding choice (WP2 / ux-overhaul §2):
+#   The modals dirty-track their controls with Alpine and submit
+#   ``set_category=true`` / ``set_user_rate=true`` only for fields the
+#   user actually touched; clearing a category is the explicit
+#   "× remove category" control. The API still accepts any ``set_*``
+#   combination from JSON callers via the same Pydantic model.
 # ---------------------------------------------------------------------------
 
 
@@ -198,6 +200,20 @@ def _parse_form_bool(value: str | None) -> bool:
     if value is None:
         return False
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _hx_trigger_json(*events: str, toast_message: str) -> str:
+    """Build an ``HX-Trigger`` header value: named events + a success toast.
+
+    htmx accepts a JSON object in ``HX-Trigger``: each key is dispatched
+    as an event, its value as the event detail. The base.html <body>
+    listener re-dispatches ``closeModal`` as the ``close-modal`` window
+    event and ``toast`` as ``show-toast`` (WP2 toast contract; error
+    toasts come from the global htmx:responseError listener instead).
+    """
+    payload: dict[str, object] = {name: True for name in events}
+    payload["toast"] = {"level": "success", "message": toast_message}
+    return json.dumps(payload)
 
 
 @router.get("/transactions/{txn_id}/modal", include_in_schema=False)
@@ -288,7 +304,7 @@ def transactions_edit_partial(
         "partials/card_transaction.html",
         {"card": card},
     )
-    response.headers["HX-Trigger"] = "closeModal"
+    response.headers["HX-Trigger"] = _hx_trigger_json("closeModal", toast_message="Saved")
     return response
 
 
@@ -420,7 +436,9 @@ def triage_edit_partial(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     response = _render_queue_partial(request, conn)
-    response.headers["HX-Trigger"] = "closeModal, advanceQueue"
+    response.headers["HX-Trigger"] = _hx_trigger_json(
+        "closeModal", "advanceQueue", toast_message="Saved"
+    )
     return response
 
 
@@ -506,7 +524,9 @@ def triage_pair_confirm_partial(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     response = _render_queue_partial(request, conn)
-    response.headers["HX-Trigger"] = "closeModal"
+    response.headers["HX-Trigger"] = _hx_trigger_json(
+        "closeModal", toast_message="Pair confirmed"
+    )
     return response
 
 

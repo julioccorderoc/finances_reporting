@@ -131,18 +131,24 @@
 
 {# --- Phase 3 (EPIC-024): category dropdown ----------------------------- #}
 
-{%- macro category_select(name, options, selected=None) -%}
+{%- macro category_select(name, options, selected=None, autofocus=False) -%}
 {#- Render a <select> for the modal's category field.
 
     ``options`` should be a list of Pydantic ``Category`` objects (the
     output of ``categories_repo.list_all``). Categories are grouped by
     ``kind`` to mimic the existing CLI flow.
 
-    The "no category" option carries an empty value so an empty form
-    submission clears the field (per Phase 3 form-encoding choice).
+    ``autofocus=True`` renders the HTML autofocus attribute — htmx
+    focuses autofocused elements inside swapped-in content, so the modal
+    opens with the category control focused (WP2).
+
+    The "no category" option carries an empty value; since WP2 the
+    modals dirty-track the select, so an untouched empty option never
+    clears anything — clearing is the explicit remove-category control.
 -#}
 <select
   name="{{ name }}"
+  {% if autofocus %}autofocus{% endif %}
   class="mt-1 w-full border border-slate-300 rounded px-2 py-1 text-sm bg-white"
 >
   <option value="" {% if selected is none %}selected{% endif %}>— no category —</option>

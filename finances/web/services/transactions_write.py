@@ -34,11 +34,11 @@ class TransactionEditRequest(BaseModel):
     """Modal save payload.
 
     The two ``set_*`` flags disambiguate "field omitted → leave alone"
-    from "field present with value None → clear it". The standard
-    rendering pattern (chosen for v1) is to **always** set both
-    ``set_category=True`` and ``set_user_rate=True`` and let the user
-    explicitly clear via an empty value — but the API still respects
-    the ``set_*=False`` shape for partial updates from JSON callers.
+    from "field present with value None → clear it". Since WP2
+    (ux-overhaul) the modals dirty-track their controls and submit
+    ``set_*=True`` only for fields the user actually touched; clearing
+    a category is an explicit control. JSON callers may still send any
+    ``set_*`` combination for partial updates.
     """
 
     model_config = ConfigDict(extra="forbid")
