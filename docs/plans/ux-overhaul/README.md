@@ -16,8 +16,8 @@ pass/fail gate; the agent never marks a package complete — Julio does.
 ## Status
 
 | # | Work package | File | Depends on | Status |
-|---|--------------|------|------------|--------|
-| 1 | Formatting layer — `finances/format.py`, thousands separators, weekday dates, `-$` sign fix, static report parity | [01-formatting.md](01-formatting.md) | — | ⬜ |
+| --- | --- | --- | --- | --- |
+| 1 | Formatting layer — `finances/format.py`, thousands separators, weekday dates, `-$` sign fix, static report parity | [01-formatting.md](01-formatting.md) | — | ✅ 2026-07-12 (validated: full suite green, no stale `%.2f` in templates, `_format_money` gone, filters registered, html_export on shared fmt_*, live output spot-checked) |
 | 2 | Safety + feedback — category-wipe bugfix, toasts, error handler, focus | [02-safety-feedback.md](02-safety-feedback.md) | — | ⬜ |
 | 3 | Transaction notes — migration 008, full-stack thread, re-ingest-safe | [03-notes.md](03-notes.md) | — | ⬜ |
 | 4 | Triage picker + keyboard + bulk categorize | [04-triage-picker-bulk.md](04-triage-picker-bulk.md) | WP2 (toast infra; has fallbacks if WP2 absent) | ⬜ |
