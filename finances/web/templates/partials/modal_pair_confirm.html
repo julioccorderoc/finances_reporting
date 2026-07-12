@@ -42,7 +42,7 @@
         </div>
         {% if deposit.amount_usd is not none %}
           <div class="text-xs text-slate-500">
-            ≈ ${{ format_amount(deposit.amount_usd) }}
+            ≈ {{ deposit.amount_usd | fmt_money }}
             {{ rate_source_badge(deposit.rate_source, deposit.is_bcv_fallback) }}
           </div>
         {% endif %}
@@ -61,7 +61,7 @@
         </div>
         {% if sell.amount_usd is not none %}
           <div class="text-xs text-slate-500">
-            ≈ ${{ format_amount(sell.amount_usd) }}
+            ≈ {{ sell.amount_usd | fmt_money }}
             {{ rate_source_badge(sell.rate_source, sell.is_bcv_fallback) }}
           </div>
         {% endif %}

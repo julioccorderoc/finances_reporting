@@ -49,7 +49,7 @@
       {% if card.amount_usd is none %}
         <span>&mdash;</span>
       {% else %}
-        <span>${{ format_amount(card.amount_usd) }}</span>
+        <span>{{ card.amount_usd | fmt_money }}</span>
       {% endif %}
       {{ rate_source_badge(card.rate_source, card.is_bcv_fallback) }}
     </div>
