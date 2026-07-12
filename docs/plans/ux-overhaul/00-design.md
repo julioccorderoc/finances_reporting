@@ -15,8 +15,8 @@ The engine (ingest, dedup, rates, double-entry) is solid, but the presentation l
 - No way to write a comment/note on a transaction (no DB column, no UI).
 - Silent data-loss bug: the edit modal always sends `set_category=true`, so saving with the picker on "— no category —" clears an existing category with no warning (`modal_transaction.html:103-104`).
 - Zero feedback: no toast on save, no error handler for failed HTMX requests.
-- Double-clicking `Finances.command` only starts the viewer; it never runs `finances update`, so data refresh requires a terminal. (Thing 7 was planned in `docs/plans/revival/07-one-launcher.md` but never built.)
-- `finances update` summary says "run Finances.command to sort them" instead of printing a clickable URL.
+- Launcher (now `finances.command` — Thing 7 landed 2026-07-11, after this audit's snapshot): runs `finances update` as a **background** job after the server starts, so the sync summary prints while the user is already in the browser and is easy to miss. Remaining gap: update should run foreground **before** serve, summary visible first.
+- `finances update` summary says "run finances.command to sort them" instead of printing a clickable URL.
 - Filters: ctrl/cmd-click `<select multiple>`, free-text `YYYY-MM` inputs, no clear button.
 
 ## Decisions (locked with Julio 2026-07-11)
@@ -75,7 +75,7 @@ Testing: unit tests on all four functions with negative values (real expenses ar
 
 Full-stack thread:
 
-1. Migration `007_add_transaction_notes.sql`: `ALTER TABLE transactions ADD COLUMN notes TEXT;` (nullable, no default).
+1. Migration `008_add_transaction_notes.sql`: `ALTER TABLE transactions ADD COLUMN notes TEXT;` (nullable, no default). (The 007 prefix is already taken by `007_going_out_and_bank_fee_rules.sql`.)
 2. `Transaction` Pydantic model: `notes: str | None = None`.
 3. `db/repos/transactions.py`: add `notes` to every SELECT column list + `_row_to_transaction`, to `insert`, to `update()` via the `_UNSET` sentinel pattern, and to `upsert_by_source_ref` with a `COALESCE(transactions.notes, excluded.notes)`-style preserve clause so **re-ingest never wipes a manually written note** (same enrichment-preservation contract as category/rate — the ERRORS.md wipe lesson).
 4. `TransactionEditRequest`: `set_notes` / `notes` fields; `apply_edit` passes through.
@@ -85,12 +85,12 @@ Testing: notes round-trip; **re-ingest-preservation test is mandatory** (ingest 
 
 ### 5. One launcher (ships Thing 7, adjusted)
 
-Rework `Finances.command` (keep the name — muscle memory + existing docs):
+Rework `finances.command` in place (Thing 7's lowercase name stays; it already runs update, but as a background job after serve):
 
 1. Same PATH/uv guards and port-reuse check as today.
-2. Run `uv run finances update` in the foreground with its summary visible (VPN hint included on Binance geo-block). Update failure does NOT abort launch — viewer still opens on stale data with the sync strip showing staleness.
+2. Move `uv run finances update` to the foreground, BEFORE serve, with its summary visible (VPN hint included on Binance geo-block). Update failure does NOT abort launch — viewer still opens on stale data with the sync strip showing staleness.
 3. Start `finances serve` and open the browser (existing behavior), regen static report on exit (existing trap).
-4. `finances update` summary change: when needs-review count > 0, print `→ http://localhost:8765/triage` instead of "run Finances.command to sort them".
+4. `finances update` summary change: when needs-review count > 0, print `→ http://localhost:8765/triage` instead of "run finances.command to sort them".
 
 One double-click = fresh data + open viewer.
 
@@ -121,7 +121,7 @@ Big change → separate plan doc(s) under `docs/plans/ux-overhaul/`, executed on
 
 1. **WP1 Formatting layer** (`finances/format.py` + filter wiring + template sweep + sign fix + static report) — foundation, no schema change.
 2. **WP2 Safety + feedback** (wipe bug, toasts, focus) — independent of WP1, small.
-3. **WP3 Notes** (migration 007 + full-stack thread) — independent.
+3. **WP3 Notes** (migration 008 + full-stack thread) — independent.
 4. **WP4 Triage picker + keyboard + bulk** — depends on WP2's toast infra; picker lands with it.
 5. **WP5 Launcher + update hint** — independent, shell + one string.
 6. **WP6 Filter polish** — independent, templates only.
