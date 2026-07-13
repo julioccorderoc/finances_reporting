@@ -16,7 +16,7 @@ One thing per session. TDD (test commit before impl). Julio judges the gates.
 
 | # | Thing | File | Status |
 | --- | --- | --- | --- |
-| 1 | CLI teardown — drop trap commands, home the scripts, self-cleaning inputs/ | [01-cli-teardown.md](01-cli-teardown.md) | ⬜ |
+| 1 | CLI teardown — drop trap commands, home the scripts, self-cleaning inputs/ | [01-cli-teardown.md](01-cli-teardown.md) | ✅ 2026-07-13 (validated: suite green, categorize/cleanup* gone from help + code + docs, archive-move tests in test_update_cli.py, scripts archived, import_bcv_history documented, inputs/ gitignored) |
 | 2 | Saved filter views — DB-backed, chip recall on /transactions | [02-saved-views.md](02-saved-views.md) | ⬜ |
 | 3 | Edit history — audit rows in `transactions_repo.update()`, modal History section | [03-edit-history.md](03-edit-history.md) | ⬜ |
 
