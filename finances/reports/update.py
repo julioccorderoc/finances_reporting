@@ -194,6 +194,25 @@ def _step_binance(
     return outcome
 
 
+def _archive_processed(path: Path, inputs_dir: Path) -> Path:
+    """Move a successfully ingested file into ``inputs/processed/``.
+
+    Creates the directory on first use. Collision-safe: if a file of the
+    same name already sits in ``processed/`` (e.g. a re-dropped statement),
+    the incoming file gets a ``-1``, ``-2``, … suffix rather than clobbering
+    the earlier archive. Returns the final destination path.
+    """
+    processed = inputs_dir / "processed"
+    processed.mkdir(parents=True, exist_ok=True)
+    dest = processed / path.name
+    if dest.exists():
+        counter = 1
+        while (dest := processed / f"{path.stem}-{counter}{path.suffix}").exists():
+            counter += 1
+    path.rename(dest)
+    return dest
+
+
 def _step_provincial(
     conn: sqlite3.Connection, *, inputs_dir: Path, dry_run: bool
 ) -> SourceOutcome:
@@ -205,6 +224,7 @@ def _step_provincial(
 
     inserted = updated = 0
     errors: list[str] = []
+    archived = 0
     for path in files:
         try:
             report = provincial_ingest.ingest_csv(conn, path, dry_run=dry_run)
@@ -212,11 +232,19 @@ def _step_provincial(
             updated += report.rows_updated
         except Exception as exc:  # noqa: BLE001 - isolate a bad file
             errors.append(f"{path.name}: {exc}")
+            continue
+        # Only a real (non-dry) run that ingested cleanly retires the file, so
+        # a dry-run leaves inputs/ untouched and a bad file stays for a retry.
+        if not dry_run:
+            _archive_processed(path, inputs_dir)
+            archived += 1
 
     status = "error" if errors else "ok"
     summary = f"{len(files)} file(s): {inserted} new, {updated} updated"
     if errors:
         summary += f", {len(errors)} error(s)"
+    if archived:
+        summary += f"; archived {archived} file(s) → inputs/processed/"
     return SourceOutcome(
         "provincial",
         status=status,
