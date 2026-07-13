@@ -104,4 +104,11 @@
   <input type="hidden" name="sort" value="{{ filter.sort }}">
   <input type="hidden" name="direction" value="{{ filter.direction }}">
   <input type="hidden" name="page" value="1">
+
+  <div class="flex justify-end">
+    {# Full navigation on purpose: dropping ALL query params (incl. the
+       hidden sort/direction) resets to the server-side defaults —
+       last-30-days window per transactions_query.resolve_defaults. #}
+    <a href="/transactions" data-clear-filters class="text-xs text-sky-700 hover:underline">Clear filters</a>
+  </div>
 </form>

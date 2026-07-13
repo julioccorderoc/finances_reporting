@@ -63,4 +63,10 @@
 
   {# Preserve the active kind across filter changes. #}
   <input type="hidden" name="kind" value="{{ filter.kind.value }}">
+
+  <div class="flex justify-end">
+    {# Full navigation on purpose: resets range_preset to 6m, clears
+       since/until/accounts/currencies, kind back to expense. #}
+    <a href="/monthly" data-clear-filters class="text-xs text-sky-700 hover:underline">Clear filters</a>
+  </div>
 </form>
