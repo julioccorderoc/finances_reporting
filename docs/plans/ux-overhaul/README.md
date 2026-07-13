@@ -19,7 +19,7 @@ pass/fail gate; the agent never marks a package complete — Julio does.
 | --- | --- | --- | --- | --- |
 | 1 | Formatting layer — `finances/format.py`, thousands separators, weekday dates, `-$` sign fix, static report parity | [01-formatting.md](01-formatting.md) | — | ✅ 2026-07-12 (validated: full suite green, no stale `%.2f` in templates, `_format_money` gone, filters registered, html_export on shared fmt_*, live output spot-checked) |
 | 2 | Safety + feedback — category-wipe bugfix, toasts, error handler, focus | [02-safety-feedback.md](02-safety-feedback.md) | — | ✅ 2026-07-12 (validated: suite green, 17 safety tests pass, sentinels replaced by dirty-tracking, toast host + show-toast + error listener live, HX-Trigger toast JSON, remove-control + autofocus present) |
-| 3 | Transaction notes — migration 008, full-stack thread, re-ingest-safe | [03-notes.md](03-notes.md) | — | ⬜ |
+| 3 | Transaction notes — migration 008, full-stack thread, re-ingest-safe | [03-notes.md](03-notes.md) | — | ✅ 2026-07-12 (validated: suite green, 26 notes tests pass incl. test_upsert_reingest_never_wipes_manual_note, COALESCE keeps existing note, textareas + card indicator + note-aware search live) |
 | 4 | Triage picker + keyboard + bulk categorize | [04-triage-picker-bulk.md](04-triage-picker-bulk.md) | WP2 (toast infra; has fallbacks if WP2 absent) | ⬜ |
 | 5 | Launcher reorder (update foreground-first) + triage URL in summary | [05-launcher.md](05-launcher.md) | — | ⬜ |
 | 6 | Filter polish — checkbox chips, month picker, clear button | [06-filters.md](06-filters.md) | — | ⬜ |
