@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, Res
 from finances.db.repos import accounts as accounts_repo
 from finances.db.repos import categories as categories_repo
 from finances.db.repos import saved_views as saved_views_repo
+from finances.db.repos import transaction_edits as transaction_edits_repo
 from finances.db.repos import transactions as transactions_repo
 from finances.domain.models import SavedView
 from finances.web.deps import get_conn
@@ -227,6 +228,55 @@ def _hx_trigger_json(*events: str, toast_message: str) -> str:
     return json.dumps(payload)
 
 
+_EDIT_FIELD_LABELS = {
+    "category_id": "Category",
+    "user_rate": "User rate",
+    "notes": "Notes",
+}
+
+
+def _build_edit_history(
+    conn: sqlite3.Connection, txn_id: int
+) -> list[dict[str, object]]:
+    """Presentation rows for the modal History section (Wave 2 Thing 3).
+
+    Newest first. ``category_id`` old/new values are resolved to category
+    NAMES (inactive categories included so a since-deactivated name still
+    resolves); an unknown/deleted id falls back to the raw stored id.
+    Returns ``[]`` when there is no history so the template omits the
+    section entirely.
+    """
+    edits = transaction_edits_repo.list_for_transaction(conn, txn_id)
+    if not edits:
+        return []
+
+    category_names = {
+        c.id: c.name
+        for c in categories_repo.list_all(conn, include_inactive=True)
+    }
+
+    def _display(field: str, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if field == "category_id":
+            try:
+                cid = int(value)
+            except (TypeError, ValueError):
+                return value
+            return category_names.get(cid, value)
+        return value
+
+    return [
+        {
+            "edited_at": e.edited_at,
+            "field_label": _EDIT_FIELD_LABELS.get(e.field, e.field),
+            "old_display": _display(e.field, e.old_value),
+            "new_display": _display(e.field, e.new_value),
+        }
+        for e in edits
+    ]
+
+
 @router.get("/transactions/{txn_id}/modal", include_in_schema=False)
 def transactions_modal_partial(
     request: Request,
@@ -276,6 +326,7 @@ def transactions_modal_partial(
             "categories": categories,
             "top_categories": top_categories(conn, kind=txn.kind),
             "account_name": account_name,
+            "history": _build_edit_history(conn, txn_id),
         },
     )
 

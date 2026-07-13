@@ -38,6 +38,12 @@ def _to_text(value: Decimal | None) -> str | None:
     return format(value, "f")
 
 
+def _int_text(value: int | None) -> str | None:
+    if value is None:
+        return None
+    return str(value)
+
+
 def _iso(value: Any) -> str | None:
     if value is None:
         return None
@@ -251,16 +257,36 @@ def update(
     viewer's transaction-edit modal — the viewer must not run its own
     UPDATE statements.
     """
+    # Read current state first so we can record what actually CHANGED into
+    # transaction_edits (Wave 2 Thing 3). This is the single sanctioned write
+    # path (rule-012), so the audit trail covers the modal, triage, PATCH API
+    # and bulk-edit with no endpoint changes. needs_review is deliberately not
+    # recorded — it is resolver-derived (ADR-005), not a manual field.
+    current = get_by_id(conn, id)
+    if current is None:
+        raise LookupError(f"transaction id={id} not found")
+
     sets: list[str] = []
     params: list[Any] = []
+    # (field, old_value_text, new_value_text) for each recordable change.
+    edits: list[tuple[str, str | None, str | None]] = []
 
     if not isinstance(category_id, _Unset):
         sets.append("category_id = ?")
         params.append(category_id)
+        if category_id != current.category_id:
+            edits.append(
+                ("category_id", _int_text(current.category_id), _int_text(category_id))
+            )
 
     if not isinstance(user_rate, _Unset):
         sets.append("user_rate = ?")
         params.append(_to_text(user_rate))
+        # Decimal equality is value-based, so 36.0 == 36.00 records nothing.
+        if user_rate != current.user_rate:
+            edits.append(
+                ("user_rate", _to_text(current.user_rate), _to_text(user_rate))
+            )
 
     if not isinstance(needs_review, _Unset):
         sets.append("needs_review = ?")
@@ -269,15 +295,24 @@ def update(
     if not isinstance(notes, _Unset):
         sets.append("notes = ?")
         params.append(notes)
+        if notes != current.notes:
+            edits.append(("notes", current.notes, notes))
 
     sets.append("updated_at = ?")
     params.append(datetime.now(tz=UTC).isoformat())
 
     params.append(id)
     sql = f"UPDATE transactions SET {', '.join(sets)} WHERE id = ?"
-    cur = conn.execute(sql, params)
-    if cur.rowcount == 0:
-        raise LookupError(f"transaction id={id} not found")
+    conn.execute(sql, params)
+
+    for field, old_value, new_value in edits:
+        conn.execute(
+            """
+            INSERT INTO transaction_edits (transaction_id, field, old_value, new_value)
+            VALUES (?, ?, ?, ?)
+            """,
+            (id, field, old_value, new_value),
+        )
 
     refreshed = get_by_id(conn, id)
     if refreshed is None:  # pragma: no cover - defensive; UPDATE just succeeded
