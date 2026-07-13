@@ -6,18 +6,21 @@
 #
 # What it does (deliberately dumb — plain bash, no launchd, no daemons):
 #   1. cd into the repo (wherever this file lives),
-#   2. start `finances serve` if the port is free, else just reuse the running one,
-#   3. open the browser at the viewer right away — never wait on network syncs,
-#   4. THEN run `finances update` as a background job in this terminal, so the
-#      per-source summary prints while you're already browsing; if it fails
-#      (offline, VPN off for Binance), the launcher keeps going,
+#   2. if the port is already bound, reuse the running server: re-open the
+#      browser and exit,
+#   3. run `finances update` in the FOREGROUND so its per-source summary
+#      (inserted counts, errors, VPN hint, needs-review total + triage URL)
+#      is on screen before the viewer opens; if it fails (offline, VPN off
+#      for Binance) the launch continues — the viewer opens on existing data
+#      and the sync strip shows what's stale,
+#   4. start `finances serve` and open the browser at the viewer,
 #   5. on exit (Ctrl-C or closing the window), regenerate report.html so the
 #      static file reflects any edits made this session.
 #
 # The server's own shutdown hook also regenerates report.html; the EXIT trap
 # below is a harmless belt-and-suspenders for the cases where it can't (e.g. a
 # hard window close before the server finishes teardown). `finances update`
-# regenerates report.html too and is safe alongside the server (SQLite WAL).
+# regenerates report.html too.
 
 set -euo pipefail
 
@@ -54,18 +57,17 @@ regen_report() {
 }
 trap regen_report EXIT
 
+# Sync every source BEFORE the viewer opens, in the foreground, so the
+# summary (per-source counts, errors, needs-review total + triage URL) is
+# the first thing on screen. The `|| echo` guard means a hard update failure
+# never aborts the launch under `set -e` — the viewer still opens on
+# existing data and its sync strip shows the staleness.
+echo "── Syncing sources (finances update) ──"
+uv run finances update || echo "finances update failed — opening the viewer on existing data."
+echo ""
+
 # Open the browser once the server has had a moment to bind.
 ( sleep 2; open "$URL" >/dev/null 2>&1 || true ) &
-
-# Sync every source in the background AFTER the browser opens; the per-source
-# summary prints into this terminal while you browse. A failure here (offline,
-# VPN off) never kills the launcher — the summary itself says what went wrong.
-(
-  sleep 3
-  echo ""
-  echo "── Syncing sources (finances update) — summary prints here while you browse ──"
-  uv run finances update || echo "finances update failed — the viewer still works with existing data."
-) &
 
 echo "Starting Finances viewer at ${URL}"
 echo "Press Ctrl-C (or close this window) to stop — report.html is refreshed on exit."

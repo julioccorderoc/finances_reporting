@@ -350,6 +350,27 @@ def test_render_summary_zero_needs_review_names_launcher(tmp_path) -> None:
 
     assert "finances.command" in text
     assert "Finances.command" not in text
+    # The triage URL only appears when something is actually waiting.
+    assert "http://localhost:8765/triage" not in text
+
+
+def test_render_summary_needs_review_points_at_triage_url(tmp_path) -> None:
+    from finances.reports.update import UpdateReport, render_summary
+
+    report = UpdateReport(
+        outcomes=[],
+        needs_review_total=7,
+        freshness=[],
+        dry_run=False,
+        report_regenerated=True,
+        report_path=tmp_path / "report.html",
+    )
+    text = render_summary(report)
+
+    assert "Needs review: 7" in text
+    assert "http://localhost:8765/triage" in text
+    # Old wording is gone — the URL replaces the "sort them" instruction.
+    assert "sort them" not in text
 
 
 # ---------------------------------------------------------------------------

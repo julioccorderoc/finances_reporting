@@ -315,7 +315,7 @@ def render_summary(report: UpdateReport) -> str:
     if report.needs_review_total:
         lines.append(
             f"Needs review: {report.needs_review_total} row(s) waiting for "
-            "triage — run finances.command to sort them."
+            "triage → http://localhost:8765/triage"
         )
     else:
         lines.append(
