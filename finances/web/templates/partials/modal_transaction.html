@@ -27,10 +27,27 @@
   class="tx-modal-overlay"
   data-tx-modal
   data-tx-id="{{ txn.id }}"
-  x-data="{}"
+  x-data="{
+    isTyping(e) {
+      const t = e.target;
+      return t instanceof Element && t.matches('input, textarea, select, button');
+    }
+  }"
+  x-init="$nextTick(() => { const c = $el.querySelector('.tx-modal-card'); if (c) c.focus(); })"
   @keydown.escape.window="window.dispatchEvent(new CustomEvent('close-modal'))"
+  @keydown.window="
+    if (isTyping($event)) return;
+    const key = $event.key;
+    if (key.length === 1 && key >= '1' && key <= '8') {
+      const chip = $el.querySelectorAll('[data-chip]')[Number(key) - 1];
+      if (chip) { chip.click(); $event.preventDefault(); }
+    } else if (key === 'Enter') {
+      const save = $el.querySelector('form.tx-modal-form button[type=submit]');
+      if (save) { save.click(); $event.preventDefault(); }
+    }
+  "
 >
-  <div class="tx-modal-card" role="dialog" aria-modal="true">
+  <div class="tx-modal-card" role="dialog" aria-modal="true" tabindex="-1">
     {# 1. Header --------------------------------------------------------- #}
     <header class="tx-modal-header">
       <div class="flex items-baseline gap-2">
