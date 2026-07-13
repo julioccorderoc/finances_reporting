@@ -12,8 +12,7 @@
      account_name   str
 #}
 {% from "_macros.html" import rate_source_badge, needs_review_badge,
-                              kind_class, format_date, format_amount,
-                              category_select %}
+                              kind_class, format_date, format_amount %}
 
 <div
   class="tx-modal-overlay"
@@ -80,22 +79,17 @@
       x-data="{ catDirty: false, rateDirty: false, notesDirty: false }"
       x-init="$nextTick(() => { const el = $root.querySelector('[name=category_id]'); if (el) el.focus(); })"
     >
-      <input type="hidden" name="set_category" value="false" :value="catDirty ? 'true' : 'false'">
+      {# Picker (WP4) owns set_category + category_id; user_rate + notes
+         keep their WP2/WP3 dirty-tracked keep-set sentinels verbatim. #}
       <input type="hidden" name="set_user_rate" value="false" :value="rateDirty ? 'true' : 'false'">
       <input type="hidden" name="set_notes" value="false" :value="notesDirty ? 'true' : 'false'">
 
-      <label class="block" @change="catDirty = true">
+      <div class="block">
         <span class="text-xs uppercase tracking-wide text-slate-500">Category</span>
-        {{ category_select("category_id", categories, selected=txn.category_id, autofocus=True) }}
-      </label>
-
-      {% if txn.category_id is not none %}
-        <button
-          type="button"
-          class="remove-category-btn"
-          @click="$root.querySelector('[name=category_id]').value = ''; catDirty = true"
-        >&times; remove category</button>
-      {% endif %}
+        {% with picker_selected = txn.category_id %}
+          {% include "partials/category_picker.html" %}
+        {% endwith %}
+      </div>
 
       <label class="block" @input="rateDirty = true">
         <span class="text-xs uppercase tracking-wide text-slate-500">User rate</span>

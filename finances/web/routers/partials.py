@@ -23,6 +23,7 @@ from finances.db.repos import transactions as transactions_repo
 from finances.web.deps import get_conn
 from finances.web.routers._monthly_filter_dep import monthly_filter_from_query
 from finances.web.routers._tx_filter_dep import filter_from_query
+from finances.web.services.category_stats import top_categories
 from finances.web.services.dashboard import build_sync_status
 from finances.web.services.transactions_query import _project_card
 from finances.web.services.transactions_write import (
@@ -271,6 +272,7 @@ def transactions_modal_partial(
             "txn": txn,
             "card": card,
             "categories": categories,
+            "top_categories": top_categories(conn, kind=txn.kind),
             "account_name": account_name,
         },
     )
@@ -412,6 +414,7 @@ def triage_modal_partial(
             "txn": txn,
             "card": card,
             "categories": categories,
+            "top_categories": top_categories(conn, kind=txn.kind),
             "account_name": account_name,
         },
     )
