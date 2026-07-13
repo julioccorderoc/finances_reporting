@@ -13,9 +13,9 @@ Design notes:
   Provincial CSV deposits are sized + dated so the
   ``BankAnchoredP2pPairing`` strategy finds exactly one counterpart per
   bank row (see ``tests/integration/fixtures/``).
-* **Deterministic cleanup.** ``run_cleanup`` is invoked with an explicit
-  ``PromptFn`` so no human input is required; the mapping is read from
-  ``_CLEANUP_MAP`` below.
+* **Deterministic cleanup.** ``_resolve_all_needs_review`` categorizes every
+  review row from a fixed mapping so no human input is required; the mapping
+  is read from ``_CLEANUP_MAP`` below.
 * **No live I/O.** SDK calls are satisfied by ``MagicMock`` fixtures
   loaded from JSON files; HTTP calls are either avoided (BCV passes
   ``html=``) or patched at the ``httpx.Client`` seam (P2P rates).
@@ -39,14 +39,14 @@ import pytest
 from finances.db.connection import _register_decimal_adapters
 from finances.db.migrate import MIGRATIONS_DIR, apply_migrations
 from finances.db.repos import accounts as accounts_repo
+from finances.db.repos import categories as categories_repo
 from finances.db.repos import positions as positions_repo
 from finances.db.repos import transactions as txn_repo
-from finances.domain.models import Account, AccountKind
+from finances.domain.models import Account, AccountKind, TransactionKind
 from finances.ingest.binance import sync_binance
 from finances.ingest.bcv import ingest_bcv
 from finances.ingest.p2p_rates import ingest_p2p_rates
 from finances.ingest.provincial import ingest_csv
-from finances.migration.interactive_cleanup import run_cleanup
 from finances.reports import consolidated_usd
 
 
@@ -108,7 +108,7 @@ def _clear_paired_transfer_needs_review(conn: sqlite3.Connection) -> None:
     though they are already reconciled — a state the cleanup walker
     should never observe. Integration tests explicitly express that
     invariant by clearing the flag on any transfer row that already has
-    a ``transfer_id`` before calling :func:`run_cleanup`; if a regression
+    a ``transfer_id`` before resolving needs_review; if a regression
     ever strands an unpaired transfer leg, :func:`_auto_resolver` will
     fail loudly on it.
     """
@@ -144,6 +144,54 @@ def _auto_resolver(row: sqlite3.Row) -> tuple[str | None, str | None]:
     if kind == "income":
         return ("Other Income", None)
     return ("Other Expense", None)
+
+
+def _resolve_all_needs_review(conn: sqlite3.Connection) -> int:
+    """Deterministically categorize every ``needs_review=1`` row.
+
+    A minimal, self-contained stand-in for the retired cleanup walker
+    (removed in the Wave 2 CLI teardown — the viewer's triage flow owns
+    manual review now). Walks the
+    review rows in chronological order, resolves each via
+    :func:`_auto_resolver`, clears ``needs_review`` and sets ``category_id``
+    (plus ``user_rate`` when supplied). Returns the number of rows resolved.
+    """
+    rows = conn.execute(
+        """
+        SELECT id, account_id, occurred_at, kind, amount, currency,
+               description, category_id, user_rate, source
+        FROM transactions
+        WHERE needs_review = 1
+        ORDER BY occurred_at ASC, id ASC
+        """
+    ).fetchall()
+    resolved = 0
+    for row in rows:
+        category_name, rate_raw = _auto_resolver(row)
+        if category_name is None or not category_name.strip():
+            continue
+        kind = TransactionKind(row["kind"])
+        cat = categories_repo.get_by_name(conn, kind, category_name.strip())
+        assert cat is not None and cat.id is not None, (
+            f"unknown category {category_name!r} for kind={kind.value!r}"
+        )
+        user_rate = (rate_raw or "").strip() or None
+        if user_rate is None:
+            conn.execute(
+                "UPDATE transactions "
+                "SET category_id = ?, needs_review = 0, "
+                "    updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (cat.id, int(row["id"])),
+            )
+        else:
+            conn.execute(
+                "UPDATE transactions "
+                "SET category_id = ?, user_rate = ?, needs_review = 0, "
+                "    updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (cat.id, user_rate, int(row["id"])),
+            )
+        resolved += 1
+    return resolved
 
 
 # ---------------------------------------------------------------------------
@@ -425,8 +473,8 @@ def test_no_needs_review_after_cleanup(mocker: Any) -> None:
 
     Provincial ingest flags every row as ``needs_review=True`` (no
     categorizer wired into ``ingest_csv``'s call site today). The
-    integration cleanup invokes ``run_cleanup`` with
-    :func:`_auto_resolver`; after it runs, no row in the fixture
+    integration cleanup invokes ``_resolve_all_needs_review`` (backed by
+    :func:`_auto_resolver`); after it runs, no row in the fixture
     universe may still carry ``needs_review=1``.
     """
     conn = _open_fresh_db()
@@ -439,10 +487,9 @@ def test_no_needs_review_after_cleanup(mocker: Any) -> None:
         ).fetchone()["c"]
         assert pre > 0, "fixture misconfigured: no needs_review rows to clean up"
 
-        cleanup = run_cleanup(conn, prompt=_auto_resolver)
-        assert cleanup.rows_resolved == pre, (
-            f"cleanup resolved {cleanup.rows_resolved} of {pre} rows; "
-            f"errors={cleanup.errors}"
+        resolved = _resolve_all_needs_review(conn)
+        assert resolved == pre, (
+            f"cleanup resolved {resolved} of {pre} rows"
         )
 
         post = conn.execute(
@@ -469,7 +516,7 @@ def test_consolidated_usd_excludes_bcv_headlines(mocker: Any) -> None:
         _clear_paired_transfer_needs_review(conn)
         # Resolve needs_review first; otherwise rows with rate_source='needs_review'
         # mask whatever BCV fallbacks would otherwise surface.
-        run_cleanup(conn, prompt=_auto_resolver)
+        _resolve_all_needs_review(conn)
 
         report = consolidated_usd.build_report(conn)
 
