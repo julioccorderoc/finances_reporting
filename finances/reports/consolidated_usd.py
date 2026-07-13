@@ -106,7 +106,8 @@ def _fetch_non_transfer_transactions(
     rows = conn.execute(
         """
         SELECT id, account_id, occurred_at, kind, amount, currency, description,
-               category_id, transfer_id, user_rate, source, source_ref, needs_review
+               category_id, transfer_id, user_rate, source, source_ref,
+               needs_review, notes
         FROM transactions
         WHERE kind <> 'transfer'
         ORDER BY occurred_at ASC, id ASC

@@ -39,6 +39,9 @@
 
   <span class="text-sm text-slate-900 truncate" title="{{ card.description }}">
     {{ card.description if card.description else '—' }}
+    {%- if card.notes %}
+      <span class="text-xs text-slate-500 italic" data-note-indicator title="{{ card.notes }}">&#9998; {{ card.notes | truncate(40) }}</span>
+    {%- endif %}
   </span>
 
   <div class="text-right tabular-nums">

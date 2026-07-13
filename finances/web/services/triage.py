@@ -100,7 +100,7 @@ _TXN_QUERY_BASE = """
     SELECT
         t.id, t.account_id, t.occurred_at, t.kind, t.amount, t.currency,
         t.description, t.category_id, t.transfer_id, t.user_rate,
-        t.source, t.source_ref, t.needs_review,
+        t.source, t.source_ref, t.needs_review, t.notes,
         a.name AS account_name,
         c.name AS category_name
     FROM transactions t

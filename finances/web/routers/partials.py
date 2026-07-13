@@ -202,6 +202,14 @@ def _parse_form_bool(value: str | None) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _parse_optional_text(value: str | None) -> str | None:
+    """Empty / whitespace-only form input means "clear the field"."""
+    if value is None:
+        return None
+    s = value.strip()
+    return s or None
+
+
 def _hx_trigger_json(*events: str, toast_message: str) -> str:
     """Build an ``HX-Trigger`` header value: named events + a success toast.
 
@@ -276,6 +284,8 @@ def transactions_edit_partial(
     category_id: str | None = Form(default=None),
     set_user_rate: str | None = Form(default=None),
     user_rate: str | None = Form(default=None),
+    set_notes: str | None = Form(default=None),
+    notes: str | None = Form(default=None),
     conn: sqlite3.Connection = Depends(get_conn),
 ):
     """Apply the modal-form edit and return the updated card partial.
@@ -289,6 +299,8 @@ def transactions_edit_partial(
         category_id=_parse_optional_int(category_id),
         set_user_rate=_parse_form_bool(set_user_rate),
         user_rate=_parse_optional_decimal(user_rate),
+        set_notes=_parse_form_bool(set_notes),
+        notes=_parse_optional_text(notes),
     )
 
     try:
@@ -413,6 +425,8 @@ def triage_edit_partial(
     category_id: str | None = Form(default=None),
     set_user_rate: str | None = Form(default=None),
     user_rate: str | None = Form(default=None),
+    set_notes: str | None = Form(default=None),
+    notes: str | None = Form(default=None),
     conn: sqlite3.Connection = Depends(get_conn),
 ):
     """Apply the edit and return a fresh queue partial.
@@ -426,6 +440,8 @@ def triage_edit_partial(
         category_id=_parse_optional_int(category_id),
         set_user_rate=_parse_form_bool(set_user_rate),
         user_rate=_parse_optional_decimal(user_rate),
+        set_notes=_parse_form_bool(set_notes),
+        notes=_parse_optional_text(notes),
     )
 
     try:

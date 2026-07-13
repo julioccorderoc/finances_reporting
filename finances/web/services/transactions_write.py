@@ -33,7 +33,7 @@ from finances.web.services.transactions_query import (
 class TransactionEditRequest(BaseModel):
     """Modal save payload.
 
-    The two ``set_*`` flags disambiguate "field omitted → leave alone"
+    The ``set_*`` flags disambiguate "field omitted → leave alone"
     from "field present with value None → clear it". Since WP2
     (ux-overhaul) the modals dirty-track their controls and submit
     ``set_*=True`` only for fields the user actually touched; clearing
@@ -47,6 +47,8 @@ class TransactionEditRequest(BaseModel):
     category_id: int | None = None
     set_user_rate: bool = False
     user_rate: Decimal | None = None
+    set_notes: bool = False
+    notes: str | None = None
 
 
 def apply_edit(
@@ -59,7 +61,7 @@ def apply_edit(
 
     Steps (ADR-005, ADR-012, rule-005, rule-012):
 
-    1. Apply ``category_id`` and/or ``user_rate`` updates via
+    1. Apply ``category_id``, ``user_rate`` and/or ``notes`` updates via
        ``transactions_repo.update``.
     2. Re-fetch the updated ``Transaction``.
     3. Call ``rates.resolve(conn, txn)`` to derive ``(rate, source)``.
@@ -81,6 +83,8 @@ def apply_edit(
         update_kwargs["category_id"] = req.category_id
     if req.set_user_rate:
         update_kwargs["user_rate"] = req.user_rate
+    if req.set_notes:
+        update_kwargs["notes"] = req.notes
 
     if update_kwargs:
         transactions_repo.update(conn, id=txn_id, **update_kwargs)
