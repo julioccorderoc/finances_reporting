@@ -57,46 +57,46 @@
     </label>
   </div>
 
-  <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
     {% if accounts_options %}
-      <label class="text-xs flex flex-col gap-1">
-        <span class="text-slate-500">Accounts</span>
-        <select name="accounts" multiple size="3" class="border border-slate-300 rounded px-2 py-1 text-sm">
+      <fieldset class="text-xs">
+        <legend class="text-slate-500 mb-1">Accounts</legend>
+        <div class="choice-chips">
           {% for opt in accounts_options %}
-            <option value="{{ opt }}" {% if opt in filter.accounts %}selected{% endif %}>{{ opt }}</option>
+            <label class="choice-chip"><input type="checkbox" name="accounts" value="{{ opt }}"{% if opt in filter.accounts %} checked{% endif %}><span>{{ opt }}</span></label>
           {% endfor %}
-        </select>
-      </label>
+        </div>
+      </fieldset>
     {% endif %}
     {% if kinds_options %}
-      <label class="text-xs flex flex-col gap-1">
-        <span class="text-slate-500">Kinds</span>
-        <select name="kinds" multiple size="3" class="border border-slate-300 rounded px-2 py-1 text-sm">
+      <fieldset class="text-xs">
+        <legend class="text-slate-500 mb-1">Kinds</legend>
+        <div class="choice-chips">
           {% for opt in kinds_options %}
-            <option value="{{ opt }}" {% if opt in filter.kinds %}selected{% endif %}>{{ opt }}</option>
+            <label class="choice-chip"><input type="checkbox" name="kinds" value="{{ opt }}"{% if opt in filter.kinds %} checked{% endif %}><span>{{ opt }}</span></label>
           {% endfor %}
-        </select>
-      </label>
+        </div>
+      </fieldset>
     {% endif %}
     {% if currencies_options %}
-      <label class="text-xs flex flex-col gap-1">
-        <span class="text-slate-500">Currencies</span>
-        <select name="currencies" multiple size="3" class="border border-slate-300 rounded px-2 py-1 text-sm">
+      <fieldset class="text-xs">
+        <legend class="text-slate-500 mb-1">Currencies</legend>
+        <div class="choice-chips">
           {% for opt in currencies_options %}
-            <option value="{{ opt }}" {% if opt in filter.currencies %}selected{% endif %}>{{ opt }}</option>
+            <label class="choice-chip"><input type="checkbox" name="currencies" value="{{ opt }}"{% if opt in filter.currencies %} checked{% endif %}><span>{{ opt }}</span></label>
           {% endfor %}
-        </select>
-      </label>
+        </div>
+      </fieldset>
     {% endif %}
     {% if sources_options %}
-      <label class="text-xs flex flex-col gap-1">
-        <span class="text-slate-500">Sources</span>
-        <select name="sources" multiple size="3" class="border border-slate-300 rounded px-2 py-1 text-sm">
+      <fieldset class="text-xs">
+        <legend class="text-slate-500 mb-1">Sources</legend>
+        <div class="choice-chips">
           {% for opt in sources_options %}
-            <option value="{{ opt }}" {% if opt in filter.sources %}selected{% endif %}>{{ opt }}</option>
+            <label class="choice-chip"><input type="checkbox" name="sources" value="{{ opt }}"{% if opt in filter.sources %} checked{% endif %}><span>{{ opt }}</span></label>
           {% endfor %}
-        </select>
-      </label>
+        </div>
+      </fieldset>
     {% endif %}
   </div>
 
@@ -104,4 +104,11 @@
   <input type="hidden" name="sort" value="{{ filter.sort }}">
   <input type="hidden" name="direction" value="{{ filter.direction }}">
   <input type="hidden" name="page" value="1">
+
+  <div class="flex justify-end">
+    {# Full navigation on purpose: dropping ALL query params (incl. the
+       hidden sort/direction) resets to the server-side defaults —
+       last-30-days window per transactions_query.resolve_defaults. #}
+    <a href="/transactions" data-clear-filters class="text-xs text-sky-700 hover:underline">Clear filters</a>
+  </div>
 </form>

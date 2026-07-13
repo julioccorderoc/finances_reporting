@@ -704,3 +704,72 @@
 }
 
 /* === END WP4 bulk select === */
+
+/* === WP6 filter polish: checkbox chips =================================
+ * Plain <input type="checkbox"> rendered as a tappable pill. The input
+ * stays in the DOM (native form serialization + keyboard a11y) but is
+ * visually hidden; the sibling <span> is the visible chip. Selected
+ * state is pure CSS (`input:checked + span`) — no JS, and htmx sees the
+ * native change event bubble to the filter form.
+ *
+ * NOTE: `.filter-chips` (Phase 5) is a different, pre-existing strip
+ * rule — do not merge these.
+ */
+.choice-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+.choice-chip {
+  position: relative;
+  cursor: pointer;
+}
+
+.choice-chip input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+}
+
+.choice-chip span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0.125rem 0.625rem;
+  border: 1px solid #cbd5e1;      /* slate-300 */
+  border-radius: 9999px;
+  background: #ffffff;
+  color: #334155;                 /* slate-700 */
+  font-size: 0.75rem;
+  user-select: none;
+  transition: background-color 80ms ease, border-color 80ms ease,
+              color 80ms ease;
+}
+
+.choice-chip:hover span {
+  border-color: #94a3b8;          /* slate-400 */
+}
+
+.choice-chip input:checked + span {
+  background: #0369a1;            /* sky-700 */
+  border-color: #0369a1;
+  color: #ffffff;
+}
+
+.choice-chip input:focus-visible + span {
+  outline: 2px solid #0ea5e9;     /* sky-500 */
+  outline-offset: 1px;
+}
+
+/* Phones: >=44px tap target (same convention as Phase 5 mobile polish). */
+@media (max-width: 640px) {
+  .choice-chip span {
+    min-height: 44px;
+    padding: 0.5rem 0.875rem;
+    font-size: 0.8125rem;
+  }
+}
+/* === END WP6 filter polish === */

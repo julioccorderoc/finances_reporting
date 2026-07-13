@@ -21,24 +21,12 @@
       </select>
     </label>
     <label class="text-xs flex flex-col gap-1">
-      <span class="text-slate-500">Since (YYYY-MM)</span>
-      <input
-        type="text"
-        name="since"
-        value="{{ filter.since or '' }}"
-        placeholder="2026-01"
-        class="border border-slate-300 rounded px-2 py-1 text-sm"
-      >
+      <span class="text-slate-500">Since</span>
+      <input type="month" name="since" value="{{ filter.since or '' }}" class="border border-slate-300 rounded px-2 py-1 text-sm">
     </label>
     <label class="text-xs flex flex-col gap-1">
-      <span class="text-slate-500">Until (YYYY-MM)</span>
-      <input
-        type="text"
-        name="until"
-        value="{{ filter.until or '' }}"
-        placeholder="2026-05"
-        class="border border-slate-300 rounded px-2 py-1 text-sm"
-      >
+      <span class="text-slate-500">Until</span>
+      <input type="month" name="until" value="{{ filter.until or '' }}" class="border border-slate-300 rounded px-2 py-1 text-sm">
     </label>
     {% if accounts_options %}
       <label class="text-xs flex flex-col gap-1">
@@ -75,4 +63,10 @@
 
   {# Preserve the active kind across filter changes. #}
   <input type="hidden" name="kind" value="{{ filter.kind.value }}">
+
+  <div class="flex justify-end">
+    {# Full navigation on purpose: resets range_preset to 6m, clears
+       since/until/accounts/currencies, kind back to expense. #}
+    <a href="/monthly" data-clear-filters class="text-xs text-sky-700 hover:underline">Clear filters</a>
+  </div>
 </form>
