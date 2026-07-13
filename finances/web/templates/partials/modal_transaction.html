@@ -173,5 +173,27 @@
         >Save</button>
       </div>
     </form>
+
+    {# 5. History (Wave 2 Thing 3) ---------------------------------------
+       Every manual edit (category / user_rate / notes) recorded by
+       transactions_repo.update(). Native <details> — no JS. category_id
+       old/new values are resolved to names by the router; the section is
+       omitted entirely when the txn has never been edited. #}
+    {% if history %}
+    <section class="tx-modal-section">
+      <details>
+        <summary class="tx-modal-section-title">History ({{ history | length }})</summary>
+        <ul class="mt-2 text-xs text-slate-600">
+          {% for h in history %}
+          <li class="mt-1 flex items-baseline gap-2">
+            <time class="text-slate-500 tabular-nums">{{ h.edited_at | fmt_date }}</time>
+            <span class="font-semibold">{{ h.field_label }}</span>
+            <span class="font-mono break-all">{{ h.old_display if h.old_display is not none else '—' }} → {{ h.new_display if h.new_display is not none else '—' }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+      </details>
+    </section>
+    {% endif %}
   </div>
 </div>

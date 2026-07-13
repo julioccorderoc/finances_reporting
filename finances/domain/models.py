@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -203,6 +203,32 @@ class SavedView(BaseModel):
         return None if v is None else _require_aware(v)
 
 
+class TransactionEdit(BaseModel):
+    """One recorded change to a manually-editable transaction field.
+
+    Rows are written only from inside ``transactions_repo.update()`` (the
+    single sanctioned write path, rule-012) — one per field that actually
+    changed. ``field`` is constrained to the manual-enrichment columns;
+    ``needs_review`` is resolver-derived (ADR-005) and never recorded.
+    ``old_value`` / ``new_value`` are stored as TEXT (``None`` = the field
+    was empty on that side of the change).
+    """
+
+    model_config = ConfigDict(strict=False, extra="forbid")
+
+    id: int | None = None
+    transaction_id: int
+    edited_at: datetime | None = None
+    field: Literal["category_id", "user_rate", "notes"]
+    old_value: str | None = None
+    new_value: str | None = None
+
+    @field_validator("edited_at")
+    @classmethod
+    def _aware_edited_at(cls, v: datetime | None) -> datetime | None:
+        return None if v is None else _require_aware(v)
+
+
 __all__ = [
     "Account",
     "AccountKind",
@@ -211,5 +237,6 @@ __all__ = [
     "Rate",
     "SavedView",
     "Transaction",
+    "TransactionEdit",
     "TransactionKind",
 ]
