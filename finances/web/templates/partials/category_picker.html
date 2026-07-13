@@ -1,0 +1,89 @@
+{# Shared category picker (UX overhaul WP4).
+
+   Top-used chips + Alpine type-to-filter list over all active
+   categories. Sets the hidden ``category_id`` input; ``set_category``
+   stays "false" until the user actually picks or removes a category,
+   so an untouched picker can never wipe an existing category (WP2
+   safety contract). Clearing is the explicit "remove category" control.
+
+   Context:
+     categories       list[Category] — all active categories (full list)
+     top_categories   list[Category] — most-used chips (<= 8),
+                      from services/category_stats.top_categories
+     picker_selected  int | None     — initial selection (optional)
+
+   Keyboard: chips carry data-chip="1".."8" in DOM order so the
+   modal-level handler (Task 4) maps keys 1-8 onto them.
+#}
+{% set _initial = picker_selected if picker_selected is defined and picker_selected is not none else none %}
+{% set ns = namespace(initial_name=none) %}
+{% for cat in categories %}
+  {%- if _initial is not none and cat.id == _initial %}{% set ns.initial_name = cat.name %}{% endif -%}
+{% endfor %}
+<div
+  data-category-picker
+  class="space-y-2"
+  x-data='{
+    selected: {{ _initial if _initial is not none else "null" }},
+    selectedName: {{ ns.initial_name | tojson }},
+    dirty: false,
+    query: "",
+    pick(id, name) { this.selected = id; this.selectedName = name; this.dirty = true; },
+    matches(name) { return name.includes(this.query.toLowerCase().trim()); },
+  }'
+>
+  <input type="hidden" name="set_category" value="false" :value="dirty ? 'true' : 'false'">
+  <input type="hidden" name="category_id" value="{{ _initial if _initial is not none else '' }}" :value="selected === null ? '' : selected">
+
+  {# Top-used chips (keys 1-8). #}
+  <div class="flex flex-wrap gap-1.5" data-picker-chips>
+    {% for cat in top_categories %}
+      <button
+        type="button"
+        data-chip="{{ loop.index }}"
+        @click='pick({{ cat.id }}, {{ cat.name | tojson }})'
+        class="px-2.5 py-1.5 text-sm border rounded-full bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
+        :class="selected === {{ cat.id }} ? 'ring-2 ring-slate-900 border-slate-900 bg-slate-100' : ''"
+      ><span class="text-[10px] text-slate-400 mr-1">{{ loop.index }}</span>{{ cat.name }}</button>
+    {% endfor %}
+  </div>
+
+  {# Current selection + explicit clear control. #}
+  <div class="flex items-center gap-2 text-xs text-slate-600" data-picker-current>
+    <span x-show="selected !== null">Selected: <strong x-text="selectedName"></strong></span>
+    <span x-show="selected === null" class="text-slate-400">no category</span>
+    <button
+      type="button"
+      data-picker-remove
+      x-show="selected !== null"
+      @click="pick(null, null)"
+      class="px-1.5 py-0.5 border border-rose-300 text-rose-700 rounded hover:bg-rose-50"
+    >&times; remove category</button>
+  </div>
+
+  {# Type-to-filter list over all active categories. #}
+  <input
+    type="text"
+    data-picker-search
+    x-model="query"
+    @keydown.enter.prevent
+    placeholder="Filter categories…"
+    autocomplete="off"
+    class="w-full border border-slate-300 rounded px-2 py-1 text-sm"
+  >
+  <div class="max-h-40 overflow-y-auto border border-slate-200 rounded divide-y divide-slate-100" data-picker-list>
+    {% for cat in categories %}
+      <button
+        type="button"
+        data-picker-item="{{ cat.id }}"
+        x-show='matches({{ cat.name | lower | tojson }})'
+        @click='pick({{ cat.id }}, {{ cat.name | tojson }})'
+        class="w-full flex items-baseline justify-between gap-2 px-2 py-1 text-left text-sm hover:bg-slate-50"
+        :class="selected === {{ cat.id }} ? 'bg-slate-100 font-semibold' : ''"
+      >
+        <span>{{ cat.name }}</span>
+        <span class="text-[10px] uppercase tracking-wide text-slate-400">{{ cat.kind.value }}</span>
+      </button>
+    {% endfor %}
+  </div>
+</div>
