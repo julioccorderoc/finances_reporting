@@ -842,3 +842,23 @@
   }
 }
 /* === END Wave 2 Thing 2 === */
+
+/* === Stop-server nav button (2026-07-13) === */
+.stop-server-form {
+  margin-left: auto;              /* pin to the right edge of the nav row */
+}
+
+.stop-server-btn {
+  font-size: 0.8125rem;
+  padding: 0.25rem 0.75rem;
+  border: 1px solid #fecaca;      /* red-200 */
+  border-radius: 0.375rem;
+  background: #fff;
+  color: #b91c1c;                 /* red-700 */
+  cursor: pointer;
+}
+
+.stop-server-btn:hover {
+  background: #fef2f2;            /* red-50 */
+  border-color: #fca5a5;          /* red-300 */
+}

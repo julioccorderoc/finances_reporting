@@ -9,11 +9,15 @@ touching the existing ones.
 
 from __future__ import annotations
 
+import os
+import signal
 import sqlite3
+import threading
 from datetime import UTC, date, datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import HTMLResponse
 
 from finances.db.repos import accounts as accounts_repo
 from finances.db.repos import categories as categories_repo
@@ -51,6 +55,48 @@ from finances.web.services.triage import (
 )
 
 router = APIRouter()
+
+# Grace period so the goodbye page flushes before the process exits.
+_SHUTDOWN_DELAY_SECONDS = 0.3
+
+_GOODBYE_HTML = """<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Finances — stopped</title>
+    <style>
+      body { font-family: -apple-system, system-ui, sans-serif; background: #f8fafc;
+             color: #0f172a; display: grid; place-items: center; min-height: 100vh; margin: 0; }
+      main { text-align: center; }
+      p { color: #475569; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Server stopped</h1>
+      <p>report.html was refreshed on the way out. You can close this tab.</p>
+      <p>Double-click <code>finances.command</code> whenever you need it again.</p>
+    </main>
+  </body>
+</html>"""
+
+
+def _terminate() -> None:
+    # SIGINT = the same signal as Ctrl-C in the launcher terminal: uvicorn
+    # shuts down gracefully and the lifespan hook regenerates report.html.
+    os.kill(os.getpid(), signal.SIGINT)
+
+
+@router.post("/shutdown", include_in_schema=False)
+def shutdown_server() -> HTMLResponse:
+    """Stop the server from the browser (nav "Stop server" button).
+
+    Plain form POST — the browser renders the self-contained goodbye page
+    (no /static references: the server is gone moments later), then the
+    delayed SIGINT triggers the normal graceful-shutdown path.
+    """
+    threading.Timer(_SHUTDOWN_DELAY_SECONDS, lambda: _terminate()).start()
+    return HTMLResponse(_GOODBYE_HTML)
 
 
 def _parse_triage_type(value: str | None) -> TriageType | None:

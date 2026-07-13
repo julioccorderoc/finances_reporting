@@ -20,7 +20,7 @@
   </head>
   <body
     class="min-h-screen bg-slate-50 text-slate-900"
-    x-data="{}"
+    x-data="{ advanceNext: false }"
     @close-modal.window="document.getElementById('tx-modal-host').replaceChildren()"
     @htmx:after-on-load.window="
       const raw = $event.detail && $event.detail.xhr && $event.detail.xhr.getResponseHeader('HX-Trigger');
@@ -37,9 +37,19 @@
         if (names.includes('closeModal')) {
           window.dispatchEvent(new CustomEvent('close-modal'));
         }
+        if (names.includes('advanceQueue')) {
+          advanceNext = true;
+        }
         if (toast) {
           window.dispatchEvent(new CustomEvent('show-toast', { detail: toast }));
         }
+      }
+    "
+    @htmx:after-settle.window="
+      if (advanceNext && $event.detail.target && $event.detail.target.id === 'triage-queue') {
+        advanceNext = false;
+        const next = document.querySelector('#triage-queue [hx-get*=\'/modal\']');
+        if (next) next.click();
       }
     "
     @htmx:response-error.window="
@@ -68,6 +78,12 @@
           <a href="/accounts" class="text-slate-600 hover:text-slate-900">Accounts</a>
           <a href="/rates" class="text-slate-600 hover:text-slate-900">Rates</a>
         </div>
+        {# Always-visible graceful stop: plain form POST (no htmx) so the
+           browser navigates to the goodbye page before the server exits. #}
+        <form method="post" action="/shutdown" class="stop-server-form"
+              onsubmit="return confirm('Stop the finances server?')">
+          <button type="submit" class="stop-server-btn">Stop server</button>
+        </form>
       </div>
     </nav>
 
