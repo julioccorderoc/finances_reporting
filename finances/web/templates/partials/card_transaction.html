@@ -29,6 +29,13 @@
   hx-trigger="click"
   hx-swap="innerHTML"
 >
+  {% if bulk_select is defined and bulk_select %}
+    {# WP4 bulk select. @click.stop keeps the checkbox from opening the
+       row's edit modal (the article's hx-get click trigger). #}
+    <span @click.stop>
+      <input type="checkbox" data-bulk-checkbox value="{{ card.id }}" x-model="selected" @click.stop>
+    </span>
+  {% endif %}
   <time class="text-xs text-slate-500 tabular-nums" datetime="{{ card.occurred_at.isoformat() }}">
     {{ format_date(card.occurred_at) }}
   </time>

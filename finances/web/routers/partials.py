@@ -316,7 +316,10 @@ def transactions_edit_partial(
     response = templates.TemplateResponse(
         request,
         "partials/card_transaction.html",
-        {"card": card},
+        # bulk_select keeps the checkbox cell so the swapped-in card
+        # stays aligned with the /transactions subgrid (WP4). This
+        # endpoint is only invoked from the /transactions modal.
+        {"card": card, "bulk_select": True},
     )
     response.headers["HX-Trigger"] = _hx_trigger_json("closeModal", toast_message="Saved")
     return response

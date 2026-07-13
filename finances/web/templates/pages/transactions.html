@@ -11,8 +11,78 @@
   {# Filters (top of page). #}
   {% include "partials/transactions_filters.html" %}
 
-  {# List body. Initial server render; HTMX swaps subsequent updates. #}
-  <section class="mt-4">
+  {# Bulk-select scope (WP4). The action bar lives OUTSIDE #tx-list so it
+     survives HTMX list swaps; the selection intentionally resets on any
+     swap (filter / sort / page change). Apply posts JSON via fetch to
+     the WP4 bulk endpoint, dispatches the WP2 toast event itself
+     (fetch bypasses htmx's HX-Trigger handling), then refreshes the
+     list from the current URL query (URL = filter source of truth). #}
+  <section
+    class="mt-4"
+    x-data="{
+      selected: [],
+      toggleAll(checked) {
+        this.selected = checked
+          ? Array.from(document.querySelectorAll('[data-bulk-checkbox]')).map(el => el.value)
+          : [];
+      },
+      async applyBulk() {
+        const dirty = document.querySelector('#bulk-bar input[name=set_category]');
+        if (!dirty || dirty.value !== 'true') {
+          window.dispatchEvent(new CustomEvent('show-toast', {
+            detail: { level: 'error', message: 'Pick a category first' },
+          }));
+          return;
+        }
+        const raw = document.querySelector('#bulk-bar input[name=category_id]').value;
+        const payload = {
+          ids: this.selected.map(Number),
+          category_id: raw === '' ? null : Number(raw),
+        };
+        const resp = await fetch('/api/transactions/bulk-edit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!resp.ok) {
+          let detail = '';
+          try { detail = (await resp.json()).detail || ''; } catch (e) {}
+          window.dispatchEvent(new CustomEvent('show-toast', {
+            detail: { level: 'error', message: 'Bulk edit failed. ' + detail },
+          }));
+          return;
+        }
+        const data = await resp.json();
+        window.dispatchEvent(new CustomEvent('show-toast', {
+          detail: { level: 'success', message: data.updated + ' updated' },
+        }));
+        this.selected = [];
+        htmx.ajax('GET', '/_partial/transactions/list' + window.location.search,
+                  { target: '#tx-list', swap: 'outerHTML' });
+      },
+    }"
+    @htmx:after-swap="selected = []"
+  >
+    {# Bulk action bar — revealed while at least one row is selected. #}
+    <div
+      id="bulk-bar"
+      x-show="selected.length > 0"
+      x-cloak
+      class="mb-3 p-3 border border-slate-300 rounded-lg bg-white space-y-2"
+    >
+      <div class="flex items-center justify-between text-sm">
+        <span><strong x-text="selected.length"></strong> selected</span>
+        <button
+          type="button"
+          data-bulk-apply
+          @click="applyBulk()"
+          class="px-3 py-1.5 text-sm border border-slate-900 rounded bg-slate-900 text-white hover:bg-slate-800"
+        >Apply</button>
+      </div>
+      {% include "partials/category_picker.html" %}
+    </div>
+
+    {# List body. Initial server render; HTMX swaps subsequent updates. #}
     {% include "partials/transactions_list.html" %}
   </section>
 {% endblock %}

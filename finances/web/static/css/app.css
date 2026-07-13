@@ -674,3 +674,33 @@
   color: #9f1239;               /* rose-800 */
 }
 /* === END remove-category control === */
+
+/* === WP4: bulk select ================================================== */
+
+/* Alpine x-cloak: hide the action bar until Alpine initialises. */
+[x-cloak] {
+  display: none !important;
+}
+
+/* Selectable variant: prepend a checkbox track to the card grid.
+ * Mirrors .cards (6 tracks desktop / 3 tablet) with one extra 1.5rem
+ * leading column. Still CSS Grid card-rows — no <table>.
+ */
+.cards--selectable {
+  grid-template-columns: 1.5rem 9rem 8rem 1fr 10rem 9rem 7rem;
+}
+@media (max-width: 1023px) {
+  .cards--selectable {
+    grid-template-columns: 1.5rem 7rem 1fr 9rem;
+  }
+}
+/* Phone: .cards is display:block, the checkbox stacks as the first
+ * element inside each card — keep it compact. */
+@media (max-width: 640px) {
+  .cards--selectable [data-bulk-checkbox] {
+    width: 1rem;
+    height: 1rem;
+  }
+}
+
+/* === END WP4 bulk select === */
