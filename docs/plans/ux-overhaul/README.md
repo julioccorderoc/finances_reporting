@@ -22,7 +22,7 @@ pass/fail gate; the agent never marks a package complete — Julio does.
 | 3 | Transaction notes — migration 008, full-stack thread, re-ingest-safe | [03-notes.md](03-notes.md) | — | ✅ 2026-07-12 (validated: suite green, 26 notes tests pass incl. test_upsert_reingest_never_wipes_manual_note, COALESCE keeps existing note, textareas + card indicator + note-aware search live) |
 | 4 | Triage picker + keyboard + bulk categorize | [04-triage-picker-bulk.md](04-triage-picker-bulk.md) | WP2 (toast infra; has fallbacks if WP2 absent) | ✅ 2026-07-13 (validated: suite green, picker + category_stats + bulk-edit endpoint live, show-toast wired, skip key triage-only, Tailwind rebuilt, WP2 tests superseded per 3.8b) |
 | 5 | Launcher reorder (update foreground-first) + triage URL in summary | [05-launcher.md](05-launcher.md) | — | ✅ 2026-07-13 (validated: suite green, bash -n ok, update foreground+guarded before serve, summary prints triage URL, "sort them" wording gone) |
-| 6 | Filter polish — checkbox chips, month picker, clear button | [06-filters.md](06-filters.md) | — | ⬜ |
+| 6 | Filter polish — checkbox chips, month picker, clear button | [06-filters.md](06-filters.md) | — | ✅ 2026-07-13 (validated: suite green, multi-selects gone, checkbox chips keep param names + checked state, native month inputs, clear links both forms; validator caught + fixed skipped Tailwind rebuild) |
 
 Suggested order: 1 → 2 → 3 → 4 → 5 → 6 (2 before 4; the rest are independent).
 
