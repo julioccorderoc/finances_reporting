@@ -40,6 +40,23 @@ finances sync sheets --spreadsheet-id <id>    # read-only Sheets mirror (EPIC-01
 finances backfill --from data/                # one-time historical import
 ```
 
+The `update` sweep ingests every statement dropped in `inputs/`; each file
+that ingests cleanly is retired into `inputs/processed/` so it is not
+re-parsed on the next run (both dirs are gitignored).
+
+## Maintenance tools
+
+Occasional scripts that live outside the CLI (`scripts/`, run with `uv`):
+
+- **`import_bcv_history.py`** — backfills missing daily BCV rate rows from a
+  saved multi-day BCV HTML table (the live scraper only reads today's rate).
+  Idempotent; dry-run by default, `--apply` to write. Back up the DB first.
+
+```bash
+uv run python scripts/import_bcv_history.py            # dry-run
+uv run python scripts/import_bcv_history.py --apply    # write
+```
+
 ## Local viewer
 
 A FastAPI/HTMX/Alpine viewer ships under `finances/web/`. Read-only by default
