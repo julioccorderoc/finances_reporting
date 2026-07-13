@@ -141,3 +141,38 @@ def test_monthly_month_param_validation_is_unchanged(
     client: TestClient = web_client_factory()
     resp = client.get("/monthly", params={"since": "2026-13"}, headers=_DESKTOP_UA)
     assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Task 3 — Clear-filters links.
+# ---------------------------------------------------------------------------
+
+
+def test_transactions_clear_filters_link_resets_to_bare_url(
+    seeded_web_db: sqlite3.Connection,
+    web_client_factory,
+) -> None:
+    client: TestClient = web_client_factory()
+    resp = client.get("/transactions", params={"q": "COM.PAGO"})
+    assert resp.status_code == 200
+    body = resp.text
+    # Plain link to the bare page URL — the server re-derives the
+    # last-30-days default via transactions_query.resolve_defaults.
+    assert '<a href="/transactions" data-clear-filters' in body
+    assert ">Clear filters</a>" in body
+
+
+def test_monthly_clear_filters_link_resets_to_bare_url(
+    seeded_web_db: sqlite3.Connection,
+    web_client_factory,
+) -> None:
+    client: TestClient = web_client_factory()
+    resp = client.get(
+        "/monthly",
+        params={"range_preset": "custom", "since": "2026-01"},
+        headers=_DESKTOP_UA,
+    )
+    assert resp.status_code == 200
+    body = resp.text
+    assert '<a href="/monthly" data-clear-filters' in body
+    assert ">Clear filters</a>" in body
