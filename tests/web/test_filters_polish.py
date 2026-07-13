@@ -96,3 +96,48 @@ def test_checkbox_repeated_params_still_narrow_the_list(
     assert 'data-account="Provincial"' in body
     assert 'data-account="Cash USD"' not in body
     assert 'data-account="Binance Spot"' not in body
+
+
+# ---------------------------------------------------------------------------
+# Task 2 — /monthly native month inputs.
+# ---------------------------------------------------------------------------
+
+
+def test_monthly_since_until_render_as_month_inputs_and_round_trip(
+    seeded_web_db: sqlite3.Connection,
+    web_client_factory,
+) -> None:
+    client: TestClient = web_client_factory()
+    resp = client.get(
+        "/monthly",
+        params={"range_preset": "custom", "since": "2026-01", "until": "2026-05"},
+        headers=_DESKTOP_UA,
+    )
+    assert resp.status_code == 200
+    body = resp.text
+    # Native month inputs round-trip the YYYY-MM value from the URL.
+    assert '<input type="month" name="since" value="2026-01"' in body
+    assert '<input type="month" name="until" value="2026-05"' in body
+    # The free-text placeholders are gone.
+    assert 'placeholder="2026-01"' not in body
+    assert 'placeholder="2026-05"' not in body
+
+    # Empty state renders an empty value attribute, never "None".
+    resp_default = client.get("/monthly", headers=_DESKTOP_UA)
+    assert resp_default.status_code == 200
+    assert '<input type="month" name="since" value=""' in resp_default.text
+    assert '<input type="month" name="until" value=""' in resp_default.text
+
+
+def test_monthly_month_param_validation_is_unchanged(
+    seeded_web_db: sqlite3.Connection,
+    web_client_factory,
+) -> None:
+    """Contract guard: _monthly_filter_dep still 422s malformed months.
+
+    <input type="month"> submits exactly YYYY-MM — the only format
+    _MONTH_RE accepts. Expected to pass BEFORE the template change too.
+    """
+    client: TestClient = web_client_factory()
+    resp = client.get("/monthly", params={"since": "2026-13"}, headers=_DESKTOP_UA)
+    assert resp.status_code == 422
