@@ -16,10 +16,12 @@ from typing import Literal
 from fastapi import APIRouter, Depends, Query, Request
 
 from finances.db.repos import accounts as accounts_repo
+from finances.db.repos import categories as categories_repo
 from finances.web.deps import get_conn
 from finances.web.routers._monthly_filter_dep import monthly_filter_from_query
 from finances.web.routers._tx_filter_dep import filter_from_query
 from finances.web.services.accounts_view import build_account_cards
+from finances.web.services.category_stats import top_categories
 from finances.web.services.dashboard import (
     build_kpis,
     build_recent_activity,
@@ -121,6 +123,9 @@ def transactions_page(
             "kinds_options": kinds_options,
             "currencies_options": currencies_options,
             "sources_options": sources_options,
+            # Bulk action bar (WP4): mixed kinds on this page → kind=None.
+            "categories": categories_repo.list_all(conn),
+            "top_categories": top_categories(conn, kind=None),
         },
     )
 

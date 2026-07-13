@@ -31,9 +31,14 @@
     </span>
   </div>
 
-  {# Column header (hidden on mobile via CSS). #}
-  <div class="cards">
+  {# Column header (hidden on mobile via CSS). WP4: leading checkbox
+     track + select-all; rows opt into their checkbox via bulk_select. #}
+  {% set bulk_select = true %}
+  <div class="cards cards--selectable">
     <div class="hidden sm:grid grid-cols-subgrid col-span-full text-[10px] uppercase tracking-wide text-slate-400 px-3">
+      <span>
+        <input type="checkbox" data-bulk-select-all @change="toggleAll($event.target.checked)" title="Select all on page">
+      </span>
       <span>Date</span>
       <span>Account</span>
       <span>Description</span>

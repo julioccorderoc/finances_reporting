@@ -222,8 +222,9 @@ def test_modal_no_hardcoded_set_sentinels(
     # The old always-true sentinels are gone...
     assert 'name="set_category" value="true"' not in body
     assert 'name="set_user_rate" value="true"' not in body
-    # ...replaced by Alpine dirty-tracking bindings.
-    assert "catDirty" in body
+    # ...replaced by the picker's untouched-default sentinel (WP4) and
+    # WP2's rate dirty-tracking, which the picker leaves in place.
+    assert 'name="set_category" value="false"' in body
     assert "rateDirty" in body
 
 
@@ -271,7 +272,9 @@ def test_modal_hides_remove_category_control_when_uncategorized(
     client = web_client_factory()
     txn_id = _txn_id(seeded_web_db, "cash-1")  # no category
     body = client.get(f"/_partial/transactions/{txn_id}/modal").text
-    assert "remove category" not in body
+    # WP4's picker always server-renders the control and hides it at
+    # runtime via Alpine — assert the binding, not string absence.
+    assert 'x-show="selected !== null"' in body
 
 
 def test_modal_explicit_remove_payload_clears_category(
@@ -300,13 +303,13 @@ def test_modal_explicit_remove_payload_clears_category(
     assert after.category_id is None
 
 
-def test_modal_category_control_has_autofocus(
+def test_modal_category_control_is_the_shared_picker(
     seeded_web_db: sqlite3.Connection, web_client_factory
 ) -> None:
     client = web_client_factory()
     txn_id = _txn_id(seeded_web_db, "prov-1")
     body = client.get(f"/_partial/transactions/{txn_id}/modal").text
-    assert "autofocus" in body
+    assert "data-category-picker" in body
 
 
 # ---------------------------------------------------------------------------
@@ -323,7 +326,9 @@ def test_triage_modal_no_hardcoded_set_sentinels(
 
     assert 'name="set_category" value="true"' not in body
     assert 'name="set_user_rate" value="true"' not in body
-    assert "catDirty" in body
+    # ...replaced by the picker's untouched-default sentinel (WP4) and
+    # WP2's rate dirty-tracking, which the picker leaves in place.
+    assert 'name="set_category" value="false"' in body
     assert "rateDirty" in body
 
 
@@ -366,10 +371,10 @@ def test_triage_modal_has_remove_category_control_when_categorized(
     assert "remove category" in body
 
 
-def test_triage_modal_category_control_has_autofocus(
+def test_triage_modal_category_control_is_the_shared_picker(
     seeded_web_db: sqlite3.Connection, web_client_factory
 ) -> None:
     client = web_client_factory()
     txn_id = _txn_id(seeded_web_db, "prov-1")
     body = client.get(f"/_partial/triage/{txn_id}/modal").text
-    assert "autofocus" in body
+    assert "data-category-picker" in body

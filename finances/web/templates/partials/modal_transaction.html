@@ -21,17 +21,33 @@
    rates.resolve and recomputed on every save).
 #}
 {% from "_macros.html" import rate_source_badge, needs_review_badge,
-                              kind_class, format_date, format_amount,
-                              category_select %}
+                              kind_class, format_date, format_amount %}
 
 <div
   class="tx-modal-overlay"
   data-tx-modal
   data-tx-id="{{ txn.id }}"
-  x-data="{}"
+  x-data="{
+    isTyping(e) {
+      const t = e.target;
+      return t instanceof Element && t.matches('input, textarea, select, button');
+    }
+  }"
+  x-init="$nextTick(() => { const c = $el.querySelector('.tx-modal-card'); if (c) c.focus(); })"
   @keydown.escape.window="window.dispatchEvent(new CustomEvent('close-modal'))"
+  @keydown.window="
+    if (isTyping($event)) return;
+    const key = $event.key;
+    if (key.length === 1 && key >= '1' && key <= '8') {
+      const chip = $el.querySelectorAll('[data-chip]')[Number(key) - 1];
+      if (chip) { chip.click(); $event.preventDefault(); }
+    } else if (key === 'Enter') {
+      const save = $el.querySelector('form.tx-modal-form button[type=submit]');
+      if (save) { save.click(); $event.preventDefault(); }
+    }
+  "
 >
-  <div class="tx-modal-card" role="dialog" aria-modal="true">
+  <div class="tx-modal-card" role="dialog" aria-modal="true" tabindex="-1">
     {# 1. Header --------------------------------------------------------- #}
     <header class="tx-modal-header">
       <div class="flex items-baseline gap-2">
@@ -104,27 +120,20 @@
       x-data="{ catDirty: false, rateDirty: false, notesDirty: false }"
       x-init="$nextTick(() => { const el = $root.querySelector('[name=category_id]'); if (el) el.focus(); })"
     >
-      {# Dirty-tracked sentinels (WP2): submit true only when the user
-         actually touched the matching control. An untouched empty
-         select can no longer silently clear an existing category. Notes
-         (WP3) follow the same pattern — an untouched textarea leaves the
-         stored note alone. #}
-      <input type="hidden" name="set_category" value="false" :value="catDirty ? 'true' : 'false'">
+      {# Dirty-tracked keep-set sentinels (WP2/WP3): submit true only when
+         the user actually touched user_rate / notes. The picker (WP4)
+         owns set_category + category_id and marks set_category=true only
+         once the user picks or removes a category, so an untouched picker
+         can never wipe an existing category. #}
       <input type="hidden" name="set_user_rate" value="false" :value="rateDirty ? 'true' : 'false'">
       <input type="hidden" name="set_notes" value="false" :value="notesDirty ? 'true' : 'false'">
 
-      <label class="block" @change="catDirty = true">
+      <div class="block">
         <span class="text-xs uppercase tracking-wide text-slate-500">Category</span>
-        {{ category_select("category_id", categories, selected=txn.category_id, autofocus=True) }}
-      </label>
-
-      {% if txn.category_id is not none %}
-        <button
-          type="button"
-          class="remove-category-btn"
-          @click="$root.querySelector('[name=category_id]').value = ''; catDirty = true"
-        >&times; remove category</button>
-      {% endif %}
+        {% with picker_selected = txn.category_id %}
+          {% include "partials/category_picker.html" %}
+        {% endwith %}
+      </div>
 
       <label class="block" @input="rateDirty = true">
         <span class="text-xs uppercase tracking-wide text-slate-500">User rate</span>

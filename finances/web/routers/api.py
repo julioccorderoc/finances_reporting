@@ -10,13 +10,16 @@ these endpoints.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import UTC, date, datetime
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, ConfigDict
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from pydantic import BaseModel, ConfigDict, Field
 
+from finances.db.repos import categories as categories_repo
+from finances.db.repos import transactions as transactions_repo
 from finances.web.deps import get_conn
 from finances.web.routers._monthly_filter_dep import monthly_filter_from_query
 from finances.web.routers._tx_filter_dep import filter_from_query
@@ -96,6 +99,79 @@ def transactions_patch(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+# ---------------------------------------------------------------------------
+# Bulk edit (UX overhaul WP4).
+# ---------------------------------------------------------------------------
+
+
+class BulkEditRequest(BaseModel):
+    """Body for POST /api/transactions/bulk-edit.
+
+    ``category_id: null`` is an explicit bulk clear — the UI only sends
+    it via the picker's "remove category" control, never as a side
+    effect of an untouched picker. ``extra="forbid"`` keeps
+    ``needs_review`` (derived-only) and everything else out.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    ids: list[int] = Field(min_length=1)
+    category_id: int | None = None
+
+
+class BulkEditResponse(BaseModel):
+    """JSON shape returned by POST /api/transactions/bulk-edit."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    updated: int
+
+
+@router.post("/transactions/bulk-edit", response_model=BulkEditResponse)
+def transactions_bulk_edit(
+    body: BulkEditRequest,
+    response: Response,
+    conn: sqlite3.Connection = Depends(get_conn),
+) -> BulkEditResponse:
+    """Assign (or explicitly clear) one category on many transactions.
+
+    Per rule-012 every row goes through the sanctioned
+    ``transactions_repo.update()`` — no parallel UPDATE SQL in web code.
+    The loop runs inside ONE DB transaction: an unknown id rolls the
+    whole batch back and returns 404 (all-or-nothing — a partially
+    applied bulk edit would be invisible to the user).
+
+    Category is the only bulk-editable field in v1. ``needs_review`` is
+    untouched: it is derived from the rate resolver, and category
+    changes cannot affect it (see ADR-005 / ADR-012).
+    """
+    if body.category_id is not None:
+        if categories_repo.get_by_id(conn, body.category_id) is None:
+            raise HTTPException(
+                status_code=422, detail=f"unknown category id={body.category_id}"
+            )
+
+    # deps.get_conn opens autocommit connections (isolation_level=None);
+    # explicit BEGIN/COMMIT makes the per-row loop atomic.
+    conn.execute("BEGIN")
+    try:
+        for txn_id in body.ids:
+            transactions_repo.update(conn, id=txn_id, category_id=body.category_id)
+    except LookupError as exc:
+        conn.execute("ROLLBACK")
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+    conn.execute("COMMIT")
+
+    updated = len(body.ids)
+    response.headers["HX-Trigger"] = json.dumps(
+        {"toast": {"level": "success", "message": f"{updated} updated"}}
+    )
+    return BulkEditResponse(updated=updated)
 
 
 # ---------------------------------------------------------------------------
