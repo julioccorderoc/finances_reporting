@@ -407,3 +407,157 @@ def test_update_command_dry_run_smoke(
     assert "needs review" in result.output.lower()
     # Dry-run wrote no report file.
     assert not (tmp_path / "report.html").exists()
+
+
+# ---------------------------------------------------------------------------
+# Auto-archive — a successful `update` sweep moves ingested inputs into
+# inputs/processed/ so they are not re-parsed forever (Wave 2 CLI teardown).
+# ---------------------------------------------------------------------------
+
+
+def test_run_update_archives_ingested_provincial_file(
+    in_memory_db, happy_steps, tmp_path
+) -> None:
+    """A non-dry sweep moves each successfully ingested file to processed/."""
+    from finances.reports.update import render_summary, run_update
+
+    inputs = _inputs_with_one_csv(tmp_path)
+    src = inputs / "provincial_2026-07-01.csv"
+    assert src.exists()
+
+    result = run_update(
+        in_memory_db,
+        make_binance_client=_make_fake_client,
+        inputs_dir=inputs,
+        report_path=tmp_path / "report.html",
+        dry_run=False,
+    )
+
+    # Original gone; the file now lives under inputs/processed/ by the same name.
+    assert not src.exists()
+    moved = inputs / "processed" / "provincial_2026-07-01.csv"
+    assert moved.exists()
+    assert moved.read_text(encoding="utf-8") == "stub"
+
+    # The provincial outcome (and the rendered summary) mention the archive.
+    summary = result.source("provincial").summary
+    assert "archived 1 file" in summary
+    assert "inputs/processed/" in summary
+    assert "inputs/processed/" in render_summary(result)
+
+
+def test_run_update_dry_run_does_not_archive(
+    in_memory_db, happy_steps, tmp_path
+) -> None:
+    """A dry-run sweep parses but moves nothing — the file stays in inputs/."""
+    from finances.reports.update import run_update
+
+    inputs = _inputs_with_one_csv(tmp_path)
+    src = inputs / "provincial_2026-07-01.csv"
+
+    result = run_update(
+        in_memory_db,
+        make_binance_client=_make_fake_client,
+        inputs_dir=inputs,
+        report_path=tmp_path / "report.html",
+        dry_run=True,
+    )
+
+    assert src.exists()  # untouched
+    assert not (inputs / "processed").exists()
+    assert "archived" not in result.source("provincial").summary
+
+
+def test_run_update_failed_parse_leaves_file(
+    in_memory_db, happy_steps, monkeypatch, tmp_path
+) -> None:
+    """A file whose ingest raises is NOT archived — it stays for a retry."""
+    import finances.ingest.provincial as provincial_ingest
+    from finances.reports.update import run_update
+
+    inputs = _inputs_with_one_csv(tmp_path)
+    src = inputs / "provincial_2026-07-01.csv"
+
+    def boom(conn, csv_path, *, dry_run=False, **kw):
+        raise ValueError("unparseable statement")
+
+    monkeypatch.setattr(provincial_ingest, "ingest_csv", boom)
+
+    result = run_update(
+        in_memory_db,
+        make_binance_client=_make_fake_client,
+        inputs_dir=inputs,
+        report_path=tmp_path / "report.html",
+        dry_run=False,
+    )
+
+    assert src.exists()  # left in place
+    assert not (inputs / "processed" / "provincial_2026-07-01.csv").exists()
+    prov = result.source("provincial")
+    assert prov.status == "error"
+    assert "archived" not in prov.summary
+
+
+def test_run_update_archive_collision_gets_suffix(
+    in_memory_db, happy_steps, tmp_path
+) -> None:
+    """A name clash in processed/ gets a numeric suffix rather than clobbering."""
+    from finances.reports.update import run_update
+
+    inputs = _inputs_with_one_csv(tmp_path)
+    src = inputs / "provincial_2026-07-01.csv"
+
+    # A previously archived file already occupies the destination name.
+    processed = inputs / "processed"
+    processed.mkdir()
+    (processed / "provincial_2026-07-01.csv").write_text("older", encoding="utf-8")
+
+    run_update(
+        in_memory_db,
+        make_binance_client=_make_fake_client,
+        inputs_dir=inputs,
+        report_path=tmp_path / "report.html",
+        dry_run=False,
+    )
+
+    assert not src.exists()
+    # Original archive untouched; the new file lands beside it with a suffix.
+    assert (processed / "provincial_2026-07-01.csv").read_text(encoding="utf-8") == "older"
+    suffixed = processed / "provincial_2026-07-01-1.csv"
+    assert suffixed.exists()
+    assert suffixed.read_text(encoding="utf-8") == "stub"
+
+
+def test_ingest_provincial_command_leaves_file_in_place(
+    happy_steps, monkeypatch, tmp_path
+) -> None:
+    """The explicit `finances ingest provincial <path>` never archives — only
+    the `update` sweep moves files."""
+    from typer.testing import CliRunner
+
+    import finances.ingest.provincial as provincial_ingest
+    from finances.cli import main as cli_main
+    from finances.db.connection import get_connection
+    from finances.db.migrate import apply_migrations
+    from finances.ingest.provincial import IngestReport
+
+    db_file = tmp_path / "ingest.db"
+    conn = get_connection(db_file)
+    apply_migrations(conn)
+    conn.close()
+
+    csv_path = tmp_path / "one_off.csv"
+    csv_path.write_text("stub", encoding="utf-8")
+
+    def fake_ingest(conn, path, *, dry_run=False, **kw):
+        return IngestReport(rows_seen=1, rows_inserted=1, rows_updated=0)
+
+    monkeypatch.setattr(provincial_ingest, "ingest_csv", fake_ingest)
+    monkeypatch.setattr(cli_main, "DB_PATH", db_file)
+
+    runner = CliRunner()
+    result = runner.invoke(cli_main.app, ["ingest", "provincial", str(csv_path)])
+
+    assert result.exit_code == 0, result.output
+    assert csv_path.exists()  # not moved
+    assert not (tmp_path / "processed").exists()
