@@ -108,6 +108,7 @@ V1_TAXONOMY: tuple[tuple[TransactionKind, str], ...] = (
     (TransactionKind.EXPENSE, "Lending"),
     (TransactionKind.EXPENSE, "Education"),
     (TransactionKind.EXPENSE, "Clothing"),
+    (TransactionKind.EXPENSE, "Rent"),
     (TransactionKind.TRANSFER, "Internal Transfer"),
     (TransactionKind.TRANSFER, "External Transfer"),
     (TransactionKind.ADJUSTMENT, "Reconciliation"),
