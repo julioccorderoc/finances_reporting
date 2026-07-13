@@ -183,12 +183,33 @@ class EarnPosition(BaseModel):
         return v.upper()
 
 
+class SavedView(BaseModel):
+    """A named /transactions filter combination (Wave 2 Thing 2).
+
+    ``query_string`` is the raw querystring without the leading ``?``;
+    chips rebuild the URL as ``/transactions?<query_string>``.
+    """
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    id: int | None = None
+    name: str
+    query_string: str
+    created_at: datetime | None = None
+
+    @field_validator("created_at")
+    @classmethod
+    def _aware_created_at(cls, v: datetime | None) -> datetime | None:
+        return None if v is None else _require_aware(v)
+
+
 __all__ = [
     "Account",
     "AccountKind",
     "Category",
     "EarnPosition",
     "Rate",
+    "SavedView",
     "Transaction",
     "TransactionKind",
 ]

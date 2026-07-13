@@ -19,7 +19,9 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, Res
 
 from finances.db.repos import accounts as accounts_repo
 from finances.db.repos import categories as categories_repo
+from finances.db.repos import saved_views as saved_views_repo
 from finances.db.repos import transactions as transactions_repo
+from finances.domain.models import SavedView
 from finances.web.deps import get_conn
 from finances.web.routers._monthly_filter_dep import monthly_filter_from_query
 from finances.web.routers._tx_filter_dep import filter_from_query
@@ -563,6 +565,86 @@ def triage_skip_partial(
     skip_store.add(item_id)
     response = _render_queue_partial(request, conn)
     response.headers["HX-Trigger"] = "closeModal"
+    return response
+
+
+# ---------------------------------------------------------------------------
+# Saved filter views (Wave 2 Thing 2 / docs/plans/wave2/02-saved-views.md).
+#
+# The chip row + inline save form live in partials/saved_views.html and
+# swap as one unit (#saved-views, outerHTML). Create/delete re-render the
+# row and carry a success toast in HX-Trigger (WP2 contract). Error paths
+# (duplicate/blank name, missing id) raise HTTPException so the global
+# htmx:response-error listener in base.html surfaces the JSON ``detail``
+# as the error toast — same split as the transaction-edit endpoints.
+# ---------------------------------------------------------------------------
+
+
+def _render_saved_views(request: Request, conn: sqlite3.Connection):
+    templates = request.app.state.templates
+    return templates.TemplateResponse(
+        request,
+        "partials/saved_views.html",
+        {"views": saved_views_repo.list_all(conn)},
+    )
+
+
+@router.get("/views", include_in_schema=False)
+def saved_views_partial(
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Return the saved-views chip row + save form fragment."""
+    return _render_saved_views(request, conn)
+
+
+@router.post("/views", include_in_schema=False)
+def saved_views_create_partial(
+    request: Request,
+    name: str = Form(default=""),
+    query_string: str = Form(default=""),
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Save the CURRENT querystring under ``name``; re-render the chip row.
+
+    ``query_string`` arrives from ``window.location.search`` so a leading
+    ``?`` is stripped before storage (the DB keeps the bare querystring).
+    """
+    clean_name = name.strip()
+    if not clean_name:
+        raise HTTPException(status_code=422, detail="View name must not be empty")
+    qs = query_string.strip().removeprefix("?")
+
+    try:
+        saved_views_repo.insert(
+            conn, SavedView(name=clean_name, query_string=qs)
+        )
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f'A view named "{clean_name}" already exists',
+        ) from exc
+
+    response = _render_saved_views(request, conn)
+    response.headers["HX-Trigger"] = _hx_trigger_json(
+        toast_message=f'View "{clean_name}" saved'
+    )
+    return response
+
+
+@router.post("/views/{view_id}/delete", include_in_schema=False)
+def saved_views_delete_partial(
+    request: Request,
+    view_id: int,
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Delete the saved view and re-render the chip row."""
+    if not saved_views_repo.delete(conn, view_id):
+        raise HTTPException(
+            status_code=404, detail=f"saved view id={view_id} not found"
+        )
+    response = _render_saved_views(request, conn)
+    response.headers["HX-Trigger"] = _hx_trigger_json(toast_message="View deleted")
     return response
 
 
