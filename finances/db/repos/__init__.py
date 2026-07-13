@@ -9,6 +9,7 @@ from finances.db.repos import (
     import_state,
     positions,
     rates,
+    saved_views,
     transactions,
 )
 
@@ -18,5 +19,6 @@ __all__ = [
     "import_state",
     "positions",
     "rates",
+    "saved_views",
     "transactions",
 ]

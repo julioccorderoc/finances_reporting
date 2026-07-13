@@ -773,3 +773,72 @@
   }
 }
 /* === END WP6 filter polish === */
+
+/* === Wave 2 Thing 2: saved views =======================================
+ * Same pill language as the WP6 .choice-chip, but these are NAVIGATION
+ * chips (an <a> that recalls a saved /transactions querystring) with an
+ * inline x delete button, so they get their own class instead of
+ * overloading the checkbox pattern.
+ */
+.view-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+.view-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0.125rem 0.25rem 0.125rem 0.625rem;
+  border: 1px solid #cbd5e1;      /* slate-300 */
+  border-radius: 9999px;
+  background: #ffffff;
+  font-size: 0.75rem;
+  transition: background-color 80ms ease, border-color 80ms ease;
+}
+
+.view-chip:hover {
+  border-color: #94a3b8;          /* slate-400 */
+}
+
+.view-chip a {
+  color: #0369a1;                 /* sky-700 — reads as navigation */
+  text-decoration: none;
+}
+
+.view-chip a:hover {
+  text-decoration: underline;
+}
+
+.view-chip-delete {
+  margin-left: 0.25rem;
+  padding: 0 0.375rem;
+  border: 0;
+  background: transparent;
+  color: #64748b;                 /* slate-500 */
+  font-size: 0.875rem;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 9999px;
+}
+
+.view-chip-delete:hover {
+  color: #b91c1c;                 /* red-700 */
+  background: #f1f5f9;            /* slate-100 */
+}
+
+/* Phones: >=44px tap target, matching .choice-chip. */
+@media (max-width: 640px) {
+  .view-chip {
+    min-height: 44px;
+    padding: 0.5rem 0.375rem 0.5rem 0.875rem;
+    font-size: 0.8125rem;
+  }
+
+  .view-chip-delete {
+    padding: 0.5rem;
+    font-size: 1rem;
+  }
+}
+/* === END Wave 2 Thing 2 === */
