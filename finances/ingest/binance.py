@@ -28,6 +28,7 @@ from finances.db.repos import accounts as accounts_repo
 from finances.db.repos import categories as categories_repo
 from finances.db.repos import import_state as import_state_repo
 from finances.db.repos import transactions as transactions_repo
+from finances.domain import realized_rates
 from finances.domain.earn import EarnSnapshotRow, refresh_earn_positions
 from finances.domain.models import Transaction, TransactionKind
 from finances.domain.transfers import create_transfer
@@ -784,6 +785,13 @@ def sync_binance(
             earn_stats = _ingest_earn_positions(
                 conn, client, earn_id=earn_id, snapshot_at=snapshot_at, errors=errors,
             )
+
+            # Any P2P sell just ingested changes the realized VES cost basis
+            # (ADR-013). Rebuilding inside the transaction keeps the derived
+            # rates consistent with the fills they come from, and lets
+            # ``dry_run`` roll both back together. It runs after the chunk
+            # loop so every fill in the window is accounted for at once.
+            realized_rates.rebuild(conn)
 
             if dry_run:
                 conn.execute("ROLLBACK")
