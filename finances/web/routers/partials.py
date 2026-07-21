@@ -45,7 +45,11 @@ from finances.web.services.monthly_view import (
     build_mobile,
     build_pivot,
 )
-from finances.web.services.rates_view import DEFAULT_RANGE_DAYS, build_rates_chart
+from finances.web.services.rates_view import (
+    DEFAULT_RANGE_DAYS,
+    build_rates_chart,
+    rates_for_day,
+)
 from finances.web.services.transactions_query import (
     TransactionsFilter,
     query_transactions,
@@ -462,6 +466,18 @@ def triage_modal_partial(
 
     categories = categories_repo.list_all(conn)
 
+    # Native-USD rows (USD/USDT/USDC) never consult a rate, so the panel
+    # would be pure noise for them — see spec §5.1.
+    day_rates = (
+        []
+        if card.rate_source == "native_usd"
+        else rates_for_day(
+            conn,
+            day=txn.occurred_at.date(),
+            winning_source=card.rate_source,
+        )
+    )
+
     templates = request.app.state.templates
     return templates.TemplateResponse(
         request,
@@ -472,6 +488,7 @@ def triage_modal_partial(
             "categories": categories,
             "top_categories": top_categories(conn, kind=txn.kind),
             "account_name": account_name,
+            "day_rates": day_rates,
         },
     )
 

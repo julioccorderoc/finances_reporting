@@ -60,6 +60,46 @@
       <div class="mt-1 text-xs text-slate-500">{{ account_name }}</div>
     </header>
 
+    {% if day_rates %}
+    <section class="tx-modal-section" data-rate-panel>
+      <h3 class="tx-modal-section-title">Rates for {{ format_date(card.occurred_at) }}</h3>
+      <dl class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+        {% for r in day_rates %}
+          <dt class="text-slate-600">{{ r.label }}</dt>
+          <dd class="tabular-nums" data-rate-row="{{ r.source }}">
+            {% if r.rate is none %}
+              <span class="text-slate-400">&mdash;</span>
+            {% else %}
+              <span class="{% if r.is_winner %}font-semibold text-slate-900{% else %}text-slate-600{% endif %}">
+                {{ r.rate | fmt_number }}
+              </span>
+              {% if r.is_carry %}
+                <span class="text-slate-500">(from {{ r.as_of_date | fmt_date }})</span>
+              {% endif %}
+              {% if r.is_winner %}
+                <span class="text-emerald-700" data-rate-winner>
+                  &larr; used for {{ card.amount_usd | fmt_money }}
+                </span>
+              {% endif %}
+              {% if r.is_reference_only %}
+                <span class="text-amber-700">reference only</span>
+              {% endif %}
+            {% endif %}
+          </dd>
+        {% endfor %}
+      </dl>
+      {% if card.rate_source == 'user_rate' %}
+        <p class="mt-1 text-[11px] text-slate-500">
+          The $ above uses your own rate, not any of these.
+        </p>
+      {% elif card.amount_usd is none %}
+        <p class="mt-1 text-[11px] text-slate-500">
+          No rate available for this day &mdash; enter one below to price it.
+        </p>
+      {% endif %}
+    </section>
+    {% endif %}
+
     <section class="tx-modal-section">
       <h3 class="tx-modal-section-title">Provenance</h3>
       <dl class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-600">
