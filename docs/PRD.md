@@ -107,10 +107,14 @@ Rate resolution (per ADR-005 priority): per-row `user_rate` override → Binance
 
 ## 7. Reporting Outputs
 
-SQL views drive every report:
+SQL views drive the aggregate reports. USD valuation is **not** a view —
+`finances.domain.rates.resolve` is the sole authority (rule-005). The
+`v_transactions_usd` view was dropped in migration 014 (ADR-013) for
+computing `amount_usd` inline with its own rate logic.
+
+Views:
 
 - `v_account_balances` — sum-of-amounts per account (native + USD).
-- `v_transactions_usd` — every transaction enriched with `amount_usd`.
 - `v_monthly_summary` — month × category × account.
 - `v_unreconciled_transfers` — transfers without a paired sibling row.
 
