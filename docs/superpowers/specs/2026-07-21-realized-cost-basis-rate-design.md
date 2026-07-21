@@ -1,7 +1,7 @@
 # Design — Realized Cost-Basis Rate for Bolívar Spending
 
 **Date:** 2026-07-21
-**Status:** Approved (design); implementation not started
+**Status:** Implemented 2026-07-21 (migration `014`, ADR-013). Numbering note: 012 and 013 were taken by concurrent work while this was in flight.
 **Supersedes decision in:** ADR-005 §1 Option 2 (previously rejected)
 **Requires:** new ADR-013, amendment to `docs/architecture/rules/rule-005-single-rate-resolver.md`
 
@@ -138,7 +138,7 @@ A CLI command `finances rates rebuild-realized` exposes the same operation for t
 
 The view (`001_initial.sql:167-200`) computes `amount_usd` in SQL using its own hardcoded `binance_p2p_median` logic. This is already a standing violation of rule-005 ("No SQL view, report, or ingester may compute `amount_usd` inline using its own rate logic"). Once tier 2 exists the view silently disagrees with the resolver.
 
-**Decision: drop the view** (migration `012`). The Python resolver becomes the sole authority for USD valuation.
+**Decision: drop the view** (migration `014`). The Python resolver becomes the sole authority for USD valuation.
 
 Rejected: mirroring the 5-tier chain plus VWAP and the age guard in SQL (hand-synced duplication, explicitly forbidden by rule-005); and demoting the view to a renamed "market reference" (leaves two conflicting USD answers in the database — the exact failure class this project exists to eliminate).
 
@@ -148,7 +148,7 @@ Rejected: mirroring the 5-tier chain plus VWAP and the age guard in SQL (hand-sy
 
 **New**
 - `finances/domain/realized_rates.py`
-- `finances/db/migrations/012_drop_v_transactions_usd.sql`
+- `finances/db/migrations/014_drop_v_transactions_usd.sql`
 - `docs/ADR/ADR-013-realized-cost-basis.md`
 
 **Changed**
@@ -178,7 +178,7 @@ Tests land before implementation (rule-011). Coverage targets unchanged: ≥85% 
 
 ## 7. Rollout
 
-1. Apply migration 012.
+1. Apply migration 014.
 2. Run `finances rates rebuild-realized` to populate history.
 3. Run `finances report consolidated` before and after, and diff — this shows exactly which transactions re-valued and by how much. Read-only; no writes.
 

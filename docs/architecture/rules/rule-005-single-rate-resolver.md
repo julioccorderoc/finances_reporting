@@ -1,16 +1,19 @@
 # Rule 005 — Single Rate Resolver
 
-**Source ADR:** [ADR-005](../../ADR/ADR-005-rate-resolution-priority.md)
+**Source ADR:** [ADR-005](../../ADR/ADR-005-rate-resolution-priority.md), extended by [ADR-013](../../ADR/ADR-013-realized-cost-basis.md)
 **Scope:** All USD-equivalence calculations across the codebase.
 
-**Constraint:** Every USD-equivalent value must be produced by `finances.domain.rates.resolve()`. SQL views that need a USD value must call the resolver via a Python-built materialization step or a SQL function backed by it — never inline ad-hoc rate logic.
+**Constraint:** Every USD-equivalent value must be produced by `finances.domain.rates.resolve()`. **No SQL view may compute `amount_usd`.** `v_transactions_usd` was dropped in migration `014` for violating this and must not be recreated; a view needing USD must go through a Python-built materialization step backed by the resolver, never inline ad-hoc rate logic.
 
 **Locked priority order:**
 
 1. `transactions.user_rate` (the user's actual realized rate)
-2. `rates(USDT, VES, occurred_date, source='binance_p2p_median')` — **this is the source used in the final consolidated USD summary**
-3. `rates(USD, VES, occurred_date, source='bcv')` — **fallback only**; BCV is also tracked for reference but never the headline number
-4. None → set `transactions.needs_review = 1`
+2. `rates(USDT, VES, occurred_date, source='binance_p2p_realized')` — **cost basis**: the volume-weighted rate at which the bolívars were actually acquired, carried forward from the most recent P2P sell. Applies only while no older than `REALIZED_MAX_AGE_DAYS` (14, inclusive); past that the chain falls through. Headline-eligible.
+3. `rates(USDT, VES, occurred_date, source='binance_p2p_median')` — market rate; headline-eligible
+4. `rates(USD, VES, occurred_date, source='bcv')` — **fallback only**; BCV is also tracked for reference but never the headline number
+5. None → set `transactions.needs_review = 1`
+
+**Realized rates are derived, never ad hoc.** Only `finances.domain.realized_rates` may produce `binance_p2p_realized` rows. Its `rebuild()` must stay wired into Binance ingest, or the derived rates silently fall behind the fills they come from.
 
 **Headline rule (per ADR-005 amendment 2026-04-19):** No BCV-sourced USD value may appear in headline reports (`finances report consolidated`, Sheets `Monthly` tab, weekly summary). If the resolver returns a BCV-sourced value for a row destined for a headline, the row must be flagged `needs_review = 1` and excluded from the headline aggregate (or shown with a clear "BCV fallback" annotation that the report renderer surfaces).
 
