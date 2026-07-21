@@ -740,18 +740,19 @@
 **Dependencies:** EPIC-024.
 **ADRs:** ADR-012 (unified queue), ADR-002 (transfer pairing), rule-012.
 
-**Business Objective:** Replace the old hand-edited Sheets triage motion with a single difficulty-first, then-oldest-within-group queue surfacing rate / category / pair issues, with `[Save & next] [Park] [Cancel]` semantics and a side-by-side pair-confirm modal.
+**Business Objective:** Replace the old hand-edited Sheets triage motion with a unified queue surfacing rate / category / pair issues, with `[Save & next] [Skip] [Cancel]` semantics (shipped) and a side-by-side pair-confirm modal. ADR-012 Amendment 2026-07-21 **decides, but has not yet built,** a difficulty-first, then-oldest-within-group ordering and a durable `[Park]` action to replace `[Skip]` — see the shipped-vs-planned split below.
 
 **Technical Boundary:**
 
 - `services/triage.py` builds `TriageQueue` from `transactions WHERE needs_review=1`, `transactions WHERE category_id IS NULL` (excluding transfer/adjustment), and `BankAnchoredP2pPairing.match()` proposals. A txn with both rate and category issues appears once with both badges.
-- Deferral is durable, backed by the `transactions.parked` column (migration 014). The former in-memory skip store is removed. See ADR-012 Amendment 2026-07-21.
+- **Shipped today:** deferral is the session-local, in-memory skip store (`triage.get_skip_store`, `app.state.skipped_triage_ids`) — still referenced from `finances/web/routers/partials.py`, `finances/web/routers/api.py`, and `finances/web/routers/pages.py`, with the Skip button still shipping in the modal. Queue ordering is `(occurred_at, item_id)`: a single chronological sort with `item_id` as the mandatory tiebreak for the ~84% of rows sharing a timestamp.
+- **Planned, NOT yet built** (ADR-012 Amendment 2026-07-21 — a decision, not a shipped change): deferral becomes durable, backed by a future `transactions.parked` column, and the in-memory skip store is removed; queue ordering becomes `(bucket, occurred_at, item_id)` where bucket 0 = category-only, 1 = rate-missing, 2 = pair. **No migration number is reserved for this yet** — the highest migration applied on this branch is `013_deactivate_lifestyle_tools.sql`; the `parked` column does not exist in the schema today. Do not assume migration 014 is taken, and do not write `WHERE parked = ...` against the current DB — it will raise `OperationalError: no such column: parked`.
 - `GET /triage`, `GET /api/triage[?type_filter=rate|category|pair]`, `POST /api/transfers`, plus six HTMX endpoints (queue, txn modal, txn edit, pair modal, pair confirm, skip).
 - Triage variant of the modal posts to `/_partial/triage/{id}/edit` and sets `HX-Trigger: closeModal, advanceQueue`.
 - Pair-confirm calls `transfers.create_transfer(conn, anchor_transaction_id=deposit_id, counterpart_transaction_id=sell_id, ...)` — no parallel SQL.
 - Cards on `/triage` use a `triage_modal_url` override on the canonical card so the Save & next modal opens; `/transactions` cards still use the Phase 3 modal (regression-tested).
 
-**Verification Criteria:** Queue is ordered `(bucket, occurred_at, item_id)` — category-only items first, then rate-missing, then pairs — with type-filter chips and unfiltered counts; merged items render once with two badges; pair-confirm creates a transfer (both legs share the new `transfer_id`); Park removes an item from the main run durably and it reappears in the Parked group after a server restart; integrity warnings surface for any `transfer_id` with only one leg; full suite green.
+**Verification Criteria:** Queue is ordered `(occurred_at, item_id)` — this is what ships today: deterministic, oldest-first, `item_id` tiebreak — with type-filter chips and unfiltered counts; merged items render once with two badges; pair-confirm creates a transfer (both legs share the new `transfer_id`); integrity warnings surface for any `transfer_id` with only one leg; full suite green. The `(bucket, occurred_at, item_id)` difficulty-first ordering and durable Park-survives-restart behavior described in ADR-012 Amendment 2026-07-21 are planned follow-on work, not yet implemented, and are not part of this epic's current gate.
 
 ---
 

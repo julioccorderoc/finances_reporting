@@ -236,7 +236,10 @@ def _build_integrity_warnings(conn: sqlite3.Connection) -> list[str]:
     """Surface unreconciled transfers as human-readable warnings.
 
     Read straight from :func:`finances.domain.transfers.find_unreconciled`
-    so the wording stays under the canonical view.
+    so the wording stays under the canonical view. That query carries no
+    ORDER BY (it is shared, ADR-002-owned SQL), so the row order it returns
+    is not guaranteed stable between renders — we sort the rendered strings
+    here, in this module only, so the banner's line order is deterministic.
     """
     rows = transfers_domain.find_unreconciled(conn)
     warnings: list[str] = []
@@ -252,7 +255,7 @@ def _build_integrity_warnings(conn: sqlite3.Connection) -> list[str]:
             warnings.append(
                 f"transfer_id={tid} has only {leg_count} leg(s) (expected 2)"
             )
-    return warnings
+    return sorted(warnings)
 
 
 def build_queue(

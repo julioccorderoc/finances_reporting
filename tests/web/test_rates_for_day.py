@@ -14,6 +14,7 @@ from decimal import Decimal
 import pytest
 
 from finances.db.repos import rates as rates_repo
+from finances.domain import rates as rates_domain
 from finances.domain.models import Rate
 from finances.web.services.rates_view import rates_for_day
 
@@ -116,3 +117,37 @@ def test_bcv_series_reads_usd_ves_not_usdt_ves(
     series = rates_for_day(web_db, day=DAY, winning_source="bcv")
 
     assert series[2].rate is None
+
+
+@pytest.mark.parametrize(
+    "base,quote,source",
+    list(rates_domain._FALLBACK_TIERS),
+    ids=[tier[2] for tier in rates_domain._FALLBACK_TIERS],
+)
+@pytest.mark.parametrize(
+    "suffix", ["", rates_domain.CARRY_SUFFIX], ids=["exact", "carry"]
+)
+def test_every_resolver_tier_has_exactly_one_modal_winner(
+    web_db: sqlite3.Connection, base: str, quote: str, source: str, suffix: str
+) -> None:
+    """Cross-module invariant pinning ``rates_view`` to ``rates.resolve``.
+
+    Parametrized straight off ``finances.domain.rates._FALLBACK_TIERS`` — the
+    resolver's own priority chain — rather than a hand-copied list of source
+    names. If the resolver ever grows a tier (or renames one) that
+    ``_MODAL_SERIES_SPEC`` in ``rates_view.py`` doesn't also know about, this
+    test must fail (zero winners, not a skip) rather than let the modal
+    silently render three rates with no winner marked.
+    """
+    winning_source = source + suffix
+
+    series = rates_for_day(web_db, day=DAY, winning_source=winning_source)
+
+    winners = [s for s in series if s.is_winner]
+    assert len(winners) == 1, (
+        f"expected exactly one modal series to win for "
+        f"winning_source={winning_source!r}, got {[s.source for s in winners]!r} "
+        f"— rates_view._MODAL_SERIES_SPEC is out of sync with "
+        f"rates.resolve's _FALLBACK_TIERS"
+    )
+    assert winners[0].source == source

@@ -22,6 +22,7 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict
 
 from finances.db.repos import rates as rates_repo
+from finances.domain.rates import CARRY_SUFFIX
 
 DEFAULT_RANGE_DAYS = 30
 
@@ -79,9 +80,6 @@ _MODAL_SERIES_SPEC: tuple[tuple[str, str, str, str], ...] = (
 
 # ADR-005: BCV is reference-only and never a headline figure.
 _REFERENCE_ONLY_SOURCES = frozenset({"bcv"})
-
-# finances.domain.rates appends this when a rate is carried from an earlier day.
-_CARRY_SUFFIX = "_carry"
 
 
 class DayRate(BaseModel):
@@ -199,7 +197,7 @@ def rates_for_day(
     forbids. Sources with no table-backed series (``user_rate``,
     ``native_usd``, ``needs_review``) simply mark nothing.
     """
-    winner = winning_source.removesuffix(_CARRY_SUFFIX)
+    winner = winning_source.removesuffix(CARRY_SUFFIX)
 
     series: list[DayRate] = []
     for base, quote, source, label in _MODAL_SERIES_SPEC:

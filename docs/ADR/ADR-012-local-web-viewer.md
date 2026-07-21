@@ -90,7 +90,8 @@ The viewer must default to binding `127.0.0.1`. Binding `0.0.0.0` requires a non
 ## Amendment — 2026-07-21: triage ordering, navigation, and durable parking
 
 **Status:** Accepted. Supersedes the queue-ordering and action-row clauses of
-§50 for the `/triage` surface only. The rest of ADR-012 stands.
+the "Triage" subsection (§2 Decision, above) for the `/triage` surface only.
+The rest of ADR-012 stands.
 
 **Context.** The original decision optimised for auditability: strict
 oldest-issue-first ordering, and a skip that was deliberately session-local so
