@@ -62,20 +62,47 @@ Five concrete obstacles stand in the way.
 
 ## 3. Prerequisites (blocking — no code until these land)
 
-### 3.1 The manual-pair-picker branch must merge first
+### 3.1 Isolation from the manual-pair-picker branch
 
-The working tree is on `feat/manual-pair-picker`, nine commits ahead of `main`,
-with untracked `finances/db/migrations/013_deactivate_lifestyle_tools.sql` and
-its test. The approved plan
-`docs/superpowers/plans/2026-07-21-manual-pair-picker.md` claims
-`finances/web/routers/_tx_filter_dep.py`,
+The approved plan `docs/superpowers/plans/2026-07-21-manual-pair-picker.md`
+claims `finances/web/routers/_tx_filter_dep.py`,
 `finances/web/services/transactions_query.py` and
 `finances/web/templates/partials/transactions_filters.html` — the same files
 §5.4 needs. Two plans editing the two-place filter enumeration in
 `_tx_filter_dep.py` in one working tree is the collision MEMORY.md warns about.
 
-**Decision:** finish and merge the pair picker, then branch this work fresh from
-`main`.
+**Decision (revised 2026-07-21):** rather than serializing behind the pair
+picker, this work proceeds in parallel in a dedicated git worktree at
+`.claude/worktrees/triage-speedrun`, on branch `worktree-triage-speedrun`
+branched from `origin/main` (`dbd9ced`, verified identical to local `main`).
+The two trees never touch. The cost is deferred, not removed: whichever branch
+merges second resolves conflicts in the three files above. Keep this work's
+edits to `_tx_filter_dep.py` minimal and additive to make that merge cheap.
+
+### 3.1a Base-branch reality: `main` is still four-tier
+
+**`main` does not contain the realized cost-basis work.**
+`finances/domain/realized_rates.py` does not exist on this branch, and
+`_FALLBACK_TIERS` in `finances/domain/rates.py` holds two entries, so the live
+chain here is the original ADR-005 four-tier one:
+
+1. `txn.user_rate` → `user_rate`
+2. `rates(USDT, VES, 'binance_p2p_median')` → `binance_p2p_median` / `…_carry`
+3. `rates(USD, VES, 'bcv')` → `bcv` / `bcv_carry`
+4. none → `needs_review`
+
+ADR-013's `binance_p2p_realized` tier exists only on the unmerged
+`feat/manual-pair-picker` and `design/realized-cost-basis-rate` branches.
+
+**Consequence for §5.1:** build the panel **series-driven from a spec list**, and
+include the realized series from day one. Its source string
+(`binance_p2p_realized`) simply matches no rows here, so
+`latest_on_or_before` returns `None` and the row renders `—`. Add both badge
+keys preemptively. When the realized branch merges, the panel lights up with no
+code change — and it never displays a winner it cannot name.
+
+Do **not** import from `finances.domain.realized_rates` in this work; that
+module is absent on this base. Reference the source string only.
 
 ### 3.2 ADR-012 amendment + roadmap edit
 
@@ -151,8 +178,11 @@ RATES FOR APR 23
 
 Carry-forward is disclosed inline: `USDT P2P  481.00  (from Apr 21)`.
 
-**Why three series.** Commit `cb2fc5c` (ADR-013) inserted a new **tier 2** into
-`rates.resolve` ahead of the P2P median. The chain is now five tiers, not four:
+**Why three series even though this base has four tiers.** On
+`feat/manual-pair-picker`, commit `cb2fc5c` (ADR-013) inserted a new **tier 2**
+into `rates.resolve` ahead of the P2P median, making the chain five tiers. That
+code is **not** on this worktree's base — see §3.1a. The panel is nonetheless
+built against the five-tier shape so it stays correct after that merge:
 
 1. `txn.user_rate` → `user_rate`
 2. `rates(USDT, VES, 'binance_p2p_realized')`, gated by
@@ -161,7 +191,9 @@ Carry-forward is disclosed inline: `USDT P2P  481.00  (from Apr 21)`.
 4. `rates(USD, VES, 'bcv')` → `bcv` / `bcv_carry`
 5. none → `needs_review`
 
-A two-series panel would mark neither winner the moment tier 2 has data.
+A two-series panel would mark neither winner the moment tier 2 both merges and
+has data. On this base, tier 2 is absent from the resolver, so `rate_source` can
+never be `binance_p2p_realized` and the Realized row is always `—`.
 
 **New service function** in `finances/web/services/rates_view.py`:
 
