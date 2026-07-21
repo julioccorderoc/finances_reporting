@@ -48,6 +48,21 @@ _SORT_COLUMN_MAP: dict[str, str] = {
     "amount_usd": "CAST(t.amount AS REAL)",
 }
 
+# Shared SELECT prefix for every row that will pass through
+# _row_to_transaction. Keep the column list and that function in sync —
+# they are the pair that breaks when a column is added to transactions.
+TXN_QUERY_BASE = """
+    SELECT
+        t.id, t.account_id, t.occurred_at, t.kind, t.amount, t.currency,
+        t.description, t.category_id, t.transfer_id, t.user_rate,
+        t.source, t.source_ref, t.needs_review, t.notes,
+        a.name AS account_name,
+        c.name AS category_name
+    FROM transactions t
+    LEFT JOIN accounts a ON a.id = t.account_id
+    LEFT JOIN categories c ON c.id = t.category_id
+"""
+
 
 # ---------------------------------------------------------------------------
 # Pydantic models.
