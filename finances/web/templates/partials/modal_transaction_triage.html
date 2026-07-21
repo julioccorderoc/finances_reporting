@@ -12,6 +12,11 @@
      card           TransactionCard (projection)
      categories     list[Category]
      account_name   str
+     active_filter  str | None — carried into the Save/Park POST URLs so
+                    the returned queue partial stays filtered the same
+                    way the queue was when this modal was opened (Task 4
+                    §3: _render_queue_partial no longer hardcodes
+                    type_filter=None).
 #}
 {% from "_macros.html" import rate_source_badge, needs_review_badge,
                               kind_class, format_date, format_amount %}
@@ -135,7 +140,7 @@
        an existing category. #}
     <form
       class="tx-modal-form"
-      hx-post="/_partial/triage/{{ txn.id }}/edit"
+      hx-post="/_partial/triage/{{ txn.id }}/edit{% if active_filter %}?type_filter={{ active_filter }}{% endif %}"
       hx-target="#triage-queue"
       hx-swap="innerHTML"
       x-data="{ catDirty: false, rateDirty: false, notesDirty: false }"
@@ -189,7 +194,7 @@
           type="button"
           data-park-btn
           class="px-3 py-1.5 text-sm border border-amber-300 rounded bg-amber-50 text-amber-800 hover:bg-amber-100"
-          hx-post="/_partial/triage/{{ txn.id }}/park"
+          hx-post="/_partial/triage/{{ txn.id }}/park{% if active_filter %}?type_filter={{ active_filter }}{% endif %}"
           hx-target="#triage-queue"
           hx-swap="innerHTML"
         >Park for later</button>

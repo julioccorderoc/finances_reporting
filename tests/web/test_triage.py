@@ -357,16 +357,28 @@ def test_triage_queue_includes_pair_items_from_strategy(
     assert proposal.sell.id == sell_id
 
 
-def test_triage_queue_sorted_oldest_first(
+def test_triage_queue_sorted_oldest_first_within_each_bucket(
     triage_seeded_db: sqlite3.Connection,
 ) -> None:
+    """Task 4 (ADR-012 Amendment, spec §5.5): the difficulty bucket now
+    leads the sort key, so "oldest first" is a per-bucket guarantee, not
+    a whole-queue one — a bucket-0 item can legitimately be newer than a
+    bucket-1 item that follows it in the queue.
+    """
+    from itertools import groupby
+
     from finances.web.services.triage import build_queue
 
     queue = build_queue(triage_seeded_db)
-    sort_keys = [item.sort_key for item in queue.items]
-    assert sort_keys == sorted(sort_keys), (
-        "items must come back oldest-first by sort_key"
-    )
+
+    buckets = [item.bucket for item in queue.items]
+    assert buckets == sorted(buckets), "bucket must be non-decreasing across the queue"
+
+    for bucket, group in groupby(queue.items, key=lambda item: item.bucket):
+        sort_keys = [item.sort_key for item in group]
+        assert sort_keys == sorted(sort_keys), (
+            f"bucket {bucket} items must come back oldest-first by sort_key"
+        )
 
 
 def test_triage_queue_counts_unfiltered(

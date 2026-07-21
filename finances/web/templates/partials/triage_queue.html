@@ -3,8 +3,23 @@
    refresh).
 
    Inputs:
-     queue        TriageQueue (services/triage.py)
+     queue          TriageQueue (services/triage.py)
+     active_filter  str | None — the currently-applied type_filter, so
+                    save/park/unpark actions triggered from inside this
+                    partial can carry it forward (Task 4 §3).
+
+   The bucket-count header lives INSIDE this partial (not the page shell)
+   so it stays truthful across every htmx swap that targets #triage-queue:
+   it is built from queue.bucket_counts, which is always computed on the
+   UNFILTERED item set, so the numbers don't lie when a type-filter chip
+   is active.
 #}
+<div class="flex flex-wrap gap-x-4 gap-y-1 mb-3 text-sm text-slate-600" data-triage-bucket-header>
+  <span>Ready to categorize &middot; {{ queue.bucket_counts.get(0, 0) }}</span>
+  <span>Missing a rate &middot; {{ queue.bucket_counts.get(1, 0) }}</span>
+  <span>Pairs &middot; {{ queue.bucket_counts.get(2, 0) }}</span>
+  <span>Parked &middot; {{ queue.parked_count }}</span>
+</div>
 <div class="cards" data-triage-queue>
   {% if queue.parked_items %}
     <details data-parked-group class="parked-group mb-4">
@@ -17,7 +32,7 @@
               type="button"
               class="text-xs text-blue-700 hover:underline"
               data-unpark-btn
-              hx-post="/_partial/triage/{{ item.txn_card.id }}/unpark"
+              hx-post="/_partial/triage/{{ item.txn_card.id }}/unpark{% if active_filter %}?type_filter={{ active_filter }}{% endif %}"
               hx-target="#triage-queue"
               hx-swap="innerHTML"
             >

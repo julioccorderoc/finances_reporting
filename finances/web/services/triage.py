@@ -72,6 +72,7 @@ class TriageItem(BaseModel):
     item_id: str
     type: TriageType
     sort_key: datetime
+    bucket: int
     txn_card: TransactionCard | None = None
     txn_issue_badges: list[str] = Field(default_factory=list)
     pair_proposal: PairProposal | None = None
@@ -84,6 +85,7 @@ class TriageQueue(BaseModel):
 
     items: list[TriageItem]
     counts: dict[TriageType, int]
+    bucket_counts: dict[int, int]
     integrity_warnings: list[str]
     parked_items: list[TriageItem]
     parked_count: int
@@ -164,12 +166,18 @@ def _collect_txn_items(
         # of the two. RATE wins because a missing rate yields a None USD
         # amount (more visible to triage).
         item_type = TriageType.RATE if "rate" in badges else TriageType.CATEGORY
+        # Difficulty bucket (spec §5.5, ADR-012 Amendment): a missing rate
+        # dominates a missing category, because it is the expensive kind of
+        # thinking. Bucket 0 = category-only (needs_review=0), bucket 1 =
+        # needs_review=1 regardless of whether category is also missing.
+        bucket = 1 if "rate" in badges else 0
         card = _project_from_row(conn, row)
         items.append(
             TriageItem(
                 item_id=f"txn:{txn_id}",
                 type=item_type,
                 sort_key=card.occurred_at,
+                bucket=bucket,
                 txn_card=card,
                 txn_issue_badges=sorted(set(badges)),
                 pair_proposal=None,
@@ -221,12 +229,14 @@ def _collect_parked_items(conn: sqlite3.Connection) -> list[TriageItem]:
         row = entry["row"]
         badges: list[str] = entry["badges"]
         item_type = TriageType.RATE if "rate" in badges else TriageType.CATEGORY
+        bucket = 1 if "rate" in badges else 0
         card = _project_from_row(conn, row)
         items.append(
             TriageItem(
                 item_id=f"txn:{txn_id}",
                 type=item_type,
                 sort_key=card.occurred_at,
+                bucket=bucket,
                 txn_card=card,
                 txn_issue_badges=sorted(set(badges)),
                 pair_proposal=None,
@@ -267,6 +277,7 @@ def _collect_pair_items(conn: sqlite3.Connection) -> list[TriageItem]:
                 item_id=f"pair:{proposal_id}",
                 type=TriageType.PAIR,
                 sort_key=deposit_card.occurred_at,
+                bucket=2,
                 txn_card=None,
                 txn_issue_badges=[],
                 pair_proposal=PairProposal(
@@ -319,29 +330,33 @@ def build_queue(
       1) Collect txn-issue items (RATE / CATEGORY, merging duplicates,
          excluding parked rows — spec §5.3).
       2) Collect pair items (BankAnchoredP2pPairing.match).
-      3) Sort all items by (sort_key, item_id) — oldest-first, with item_id
-         as a mandatory tiebreak for the many rows sharing a timestamp.
-      4) Compute counts on the unfiltered set.
+      3) Sort all items by (bucket, sort_key, item_id) — difficulty bucket
+         first, then oldest-first, with item_id as a mandatory tiebreak for
+         the many rows sharing a timestamp.
+      4) Compute counts + bucket_counts on the unfiltered set.
       5) Apply ``type_filter`` if provided.
       6) Build integrity warnings from unreconciled transfers.
       7) Collect parked items (Task 3) — a separate surface, never part of
-         ``items``, ``counts``, or the type filter above.
+         ``items``, ``counts``, ``bucket_counts``, or the type filter above.
     """
     txn_items = _collect_txn_items(conn)
     pair_items = _collect_pair_items(conn)
     all_items = txn_items + pair_items
-    # (sort_key, item_id) is a TOTAL order. sort_key alone is not: 204 of 243
-    # live items share a timestamp, so ties would fall through to SQLite's
-    # row order, which changes with the query plan. item_id sorts as a string
-    # ("txn:9" after "txn:10"), which is arbitrary but stable — and stability,
-    # not numeric ordering, is what prev/next navigation needs.
-    all_items.sort(key=lambda it: (it.sort_key, it.item_id))
+    # Difficulty first, then chronology, then a mandatory id tiebreak.
+    # ADR-012 Amendment 2026-07-21. The item_id component is load-bearing:
+    # 204 of 243 live items share a timestamp (Provincial CSV has no time
+    # component), so without it the order inside a bucket is undefined.
+    all_items.sort(key=lambda it: (it.bucket, it.sort_key, it.item_id))
 
     # Counts always reflect the UNFILTERED queue, so the chip badges stay
     # accurate when the user selects a single type.
     counts = {t: 0 for t in TriageType}
     for item in all_items:
         counts[item.type] += 1
+
+    bucket_counts: dict[int, int] = {0: 0, 1: 0, 2: 0}
+    for item in all_items:
+        bucket_counts[item.bucket] += 1
 
     if type_filter is not None:
         filtered = [it for it in all_items if it.type == type_filter]
@@ -354,6 +369,7 @@ def build_queue(
     return TriageQueue(
         items=filtered,
         counts=counts,
+        bucket_counts=bucket_counts,
         integrity_warnings=warnings,
         parked_items=parked_items,
         parked_count=len(parked_items),

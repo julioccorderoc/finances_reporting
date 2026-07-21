@@ -1,7 +1,10 @@
 {# Triage PAIR card — two side-by-side mini-rows + confidence + Open CTA.
 
    Inputs (from triage_queue.html):
-     item   TriageItem (with item.pair_proposal)
+     item           TriageItem (with item.pair_proposal)
+     active_filter  str | None — carried into the modal URL so a confirm
+                    triggered from a filtered queue returns a queue
+                    filtered the same way (Task 4 §3).
 #}
 {% from "_macros.html" import triage_type_badge, format_date, format_amount, rate_source_badge %}
 
@@ -15,7 +18,7 @@
   data-deposit-id="{{ deposit.id }}"
   data-sell-id="{{ sell.id }}"
   data-proposal-id="{{ proposal.proposal_id }}"
-  hx-get="/_partial/triage/pair/{{ deposit.id }}/{{ sell.id }}/modal"
+  hx-get="/_partial/triage/pair/{{ deposit.id }}/{{ sell.id }}/modal{% if active_filter %}?type_filter={{ active_filter }}{% endif %}"
   hx-target="#tx-modal-host"
   hx-trigger="click"
   hx-swap="innerHTML"

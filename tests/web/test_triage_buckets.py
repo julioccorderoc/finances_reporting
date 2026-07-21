@@ -145,3 +145,78 @@ def test_header_renders_counts_inside_the_swapped_region(
     assert "Ready to categorize" in queue_region
     assert "Missing a rate" in queue_region
     assert "Parked" in queue_region
+
+
+# ---------------------------------------------------------------------------
+# _render_queue_partial must not hardcode type_filter=None (Task 4 §3).
+# ---------------------------------------------------------------------------
+
+
+def test_save_while_a_chip_is_active_returns_a_filtered_queue(
+    web_db: sqlite3.Connection, web_client_factory
+) -> None:
+    """A save made while the "Rates" chip is active must not swap in the
+    unfiltered queue.
+
+    Before the fix, ``_render_queue_partial`` hardcoded
+    ``type_filter=None``, so every save/park/unpark/pair-confirm always
+    swapped an unfiltered queue into ``#triage-queue`` regardless of the
+    filter chip the user had active (and which ``hx-push-url`` had
+    already written into the address bar). This POSTs to the edit
+    endpoint with ``?type_filter=rate`` — the same query string a save
+    triggered from a filtered queue would carry — and asserts the
+    returned partial keeps ONLY rate-type rows: the category-only row
+    must not reappear.
+    """
+    account = accounts_repo.insert(
+        web_db, Account(name="Provincial", kind=AccountKind.BANK, currency="VES")
+    )
+    groceries = categories_repo.get_by_name(
+        web_db, TransactionKind.EXPENSE, "Groceries"
+    )
+    assert groceries is not None
+
+    def _txn(ref: str, *, category_id, needs_review: bool) -> None:
+        transactions_repo.insert(
+            web_db,
+            Transaction(
+                account_id=account.id,
+                occurred_at=datetime(2026, 5, 1, tzinfo=UTC),
+                kind=TransactionKind.EXPENSE,
+                amount=Decimal("-50.00"),
+                currency="VES",
+                description=ref,
+                category_id=category_id,
+                source="provincial",
+                source_ref=ref,
+                needs_review=needs_review,
+            ),
+        )
+
+    _txn("RATE-A-MARKER", category_id=groceries.id, needs_review=True)  # id 1
+    _txn("RATE-B-MARKER", category_id=groceries.id, needs_review=True)  # id 2
+    _txn("CAT-ONLY-MARKER", category_id=None, needs_review=False)  # id 3
+
+    client: TestClient = web_client_factory()
+
+    # Edit id 2 (a no-op edit — nothing set) while the Rates chip is
+    # "active", exactly like the modal form now carries ?type_filter=...
+    # forward once opened from a filtered queue.
+    resp = client.post(
+        "/_partial/triage/2/edit",
+        params={"type_filter": "rate"},
+        data={
+            "set_category": "false",
+            "category_id": "",
+            "set_user_rate": "false",
+            "user_rate": "",
+            "set_notes": "false",
+            "notes": "",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+
+    # id 1 is still a RATE item and must survive the filter.
+    assert "RATE-A-MARKER" in resp.text
+    # id 3 is CATEGORY-typed; the filtered queue must exclude it.
+    assert "CAT-ONLY-MARKER" not in resp.text
