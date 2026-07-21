@@ -101,12 +101,15 @@ def test_usage_outside_window_does_not_rank(web_db: sqlite3.Connection) -> None:
     _use(web_db, acct, dating.id, when=two_years_ago, times=10)
     _use(web_db, acct, groceries.id, when=yesterday, times=1)
 
-    result = top_categories(web_db, kind=TransactionKind.EXPENSE, months=12)
+    result = top_categories(web_db, kind=TransactionKind.EXPENSE, months=12, limit=2)
 
     names = [c.name for c in result]
     # Groceries (1 in-window use) ranks first; Dating's 10 uses are outside the
-    # window so it does not rank — and at the default limit=8 the seed-order pad
-    # (Transport id 6 ... Fees id 12) fills the list before Dating (id 15).
+    # window, so it earns no ranking power and can only reappear through the
+    # seed-order pad, behind every lower-id category (Transport is id 6, Dating
+    # id 15). `limit` is pinned here so the assertion tests that ordering and
+    # not how many categories happen to be active (migration 013 deactivated
+    # two, which shortened the pad).
     assert names[0] == "Groceries"
     assert "Dating" not in names
 
