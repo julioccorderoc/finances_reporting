@@ -920,3 +920,60 @@ def test_sync_binance_dry_run_after_real_run_does_not_double_count(
         "SELECT COUNT(*) FROM import_runs WHERE source='binance'"
     ).fetchone()[0]
     assert runs_count_after == 1, "only the real run should leave provenance"
+
+
+# ---------------------------------------------------------------------------
+# Realized cost-basis rates are materialized as part of the run (ADR-013).
+# ---------------------------------------------------------------------------
+
+
+def _realized_rows(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT as_of_date, base, quote, rate FROM rates "
+        "WHERE source = 'binance_p2p_realized' ORDER BY as_of_date"
+    ).fetchall()
+
+
+def test_sync_binance_materializes_realized_rates(
+    in_memory_db: sqlite3.Connection,
+    mocked_binance_sdk: MagicMock,
+) -> None:
+    """A P2P sell must leave behind the realized rate the resolver reads."""
+    _seed_binance_accounts(in_memory_db)
+    _configure_sdk_with_sample_data(mocked_binance_sdk)
+
+    sync_binance(in_memory_db, client=mocked_binance_sdk, lookback_days=35)
+
+    rows = _realized_rows(in_memory_db)
+    assert len(rows) == 1
+    assert rows[0]["base"] == "USDT"
+    assert rows[0]["quote"] == "VES"
+    assert Decimal(str(rows[0]["rate"])) == Decimal("150.00")
+
+
+def test_sync_binance_dry_run_writes_no_realized_rates(
+    in_memory_db: sqlite3.Connection,
+    mocked_binance_sdk: MagicMock,
+) -> None:
+    """dry_run rolls back the whole pipeline, realized rates included."""
+    _seed_binance_accounts(in_memory_db)
+    _configure_sdk_with_sample_data(mocked_binance_sdk)
+
+    sync_binance(
+        in_memory_db, client=mocked_binance_sdk, lookback_days=35, dry_run=True
+    )
+
+    assert _realized_rows(in_memory_db) == []
+
+
+def test_sync_binance_realized_rates_are_idempotent(
+    in_memory_db: sqlite3.Connection,
+    mocked_binance_sdk: MagicMock,
+) -> None:
+    _seed_binance_accounts(in_memory_db)
+    _configure_sdk_with_sample_data(mocked_binance_sdk)
+
+    sync_binance(in_memory_db, client=mocked_binance_sdk, lookback_days=35)
+    sync_binance(in_memory_db, client=mocked_binance_sdk, lookback_days=35)
+
+    assert len(_realized_rows(in_memory_db)) == 1

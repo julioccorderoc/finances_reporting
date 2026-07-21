@@ -14,6 +14,10 @@ from __future__ import annotations
 import sqlite3
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from pathlib import Path
+
+import pytest
+from typer.testing import CliRunner
 
 from finances.db.repos import accounts as accounts_repo
 from finances.db.repos import transactions as txn_repo
@@ -291,3 +295,66 @@ def test_rebuild_with_no_p2p_history_writes_nothing(
 ) -> None:
     assert realized_rates.rebuild(seeded_db) == 0
     assert _rates_by_day(seeded_db) == {}
+
+
+# ---------------------------------------------------------------------------
+# CLI: finances rates rebuild-realized
+#
+# The manual recovery path — used for the one-time backfill over existing P2P
+# history, and whenever a P2P transaction is edited or deleted and the derived
+# rates need to catch up.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def cli_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    from finances import config
+    from finances.db.connection import get_connection
+    from finances.db.migrate import apply_migrations
+    from finances.domain.models import Account, AccountKind
+
+    db_file = tmp_path / "cli-realized.db"
+    conn = get_connection(db_file)
+    apply_migrations(conn)
+    account = accounts_repo.insert(
+        conn,
+        Account(
+            name="Binance Spot",
+            kind=AccountKind.CRYPTO_SPOT,
+            currency="USDT",
+            institution="Binance",
+        ),
+    )
+    assert account.id is not None
+    _p2p_fill(
+        conn, account_id=account.id, day=date(2025, 7, 1),
+        usdt="100", rate="40", order="1",
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(config, "DB_PATH", db_file)
+    return db_file
+
+
+def test_cli_rebuild_realized_materializes_rates(cli_db: Path) -> None:
+    from finances.cli.main import app
+    from finances.db.connection import get_connection
+
+    result = CliRunner().invoke(app, ["rates", "rebuild-realized"])
+
+    assert result.exit_code == 0, result.output
+    conn = get_connection(cli_db)
+    try:
+        assert _rates_by_day(conn) == {date(2025, 7, 1): Decimal("40")}
+    finally:
+        conn.close()
+
+
+def test_cli_rebuild_realized_reports_count(cli_db: Path) -> None:
+    from finances.cli.main import app
+
+    result = CliRunner().invoke(app, ["rates", "rebuild-realized"])
+
+    assert result.exit_code == 0, result.output
+    assert "1" in result.output
