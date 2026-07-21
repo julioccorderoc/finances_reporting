@@ -805,14 +805,6 @@ def test_every_known_source_has_a_styled_label(source: str) -> None:
     # discriminator.
     assert _label_of(html) != source
 
-
-def test_realized_keys_are_present_in_the_label_map() -> None:
-    macros = (TEMPLATES_DIR / "_macros.html").read_text()
-    block = re.search(r"label_map = \{(.*?)\n\}", macros, re.S)
-    assert block is not None, "label_map block not found in _macros.html"
-
-    assert '"binance_p2p_realized":' in block.group(1)
-    assert '"binance_p2p_realized_carry":' in block.group(1)
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
@@ -823,7 +815,7 @@ Run:
 rtk proxy uv run pytest tests/web/test_rate_badges.py -v
 ```
 
-Expected: FAILS — `test_realized_badges_read_as_p2p_family` with
+Expected: the two realized cases FAIL — `test_realized_badges_read_as_p2p_family` with
 `assert '"binance_p2p_realized":' in ...`, and
 `test_every_known_source_has_a_styled_label` on the realized entries.
 
@@ -885,8 +877,8 @@ rtk proxy uv run pytest tests/web/test_rate_badges.py -v
 rtk proxy uv run pytest -q 2>&1 | tail -5
 ```
 
-Expected: 10 passed (9 parametrized cases + 1), then the full suite green with
-no regressions.
+Expected: 9 passed (one parametrized case per known source), then the full
+suite green with no regressions.
 
 - [ ] **Step 7: Commit**
 
@@ -1210,7 +1202,7 @@ Then:
 rtk proxy uv run pytest -q 2>&1 | tail -5
 ```
 
-Expected: 824 passed (795 baseline + 3 + 10 + 10 + 6), 0 failures.
+Expected: 823 passed (795 baseline + 3 + 10 + 9 + 6), 0 failures.
 If `tests/web/test_triage.py` or `test_modal_keyboard.py` fails on a changed
 modal body, read the assertion: the panel adds markup but removes none, so a
 failure there means a raw-string assertion pinned surrounding structure. Adjust
@@ -1240,7 +1232,7 @@ rtk proxy uv run pytest -q 2>&1 | tail -3
 git log --oneline dbd9ced..HEAD
 ```
 
-Expected: 824 passing, and ten commits — five RED/docs, five GREEN — in
+Expected: 823 passing, and ten commits — five RED/docs, five GREEN — in
 test-before-implementation order.
 
 Then look at it in a browser, because none of the above proves it reads well:
