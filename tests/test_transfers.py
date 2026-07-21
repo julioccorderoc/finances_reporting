@@ -1136,6 +1136,50 @@ class TestTransfers:
         strat = BankAnchoredP2pPairing(seeded_db)
         assert strat.match() == []
 
+    def test_bank_anchored_pairing_matches_orphan_transfer_kind_sell(
+        self, seeded_db: sqlite3.Connection
+    ):
+        """A kind='transfer' sell with NULL transfer_id is still a candidate.
+
+        Backfilled P2P sells landed as kind='transfer' without ever being
+        paired (no transfer_id, no counterpart leg). They are legitimate
+        unreconciled sells and must not be invisible to the strategy just
+        because their kind was pre-stamped.
+        """
+        provincial = _account_id(seeded_db, "Provincial Bolivares")
+        spot = _account_id(seeded_db, "Binance Spot")
+
+        bank = _insert_income_row(
+            seeded_db,
+            account_id=provincial,
+            amount=Decimal("12000"),
+            currency="VES",
+            source="provincial",
+            occurred_at=FIXED_AT,
+        )
+        orphan_sell = txn_repo.insert(
+            seeded_db,
+            Transaction(
+                account_id=spot,
+                occurred_at=FIXED_AT,
+                kind=TransactionKind.TRANSFER,
+                amount=Decimal("-10"),
+                currency="USDT",
+                transfer_id=None,  # <-- never paired
+                source="binance",
+                source_ref=_unique_ref("orphan-sell"),
+                user_rate=Decimal("1200"),
+            ),
+        )
+        assert bank.id is not None and orphan_sell.id is not None
+
+        strat = BankAnchoredP2pPairing(seeded_db)
+        proposals = strat.match()
+
+        assert len(proposals) == 1
+        assert proposals[0].details["bank_transaction_id"] == bank.id
+        assert proposals[0].details["binance_transaction_id"] == orphan_sell.id
+
     def test_bank_anchored_pairing_requires_binance_user_rate(
         self, seeded_db: sqlite3.Connection
     ):
