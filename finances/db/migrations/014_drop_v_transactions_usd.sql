@@ -1,0 +1,37 @@
+-- 014_drop_v_transactions_usd.sql
+-- Retire the last competing USD implementation (ADR-013, rule-005).
+--
+-- `v_transactions_usd` (migration 001) computed `amount_usd` inline in SQL
+-- with its own hardcoded rate chain: user_rate, else the newest
+-- `binance_p2p_median` row on or before the transaction date. That has always
+-- been a standing violation of rule-005 — "No SQL view, report, or ingester
+-- may compute amount_usd inline using its own rate logic. Diverging
+-- implementations are forbidden."
+--
+-- It went unnoticed because the view and `finances.domain.rates.resolve`
+-- happened to agree. ADR-013 ends that: the resolver now prices bolivar
+-- spending at the realized cost basis (per-day VWAP of Binance P2P sells,
+-- carried forward up to 14 days), a rule the view cannot express. The two
+-- would silently disagree on exactly the transactions the owner cares most
+-- about — bolivars bought at one rate and spent after the rate moved.
+--
+-- Reproducing the chain here was rejected: it would mean hand-syncing a VWAP
+-- and an age guard across two languages forever. Keeping the view as a
+-- renamed "market reference" was also rejected: two conflicting USD answers
+-- living in one database is the precise failure this ledger exists to end.
+--
+-- Every read path already goes through the resolver in Python
+-- (finances/reports/consolidated_usd.py, finances/reports/monthly.py,
+-- finances/web/services/*), so nothing in the application loses a
+-- data source. No transaction rows are touched and no USD value is stored
+-- anywhere: `amount_usd` is derived on every read, which is why correcting
+-- the rate logic re-values all history without a data migration.
+--
+-- The invariant the view used to anchor (monthly totals == view totals) is
+-- not discarded — it is re-pointed at the consolidated report, so the
+-- cross-check now compares two independent Python report builders that share
+-- one rate implementation.
+--
+-- Idempotent: IF EXISTS, matching the CREATE VIEW style in 001_initial.sql.
+
+DROP VIEW IF EXISTS v_transactions_usd;
