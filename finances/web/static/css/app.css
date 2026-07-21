@@ -520,6 +520,30 @@
   }
 }
 
+/* Parked group (Task 3): collapsed <details> above the main queue.
+ * Its inner .cards is its own independent grid — the same card-row
+ * subgrid system, just a second, separate list of rows.
+ */
+.parked-group {
+  border: 1px solid #e5e7eb;
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: #f8fafc;
+}
+.parked-group-summary {
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #475569;
+}
+.parked-row-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 0.75rem 0.5rem;
+  margin-top: -0.25rem;
+}
+
 /* === END triage === */
 
 /* === Phase 5: mobile polish ============================================

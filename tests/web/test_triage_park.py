@@ -57,7 +57,11 @@ def test_park_removes_item_from_the_main_queue(
     client.post("/_partial/triage/1/park")
 
     assert transactions_repo.get_by_id(park_db, 1).parked is True
-    assert "txn:1" not in client.get("/api/triage").text
+    # Parking removes the row from the MAIN queue (Task 2's contract).
+    # It still shows up under queue.parked_items (Task 3), so the check
+    # is scoped to `items`, not the whole payload.
+    item_ids = [i["item_id"] for i in client.get("/api/triage").json()["items"]]
+    assert "txn:1" not in item_ids
 
 
 def test_park_survives_a_server_restart(
@@ -70,7 +74,10 @@ def test_park_survives_a_server_restart(
     # A brand-new app against the same DB file == a restarted server.
     second: TestClient = web_client_factory()
 
-    assert "txn:1" not in second.get("/api/triage").text
+    # Same scoping as above: gone from the main queue, not from the
+    # payload entirely (it now lives in parked_items).
+    item_ids = [i["item_id"] for i in second.get("/api/triage").json()["items"]]
+    assert "txn:1" not in item_ids
 
 
 def test_unpark_returns_the_item_to_the_queue(

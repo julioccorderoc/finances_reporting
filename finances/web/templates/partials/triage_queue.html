@@ -6,6 +6,28 @@
      queue        TriageQueue (services/triage.py)
 #}
 <div class="cards" data-triage-queue>
+  {% if queue.parked_items %}
+    <details data-parked-group class="parked-group mb-4">
+      <summary class="parked-group-summary">Parked &middot; {{ queue.parked_count }}</summary>
+      <div class="cards mt-2">
+        {% for item in queue.parked_items %}
+          {% include "partials/triage_card_txn.html" %}
+          <div class="parked-row-actions">
+            <button
+              type="button"
+              class="text-xs text-blue-700 hover:underline"
+              data-unpark-btn
+              hx-post="/_partial/triage/{{ item.txn_card.id }}/unpark"
+              hx-target="#triage-queue"
+              hx-swap="innerHTML"
+            >
+              Unpark
+            </button>
+          </div>
+        {% endfor %}
+      </div>
+    </details>
+  {% endif %}
   {% if queue.items %}
     {% for item in queue.items %}
       {% if item.type.value == 'pair' %}

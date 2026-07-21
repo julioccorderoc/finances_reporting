@@ -85,6 +85,8 @@ class TriageQueue(BaseModel):
     items: list[TriageItem]
     counts: dict[TriageType, int]
     integrity_warnings: list[str]
+    parked_items: list[TriageItem]
+    parked_count: int
 
 
 # ---------------------------------------------------------------------------
@@ -177,6 +179,67 @@ def _collect_txn_items(
     return items
 
 
+def _collect_parked_items(conn: sqlite3.Connection) -> list[TriageItem]:
+    """Read parked rows carrying a live issue, for the "Parked" group.
+
+    Mirrors :func:`_collect_txn_items`'s two predicates exactly, but with
+    ``t.parked = 1`` — a parked row must still show its live issue
+    badges, because parking defers a row, it does not resolve it (Task 3
+    spec). A row that hits both predicates still merges into ONE item
+    with two badges, same as the main collector.
+    """
+    rate_rows = conn.execute(
+        TXN_QUERY_BASE
+        + """
+        WHERE t.needs_review = 1
+          AND t.parked = 1
+        ORDER BY t.occurred_at, t.id
+        """
+    ).fetchall()
+
+    cat_rows = conn.execute(
+        TXN_QUERY_BASE
+        + """
+        WHERE t.category_id IS NULL
+          AND t.kind NOT IN ('transfer', 'adjustment')
+          AND t.parked = 1
+        ORDER BY t.occurred_at, t.id
+        """
+    ).fetchall()
+
+    by_id: dict[int, dict[str, Any]] = {}
+    for row in rate_rows:
+        by_id.setdefault(int(row["id"]), {"row": row, "badges": []})[
+            "badges"
+        ].append("rate")
+    for row in cat_rows:
+        entry = by_id.setdefault(int(row["id"]), {"row": row, "badges": []})
+        entry["badges"].append("category")
+
+    items: list[TriageItem] = []
+    for txn_id, entry in by_id.items():
+        row = entry["row"]
+        badges: list[str] = entry["badges"]
+        item_type = TriageType.RATE if "rate" in badges else TriageType.CATEGORY
+        card = _project_from_row(conn, row)
+        items.append(
+            TriageItem(
+                item_id=f"txn:{txn_id}",
+                type=item_type,
+                sort_key=card.occurred_at,
+                txn_card=card,
+                txn_issue_badges=sorted(set(badges)),
+                pair_proposal=None,
+            )
+        )
+
+    # Not routed through build_queue's outer sort (it's a separate list,
+    # never merged into `items`), so sort here to preserve the same
+    # ``ORDER BY t.occurred_at, t.id`` ordering the SQL asked for.
+    items.sort(key=lambda it: (it.sort_key, it.item_id))
+    return items
+
+
 def _collect_pair_items(conn: sqlite3.Connection) -> list[TriageItem]:
     """Run BankAnchoredP2pPairing and project proposals."""
     strategy = BankAnchoredP2pPairing(conn)
@@ -261,6 +324,8 @@ def build_queue(
       4) Compute counts on the unfiltered set.
       5) Apply ``type_filter`` if provided.
       6) Build integrity warnings from unreconciled transfers.
+      7) Collect parked items (Task 3) — a separate surface, never part of
+         ``items``, ``counts``, or the type filter above.
     """
     txn_items = _collect_txn_items(conn)
     pair_items = _collect_pair_items(conn)
@@ -284,11 +349,14 @@ def build_queue(
         filtered = list(all_items)
 
     warnings = _build_integrity_warnings(conn)
+    parked_items = _collect_parked_items(conn)
 
     return TriageQueue(
         items=filtered,
         counts=counts,
         integrity_warnings=warnings,
+        parked_items=parked_items,
+        parked_count=len(parked_items),
     )
 
 
