@@ -56,7 +56,7 @@ TXN_QUERY_BASE = """
     SELECT
         t.id, t.account_id, t.occurred_at, t.kind, t.amount, t.currency,
         t.description, t.category_id, t.transfer_id, t.user_rate,
-        t.source, t.source_ref, t.needs_review, t.notes,
+        t.source, t.source_ref, t.needs_review, t.parked, t.notes,
         a.name AS account_name,
         c.name AS category_name
     FROM transactions t
@@ -238,6 +238,7 @@ def _row_to_transaction(row: sqlite3.Row) -> Transaction:
         source=row["source"],
         source_ref=row["source_ref"],
         needs_review=bool(row["needs_review"]),
+        parked=bool(row["parked"]),
         notes=row["notes"],
     )
 
@@ -341,7 +342,7 @@ def query_transactions(
         SELECT
             t.id, t.account_id, t.occurred_at, t.kind, t.amount, t.currency,
             t.description, t.category_id, t.transfer_id, t.user_rate,
-            t.source, t.source_ref, t.needs_review, t.notes,
+            t.source, t.source_ref, t.needs_review, t.parked, t.notes,
             a.name AS account_name,
             c.name AS category_name
         FROM transactions t

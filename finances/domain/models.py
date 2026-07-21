@@ -103,6 +103,7 @@ class Transaction(BaseModel):
     source: str
     source_ref: str | None = None
     needs_review: bool = False
+    parked: bool = False
     notes: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None

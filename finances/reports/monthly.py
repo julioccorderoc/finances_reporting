@@ -227,7 +227,7 @@ def _fetch_transactions_in_range(
         """
         SELECT id, account_id, occurred_at, kind, amount, currency, description,
                category_id, transfer_id, user_rate, source, source_ref,
-               needs_review, notes
+               needs_review, parked, notes
         FROM transactions
         WHERE kind <> 'transfer'
         """

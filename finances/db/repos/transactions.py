@@ -73,6 +73,7 @@ def _row_to_transaction(row: sqlite3.Row) -> Transaction:
         source=row["source"],
         source_ref=row["source_ref"],
         needs_review=bool(row["needs_review"]),
+        parked=bool(row["parked"]),
         notes=row["notes"],
     )
 
@@ -83,8 +84,8 @@ def insert(conn: sqlite3.Connection, txn: Transaction) -> Transaction:
         INSERT INTO transactions (
             account_id, occurred_at, kind, amount, currency, description,
             category_id, transfer_id, user_rate, source, source_ref,
-            needs_review, notes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            needs_review, parked, notes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             txn.account_id,
@@ -99,6 +100,7 @@ def insert(conn: sqlite3.Connection, txn: Transaction) -> Transaction:
             txn.source,
             txn.source_ref,
             1 if txn.needs_review else 0,
+            1 if txn.parked else 0,
             txn.notes,
         ),
     )
@@ -110,7 +112,7 @@ def get_by_id(conn: sqlite3.Connection, transaction_id: int) -> Transaction | No
         """
         SELECT id, account_id, occurred_at, kind, amount, currency, description,
                category_id, transfer_id, user_rate, source, source_ref,
-               needs_review, notes
+               needs_review, parked, notes
         FROM transactions WHERE id = ?
         """,
         (transaction_id,),
@@ -125,7 +127,7 @@ def get_by_source_ref(
         """
         SELECT id, account_id, occurred_at, kind, amount, currency, description,
                category_id, transfer_id, user_rate, source, source_ref,
-               needs_review, notes
+               needs_review, parked, notes
         FROM transactions WHERE source = ? AND source_ref = ?
         """,
         (source, source_ref),
@@ -162,6 +164,7 @@ def upsert_by_source_ref(conn: sqlite3.Connection, txn: Transaction) -> dict[str
         txn.source,
         txn.source_ref,
         1 if txn.needs_review else 0,
+        1 if txn.parked else 0,
         txn.notes,
     )
     conn.execute(
@@ -169,8 +172,8 @@ def upsert_by_source_ref(conn: sqlite3.Connection, txn: Transaction) -> dict[str
         INSERT INTO transactions (
             account_id, occurred_at, kind, amount, currency, description,
             category_id, transfer_id, user_rate, source, source_ref,
-            needs_review, notes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            needs_review, parked, notes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(source, source_ref) DO UPDATE SET
             account_id   = excluded.account_id,
             occurred_at  = excluded.occurred_at,
@@ -217,7 +220,7 @@ def list_by_account(
     sql = """
         SELECT id, account_id, occurred_at, kind, amount, currency, description,
                category_id, transfer_id, user_rate, source, source_ref,
-               needs_review, notes
+               needs_review, parked, notes
         FROM transactions WHERE account_id = ?
         ORDER BY occurred_at DESC, id DESC
     """
@@ -241,6 +244,7 @@ def update(
     category_id: int | None | _Unset = _UNSET,
     user_rate: Decimal | None | _Unset = _UNSET,
     needs_review: bool | _Unset = _UNSET,
+    parked: bool | _Unset = _UNSET,
     notes: str | None | _Unset = _UNSET,
 ) -> Transaction:
     """Patch a single transaction's mutable fields.
@@ -291,6 +295,14 @@ def update(
     if not isinstance(needs_review, _Unset):
         sets.append("needs_review = ?")
         params.append(1 if needs_review else 0)
+
+    if not isinstance(parked, _Unset):
+        sets.append("parked = ?")
+        params.append(1 if parked else 0)
+        # Deliberately not recorded in transaction_edits: migration 009's
+        # CHECK (field IN ('category_id','user_rate','notes')) would reject
+        # a 'parked' row, and parking is a workflow flag, not a ledger
+        # correction (rule-012).
 
     if not isinstance(notes, _Unset):
         sets.append("notes = ?")
