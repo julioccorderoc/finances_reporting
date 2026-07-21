@@ -28,6 +28,7 @@ from finances.web.routers._monthly_filter_dep import monthly_filter_from_query
 from finances.web.routers._tx_filter_dep import filter_from_query
 from finances.web.services.category_stats import top_categories
 from finances.web.services.dashboard import build_sync_status
+from finances.web.services.pairing import find_pair_candidates
 from finances.web.services.transactions_query import _project_card
 from finances.web.services.transactions_write import (
     TransactionEditRequest,
@@ -328,6 +329,31 @@ def transactions_modal_partial(
             "account_name": account_name,
             "history": _build_edit_history(conn, txn_id),
         },
+    )
+
+
+@router.get("/transactions/{sell_id}/pair-candidates", include_in_schema=False)
+def transactions_pair_candidates_partial(
+    request: Request,
+    sell_id: int,
+    window_days: int = Query(default=2, ge=1, le=30),
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Render unpaired bank rows this sell could pair with.
+
+    Read-only. The pick itself is a separate POST so the write path stays
+    on confirm_pair → create_transfer (rule-002).
+    """
+    try:
+        data = find_pair_candidates(conn, sell_id=sell_id, window_days=window_days)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    templates = request.app.state.templates
+    return templates.TemplateResponse(
+        request,
+        "partials/pair_candidates.html",
+        {"data": data},
     )
 
 
