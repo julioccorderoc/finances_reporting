@@ -91,7 +91,9 @@ Candidate set: every transaction with `source='provincial'` and
 `transfer_id IS NULL` whose `occurred_at` falls within ±`window_days` of the
 sell. **Both income and expense kinds**, deliberately — a deposit recorded under
 the wrong kind must stay visible. Sorted by `drift_ratio` ascending with `None`
-last, then by `occurred_at`. The template groups by date.
+last, then by `occurred_at`. Each row carries its own weekday date label
+(closest match first beats date grouping, and matches the UX-overhaul date
+convention).
 
 Pydantic models in and out per rule-009. No mutation.
 
