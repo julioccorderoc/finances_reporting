@@ -740,7 +740,7 @@
 **Dependencies:** EPIC-024.
 **ADRs:** ADR-012 (unified queue), ADR-002 (transfer pairing), rule-012.
 
-**Business Objective:** Replace the old hand-edited Sheets triage motion with a single oldest-first queue surfacing rate / category / pair issues, with `[Save & next] [Skip → bottom] [Cancel]` semantics and a side-by-side pair-confirm modal.
+**Business Objective:** Replace the old hand-edited Sheets triage motion with a single difficulty-first, then-oldest-within-group queue surfacing rate / category / pair issues, with `[Save & next] [Park] [Cancel]` semantics and a side-by-side pair-confirm modal.
 
 **Technical Boundary:**
 
