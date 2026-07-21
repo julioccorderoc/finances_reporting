@@ -40,14 +40,17 @@ SQL_BANK_DEPOSITS = """
 """
 
 # Bank-anchored P2P pairing: fetch candidate Binance sells within the
-# ±window_days band. We include both expense and income kinds because
-# historical data is inconsistent on sign-kind pairing; we filter by
-# amount < 0 and require a user_rate.
+# ±window_days band. We include expense, income and transfer kinds because
+# historical data is inconsistent on sign-kind pairing; backfilled sells in
+# particular landed as kind='transfer' with a NULL transfer_id (orphan
+# half-transfers) and would otherwise be invisible here. The
+# ``transfer_id IS NULL`` guard is what actually establishes "unreconciled";
+# kind alone never does. We filter by amount < 0 and require a user_rate.
 SQL_BINANCE_CANDIDATES = """
     SELECT id, account_id, occurred_at, amount, currency, user_rate
     FROM transactions
     WHERE source = :binance_source
-      AND kind IN ('expense', 'income')
+      AND kind IN ('expense', 'income', 'transfer')
       AND transfer_id IS NULL
       AND CAST(amount AS REAL) < 0
       AND user_rate IS NOT NULL
