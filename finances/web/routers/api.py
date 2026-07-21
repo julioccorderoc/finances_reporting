@@ -15,7 +15,7 @@ import sqlite3
 from datetime import UTC, date, datetime
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from finances.db.repos import categories as categories_repo
@@ -60,7 +60,6 @@ from finances.web.services.triage import (
     TriageType,
     build_queue,
     confirm_pair,
-    get_skip_store,
 )
 
 router = APIRouter(prefix="/api")
@@ -286,7 +285,6 @@ def _parse_triage_type(value: str | None) -> TriageType | None:
 
 @router.get("/triage", response_model=TriageQueue)
 def triage_list_json(
-    request: Request,
     type_filter: str | None = Query(default=None),
     conn: sqlite3.Connection = Depends(get_conn),
 ) -> TriageQueue:
@@ -297,12 +295,7 @@ def triage_list_json(
     stay accurate.
     """
     parsed = _parse_triage_type(type_filter)
-    skip_store = get_skip_store(request.app)
-    return build_queue(
-        conn,
-        type_filter=parsed,
-        skipped_ids=set(skip_store) if skip_store else None,
-    )
+    return build_queue(conn, type_filter=parsed)
 
 
 class _TransfersCreateRequest(BaseModel):

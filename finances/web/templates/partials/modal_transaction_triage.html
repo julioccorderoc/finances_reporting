@@ -1,9 +1,11 @@
 {# Triage variant of the transaction-edit modal (EPIC-025 / Phase 4).
 
    Same fields as Phase 3's modal_transaction.html, but the buttons are
-   [Save & next] [Skip → bottom] [Cancel]. The form posts to the triage
+   [Save & next] [Park for later] [Cancel]. The form posts to the triage
    edit endpoint, which returns a fresh queue partial and sets
-   ``HX-Trigger: closeModal, advanceQueue`` on the response.
+   ``HX-Trigger: closeModal, advanceQueue`` on the response. Park writes
+   the durable ``transactions.parked`` column (spec §5.3) instead of the
+   old session-local Skip.
 
    Inputs:
      txn            Transaction (Pydantic)
@@ -36,8 +38,8 @@
       const save = $el.querySelector('form.tx-modal-form button[type=submit]');
       if (save) { save.click(); $event.preventDefault(); }
     } else if (key === 's' || key === 'S') {
-      const skip = $el.querySelector('[data-skip-btn]');
-      if (skip) { skip.click(); $event.preventDefault(); }
+      const park = $el.querySelector('[data-park-btn]');
+      if (park) { park.click(); $event.preventDefault(); }
     }
   "
 >
@@ -185,12 +187,12 @@
         >Cancel</button>
         <button
           type="button"
-          data-skip-btn
+          data-park-btn
           class="px-3 py-1.5 text-sm border border-amber-300 rounded bg-amber-50 text-amber-800 hover:bg-amber-100"
-          hx-post="/_partial/triage/skip/txn:{{ txn.id }}"
+          hx-post="/_partial/triage/{{ txn.id }}/park"
           hx-target="#triage-queue"
           hx-swap="innerHTML"
-        >Skip → bottom</button>
+        >Park for later</button>
         <button
           type="submit"
           class="px-3 py-1.5 text-sm border border-slate-900 rounded bg-slate-900 text-white hover:bg-slate-800"

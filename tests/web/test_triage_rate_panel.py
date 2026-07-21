@@ -143,5 +143,5 @@ def test_panel_does_not_disturb_existing_modal_contract(
 
     assert 'name="set_category"' in html
     assert 'name="user_rate"' in html
-    assert "data-skip-btn" in html
+    assert "data-park-btn" in html
     assert 'hx-post="/_partial/triage/1/edit"' in html

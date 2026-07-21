@@ -84,13 +84,6 @@
       >Cancel</button>
       <button
         type="button"
-        class="px-3 py-1.5 text-sm border border-amber-300 rounded bg-amber-50 text-amber-800 hover:bg-amber-100"
-        hx-post="/_partial/triage/skip/pair:{{ proposal.proposal_id }}"
-        hx-target="#triage-queue"
-        hx-swap="innerHTML"
-      >Skip</button>
-      <button
-        type="button"
         class="px-3 py-1.5 text-sm border border-slate-900 rounded bg-slate-900 text-white hover:bg-slate-800"
         hx-post="/_partial/triage/pair/{{ deposit.id }}/{{ sell.id }}/confirm"
         hx-target="#triage-queue"

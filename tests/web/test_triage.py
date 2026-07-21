@@ -8,7 +8,6 @@ Tests precede implementation per rule-011. Coverage:
     with two badges,
   - sorts oldest-first by ``sort_key``,
   - filters by ``type_filter`` while keeping ``counts`` unfiltered,
-  - moves session-skipped items to the bottom,
   - surfaces unreconciled-transfer integrity warnings,
   - excludes transfer/adjustment from CATEGORY items.
   - ``confirm_pair`` calls ``create_transfer`` with the right anchors
@@ -23,7 +22,6 @@ Tests precede implementation per rule-011. Coverage:
   side-by-side mini-cards + confidence.
 * ``POST /_partial/triage/pair/{deposit_id}/{sell_id}/confirm``
   creates the transfer.
-* ``POST /_partial/triage/skip/{item_id}`` floats the item.
 * Triage card partial uses /_partial/triage/{id}/modal as modal_url.
 * REGRESSION: /transactions card_transaction.html still uses the
   Phase 3 modal endpoint (no Phase 4 leakage).
@@ -397,23 +395,6 @@ def test_triage_queue_type_filter(
     assert len(queue.items) == queue.counts[TriageType.RATE]
 
 
-def test_triage_queue_skipped_items_at_bottom(
-    triage_seeded_db: sqlite3.Connection,
-) -> None:
-    from finances.web.services.triage import build_queue
-
-    queue = build_queue(triage_seeded_db)
-    assert queue.items, "fixture must produce at least one item"
-    first = queue.items[0]
-
-    skipped = build_queue(triage_seeded_db, skipped_ids={first.item_id})
-
-    # The previously-first item is NOT first anymore (it sank).
-    assert skipped.items[0].item_id != first.item_id
-    # And it appears at the END of the returned queue.
-    assert skipped.items[-1].item_id == first.item_id
-
-
 def test_triage_integrity_warnings_when_unreconciled_transfers_exist(
     triage_seeded_db: sqlite3.Connection,
 ) -> None:
@@ -548,7 +529,7 @@ def test_triage_modal_endpoint_renders_save_and_next_button(
     body = resp.text
 
     assert "Save" in body and "next" in body.lower()
-    assert "Skip" in body
+    assert "Park" in body
     assert "Cancel" in body
 
 
@@ -634,32 +615,6 @@ def test_triage_pair_confirm_creates_transfer(
     ).fetchall()
     transfer_ids = {row["transfer_id"] for row in rows}
     assert len(transfer_ids) == 1 and None not in transfer_ids
-
-
-# ---------------------------------------------------------------------------
-# Skip-store endpoint.
-# ---------------------------------------------------------------------------
-
-
-def test_triage_skip_endpoint_pushes_item_to_skip_set(
-    triage_seeded_db: sqlite3.Connection, web_client_factory
-) -> None:
-    client = web_client_factory()
-    rate_only_id = _txn_id(triage_seeded_db, "rate-only-1")
-    item_id = f"txn:{rate_only_id}"
-
-    # Confirm it's currently first (oldest needs_review legacy date).
-    pre = client.get("/api/triage").json()
-    assert pre["items"], "queue must be non-empty pre-skip"
-
-    resp = client.post(f"/_partial/triage/skip/{item_id}")
-    assert resp.status_code == 200, resp.text
-
-    # Subsequent queue must have the item at the bottom.
-    post = client.get("/api/triage").json()
-    item_ids = [it["item_id"] for it in post["items"]]
-    if item_id in item_ids:
-        assert item_ids[-1] == item_id
 
 
 # ---------------------------------------------------------------------------

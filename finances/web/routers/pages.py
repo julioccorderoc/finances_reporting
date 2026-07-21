@@ -51,7 +51,6 @@ from finances.web.services.transactions_query import (
 from finances.web.services.triage import (
     TriageType,
     build_queue,
-    get_skip_store,
 )
 
 router = APIRouter()
@@ -200,19 +199,9 @@ def triage_page(
     type_filter: str | None = Query(default=None),
     conn: sqlite3.Connection = Depends(get_conn),
 ):
-    """Render the /triage page (unified queue + filter chips).
-
-    The page reads the per-app skip store so refreshes preserve any
-    items the user already pushed to the bottom this session. The
-    skip store is intentionally session-local; see services/triage.py.
-    """
+    """Render the /triage page (unified queue + filter chips)."""
     parsed = _parse_triage_type(type_filter)
-    skip_store = get_skip_store(request.app)
-    queue = build_queue(
-        conn,
-        type_filter=parsed,
-        skipped_ids=set(skip_store) if skip_store else None,
-    )
+    queue = build_queue(conn, type_filter=parsed)
     templates = request.app.state.templates
     return templates.TemplateResponse(
         request,

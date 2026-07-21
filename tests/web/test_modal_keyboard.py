@@ -5,7 +5,7 @@ under pytest; the manual gate covers it): the overlay carries a
 window-scoped keydown handler that (1) ignores keystrokes while typing
 in form controls, (2) maps keys 1-8 to [data-chip] clicks, (3) maps
 Enter to the form's submit button (= Save & next in the triage modal),
-(4) maps s to [data-skip-btn] — triage modal only. Esc close pre-exists.
+(4) maps s to [data-park-btn] — triage modal only. Esc close pre-exists.
 """
 
 from __future__ import annotations
@@ -33,10 +33,10 @@ def test_edit_modal_has_scoped_keydown_handler(
     assert "isTyping($event)" in body      # inert while typing in inputs
     assert "data-chip" in body             # 1-8 targets exist
     assert 'tabindex="-1"' in body         # card takes focus → keys land here
-    assert "data-skip-btn" not in body     # skip is triage-only
+    assert "data-park-btn" not in body     # park is triage-only
 
 
-def test_triage_modal_has_keydown_handler_and_skip_key(
+def test_triage_modal_has_keydown_handler_and_park_key(
     seeded_web_db: sqlite3.Connection, web_client_factory
 ) -> None:
     client = web_client_factory()
@@ -46,5 +46,5 @@ def test_triage_modal_has_keydown_handler_and_skip_key(
 
     assert "@keydown.window=" in body
     assert "isTyping($event)" in body
-    assert "data-skip-btn" in body
+    assert "data-park-btn" in body
     assert 'tabindex="-1"' in body

@@ -38,7 +38,6 @@ from finances.web.services.triage import (
     TriageType,
     build_queue,
     confirm_pair,
-    get_skip_store,
 )
 from finances.web.services.monthly_view import (
     MonthlyFilter,
@@ -458,12 +457,7 @@ def _parse_triage_type_partial(value: str | None) -> TriageType | None:
 
 def _render_queue_partial(request: Request, conn: sqlite3.Connection):
     """Render only the inner queue list (pairs with hx-target=#triage-queue)."""
-    skip_store = get_skip_store(request.app)
-    queue = build_queue(
-        conn,
-        type_filter=None,
-        skipped_ids=set(skip_store) if skip_store else None,
-    )
+    queue = build_queue(conn, type_filter=None)
     templates = request.app.state.templates
     return templates.TemplateResponse(
         request,
@@ -480,12 +474,7 @@ def triage_queue_partial(
 ):
     """Return the queue partial — used by filter chips + post-save refresh."""
     parsed = _parse_triage_type_partial(type_filter)
-    skip_store = get_skip_store(request.app)
-    queue = build_queue(
-        conn,
-        type_filter=parsed,
-        skipped_ids=set(skip_store) if skip_store else None,
-    )
+    queue = build_queue(conn, type_filter=parsed)
     templates = request.app.state.templates
     return templates.TemplateResponse(
         request,
@@ -682,18 +671,49 @@ def triage_pair_confirm_partial(
     return response
 
 
-@router.post("/triage/skip/{item_id:path}", include_in_schema=False)
-def triage_skip_partial(
+def _set_parked(
     request: Request,
-    item_id: str,
-    conn: sqlite3.Connection = Depends(get_conn),
+    conn: sqlite3.Connection,
+    txn_id: int,
+    *,
+    parked: bool,
 ):
-    """Push ``item_id`` into the per-app skip store; return queue partial."""
-    skip_store = get_skip_store(request.app)
-    skip_store.add(item_id)
+    """Durably defer (or restore) ``txn_id`` via the parked column.
+
+    Per rule-012 the route issues no SQL of its own — the write goes
+    through :func:`transactions_repo.update`. Never touches
+    ``needs_review``.
+    """
+    txn = transactions_repo.get_by_id(conn, txn_id)
+    if txn is None:
+        raise HTTPException(
+            status_code=404, detail=f"transaction id={txn_id} not found"
+        )
+
+    transactions_repo.update(conn, id=txn_id, parked=parked)
+
     response = _render_queue_partial(request, conn)
     response.headers["HX-Trigger"] = "closeModal"
     return response
+
+
+@router.post("/triage/{txn_id}/park", include_in_schema=False)
+def triage_park_partial(
+    request: Request,
+    txn_id: int,
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Defer a transaction durably (spec §5.3). Never touches needs_review."""
+    return _set_parked(request, conn, txn_id, parked=True)
+
+
+@router.post("/triage/{txn_id}/unpark", include_in_schema=False)
+def triage_unpark_partial(
+    request: Request,
+    txn_id: int,
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    return _set_parked(request, conn, txn_id, parked=False)
 
 
 # ---------------------------------------------------------------------------

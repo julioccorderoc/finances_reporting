@@ -12,11 +12,6 @@ Per rule-012, this module reuses existing domain primitives:
 * :func:`confirm_pair` delegates to :func:`finances.domain.transfers.create_transfer`
   (mode 3 — both anchors). The web layer never executes its own
   INSERT/UPDATE on ``transactions``.
-
-The "Skip → bottom" affordance is intentionally session-local. Items are
-stored in ``app.state.skipped_triage_ids`` (a per-process ``set[str]``)
-and reset on app restart. Multi-worker uvicorn deployments do not sync
-these sets, which is acceptable for v1 (single-user, single-worker).
 """
 
 from __future__ import annotations
@@ -126,12 +121,15 @@ def _collect_txn_items(
     A single transaction with both issues becomes ONE item with two
     badges. Transfer/adjustment rows are excluded from the CATEGORY
     surface — those rarely carry a category by design and surfacing them
-    would noise the queue per the Q9 spec.
+    would noise the queue per the Q9 spec. Parked rows (spec §5.3) are
+    excluded from both surfaces — Park is a durable "not now", so a
+    parked item must not keep reappearing in the queue.
     """
     rate_rows = conn.execute(
         TXN_QUERY_BASE
         + """
         WHERE t.needs_review = 1
+          AND t.parked = 0
         ORDER BY t.occurred_at, t.id
         """
     ).fetchall()
@@ -141,6 +139,7 @@ def _collect_txn_items(
         + """
         WHERE t.category_id IS NULL
           AND t.kind NOT IN ('transfer', 'adjustment')
+          AND t.parked = 0
         ORDER BY t.occurred_at, t.id
         """
     ).fetchall()
@@ -250,20 +249,18 @@ def build_queue(
     conn: sqlite3.Connection,
     *,
     type_filter: TriageType | None = None,
-    skipped_ids: set[str] | None = None,
 ) -> TriageQueue:
     """Assemble the unified triage queue.
 
     Order of operations:
-      1) Collect txn-issue items (RATE / CATEGORY, merging duplicates).
+      1) Collect txn-issue items (RATE / CATEGORY, merging duplicates,
+         excluding parked rows — spec §5.3).
       2) Collect pair items (BankAnchoredP2pPairing.match).
       3) Sort all items by (sort_key, item_id) — oldest-first, with item_id
          as a mandatory tiebreak for the many rows sharing a timestamp.
       4) Compute counts on the unfiltered set.
       5) Apply ``type_filter`` if provided.
-      6) Move items in ``skipped_ids`` to the bottom (preserve relative
-         order).
-      7) Build integrity warnings from unreconciled transfers.
+      6) Build integrity warnings from unreconciled transfers.
     """
     txn_items = _collect_txn_items(conn)
     pair_items = _collect_pair_items(conn)
@@ -286,17 +283,10 @@ def build_queue(
     else:
         filtered = list(all_items)
 
-    if skipped_ids:
-        kept = [it for it in filtered if it.item_id not in skipped_ids]
-        sunk = [it for it in filtered if it.item_id in skipped_ids]
-        ordered = kept + sunk
-    else:
-        ordered = filtered
-
     warnings = _build_integrity_warnings(conn)
 
     return TriageQueue(
-        items=ordered,
+        items=filtered,
         counts=counts,
         integrity_warnings=warnings,
     )
@@ -357,20 +347,6 @@ def confirm_pair(
     }
 
 
-# ---------------------------------------------------------------------------
-# Skip-store helpers (session-local, in-memory)
-# ---------------------------------------------------------------------------
-
-
-def get_skip_store(app) -> set[str]:
-    """Return (creating if missing) the per-app skipped-ids set."""
-    store = getattr(app.state, "skipped_triage_ids", None)
-    if store is None:
-        store = set()
-        app.state.skipped_triage_ids = store
-    return store
-
-
 __all__ = [
     "PairProposal",
     "TriageItem",
@@ -378,5 +354,4 @@ __all__ = [
     "TriageType",
     "build_queue",
     "confirm_pair",
-    "get_skip_store",
 ]
