@@ -21,6 +21,8 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict
 
+from finances.db.repos import rates as rates_repo
+
 DEFAULT_RANGE_DAYS = 30
 
 
@@ -63,6 +65,37 @@ _CHART_SERIES_SPEC: tuple[tuple[str, str, str, str], ...] = (
     ("USDT", "VES", "binance_p2p_median", "USDT/VES P2P"),
     ("USD", "VES", "bcv", "USD/VES BCV"),
 )
+
+# The triage modal shows every tier ``rates.resolve`` can draw from, in the
+# resolver's own priority order, so the owner can see what was NOT used as
+# well as what was. Kept separate from _CHART_SERIES_SPEC on purpose: the
+# realized series has no rows on this base (spec §3.1a) and would draw a
+# permanently empty line on the /rates chart.
+_MODAL_SERIES_SPEC: tuple[tuple[str, str, str, str], ...] = (
+    ("USDT", "VES", "binance_p2p_realized", "Realized"),
+    ("USDT", "VES", "binance_p2p_median", "USDT P2P"),
+    ("USD", "VES", "bcv", "BCV"),
+)
+
+# ADR-005: BCV is reference-only and never a headline figure.
+_REFERENCE_ONLY_SOURCES = frozenset({"bcv"})
+
+# finances.domain.rates appends this when a rate is carried from an earlier day.
+_CARRY_SUFFIX = "_carry"
+
+
+class DayRate(BaseModel):
+    """One candidate rate for a transaction's day, as the modal shows it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str
+    source: str
+    rate: Decimal | None
+    as_of_date: date | None
+    is_carry: bool
+    is_winner: bool
+    is_reference_only: bool
 
 
 def _series_points(
@@ -155,12 +188,46 @@ def build_latest_rates(conn: sqlite3.Connection) -> list[LatestRateCard]:
     return cards
 
 
+def rates_for_day(
+    conn: sqlite3.Connection, *, day: date, winning_source: str
+) -> list[DayRate]:
+    """Return the three candidate rate series for ``day``.
+
+    ``winning_source`` is the ``rate_source`` already computed by
+    ``rates.resolve`` via ``_project_card``. This function NEVER re-derives
+    the winner — duplicating resolver logic here is exactly what rule-012
+    forbids. Sources with no table-backed series (``user_rate``,
+    ``native_usd``, ``needs_review``) simply mark nothing.
+    """
+    winner = winning_source.removesuffix(_CARRY_SUFFIX)
+
+    series: list[DayRate] = []
+    for base, quote, source, label in _MODAL_SERIES_SPEC:
+        found = rates_repo.latest_on_or_before(
+            conn, as_of_date=day, base=base, quote=quote, source=source
+        )
+        series.append(
+            DayRate(
+                label=label,
+                source=source,
+                rate=found.rate if found is not None else None,
+                as_of_date=found.as_of_date if found is not None else None,
+                is_carry=found is not None and found.as_of_date < day,
+                is_winner=source == winner,
+                is_reference_only=source in _REFERENCE_ONLY_SOURCES,
+            )
+        )
+    return series
+
+
 __all__ = [
     "DEFAULT_RANGE_DAYS",
+    "DayRate",
     "LatestRateCard",
     "RatePoint",
     "RateSeries",
     "RatesChart",
     "build_latest_rates",
     "build_rates_chart",
+    "rates_for_day",
 ]
