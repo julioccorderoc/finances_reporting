@@ -141,7 +141,11 @@ def _collect_txn_items(
     would noise the queue per the Q9 spec.
     """
     rate_rows = conn.execute(
-        _TXN_QUERY_BASE + " WHERE t.needs_review = 1"
+        _TXN_QUERY_BASE
+        + """
+        WHERE t.needs_review = 1
+        ORDER BY t.occurred_at, t.id
+        """
     ).fetchall()
 
     cat_rows = conn.execute(
@@ -149,6 +153,7 @@ def _collect_txn_items(
         + """
         WHERE t.category_id IS NULL
           AND t.kind NOT IN ('transfer', 'adjustment')
+        ORDER BY t.occurred_at, t.id
         """
     ).fetchall()
 
@@ -261,7 +266,8 @@ def build_queue(
     Order of operations:
       1) Collect txn-issue items (RATE / CATEGORY, merging duplicates).
       2) Collect pair items (BankAnchoredP2pPairing.match).
-      3) Sort all items oldest-first by ``sort_key``.
+      3) Sort all items by (sort_key, item_id) — oldest-first, with item_id
+         as a mandatory tiebreak for the many rows sharing a timestamp.
       4) Compute counts on the unfiltered set.
       5) Apply ``type_filter`` if provided.
       6) Move items in ``skipped_ids`` to the bottom (preserve relative
@@ -271,7 +277,12 @@ def build_queue(
     txn_items = _collect_txn_items(conn)
     pair_items = _collect_pair_items(conn)
     all_items = txn_items + pair_items
-    all_items.sort(key=lambda it: it.sort_key)
+    # (sort_key, item_id) is a TOTAL order. sort_key alone is not: 204 of 243
+    # live items share a timestamp, so ties would fall through to SQLite's
+    # row order, which changes with the query plan. item_id sorts as a string
+    # ("txn:9" after "txn:10"), which is arbitrary but stable — and stability,
+    # not numeric ordering, is what prev/next navigation needs.
+    all_items.sort(key=lambda it: (it.sort_key, it.item_id))
 
     # Counts always reflect the UNFILTERED queue, so the chip badges stay
     # accurate when the user selects a single type.
