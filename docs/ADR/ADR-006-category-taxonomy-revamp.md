@@ -37,6 +37,8 @@ v1 taxonomy (top-level kinds × subcategories):
 
 Drop "Ant". Drop "No ID" as a destination — replaced by `transactions.needs_review = 1`. Add explicit "Internal Transfer" so the double-entry pairs from ADR-002 land cleanly.
 
+> The list above is the taxonomy *as of v1* and has been amended several times since (see the amendment log at the bottom). For the current set **and the test that decides each category**, read [`docs/architecture/category-definitions.md`](../architecture/category-definitions.md) — it is authoritative on meaning.
+
 ## 3. Consequences (The "Why")
 
 ### Positive
@@ -82,3 +84,43 @@ Amendment 2026-04-20: renamed `Food`→`Groceries` (per legacy-taxonomy alignmen
 ## Amendment 2026-04-20 (v1.2) — Clothing
 
 Added expense category `Clothing` (migration 005). Julio's legacy ledger uses `Sub-Category=Clothing` for apparel purchases (~10 rows in the backfill). Discussed mapping to `Purchases` or `Lifestyle` and rejected both — Clothing is distinct enough to warrant its own bucket.
+
+## Amendment 2026-07-21 — Leisure/Going Out collision + dead-bucket prune
+
+Two problems, both from the taxonomy having names without written tests.
+
+**1. `Leisure` and `Going Out` meant the same thing.** Migration 004 gave
+`Leisure` the meaning "going-out food"; migration 007 then added
+`Going Out` for eating out, drinks, bars and cafés. The 69 `Leisure` rows
+were almost all named food merchants.
+
+Resolved by owner decision: **`Leisure` = non-food recreation only**
+(tours, events, cinema, hobbies); `Going Out` = food and drink consumed
+out; `Groceries` = food consumed at home. Migration 012 moves the
+mechanically unambiguous rows — 25 named food merchants to `Going Out`,
+5 supermarkets/butchers to `Groceries` — matching on exact description
+*and* current category, so hand-tagged rows elsewhere are untouched and
+re-running is a no-op. The remaining 39 rows (pago móvil `CAR.DRV*`, bank
+transfers `DR OB *`, bare person names, `EVENTOS RZEMIEN`, `DOGGO53`, and
+two positive-amount rows that are inflows mis-filed as expenses) stay in
+`Leisure` for hand triage: per rule-006, merchant strings do not encode
+intent.
+
+**2. `Lifestyle` and `Tools` were dead.** Zero transactions in nine
+months and no definition beyond the name; every concrete example routes
+to a sharper bucket (`Leisure`, `Personal Care`, `Purchases`,
+`Clothing` — migration 005 had already rejected `Lifestyle` for apparel).
+Migration 013 deactivates both, following migration 011's precedent:
+`active = 0`, never `DELETE`.
+
+Active expense categories after this amendment (17): Groceries, Going
+Out, Leisure, Dating, Gifts, Family, Lending, Transport, Health, Personal
+Care, Clothing, Purchases, Subscriptions, Utilities, Rent, Education,
+Other Expense.
+
+The disambiguating test for every category, plus the recurring edge
+rulings (friend's dinner → `Going Out`; pharmacy → `Personal Care` unless
+prescription; expect-it-back → always `Lending`), now live in
+[`docs/architecture/category-definitions.md`](../architecture/category-definitions.md),
+which is authoritative on meaning. Category *count* was never the
+problem — undefined edges were.
