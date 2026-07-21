@@ -48,6 +48,14 @@
       </select>
     </label>
     <label class="text-xs flex flex-col gap-1">
+      <span class="text-slate-500">Paired</span>
+      <select name="paired" class="border border-slate-300 rounded px-2 py-1 text-sm">
+        {% for opt in ['any', 'yes', 'no'] %}
+          <option value="{{ opt }}" {% if filter.paired == opt %}selected{% endif %}>{{ opt }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="text-xs flex flex-col gap-1">
       <span class="text-slate-500">Page size</span>
       <select name="page_size" class="border border-slate-300 rounded px-2 py-1 text-sm">
         {% for sz in [25, 50, 100] %}

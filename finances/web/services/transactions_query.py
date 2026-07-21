@@ -35,6 +35,7 @@ _DEFAULT_WINDOW_DAYS = 30
 
 _KindLiteral = Literal["income", "expense", "transfer", "adjustment"]
 _NeedsReviewLiteral = Literal["any", "yes", "no"]
+_PairedLiteral = Literal["any", "yes", "no"]
 _SortLiteral = Literal["occurred_at", "amount_native", "amount_usd"]
 _DirectionLiteral = Literal["asc", "desc"]
 _PageSizeLiteral = Literal[25, 50, 100]
@@ -88,6 +89,7 @@ class TransactionsFilter(BaseModel):
     sources: list[str] = Field(default_factory=list)
     currencies: list[str] = Field(default_factory=list)
     needs_review: _NeedsReviewLiteral = "any"
+    paired: _PairedLiteral = "any"
     q: str = ""
     sort: _SortLiteral = "occurred_at"
     direction: _DirectionLiteral = "desc"
@@ -193,6 +195,13 @@ def _build_where(f: TransactionsFilter) -> tuple[str, list[Any]]:
         where.append("t.needs_review = 1")
     elif f.needs_review == "no":
         where.append("t.needs_review = 0")
+
+    # transfer_id IS NULL is what makes a row "unpaired" — kind never does,
+    # since backfilled rows can carry kind='transfer' with no counterpart.
+    if f.paired == "yes":
+        where.append("t.transfer_id IS NOT NULL")
+    elif f.paired == "no":
+        where.append("t.transfer_id IS NULL")
 
     if f.q:
         # Free-text search covers the statement description AND the manual

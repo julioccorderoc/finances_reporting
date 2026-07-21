@@ -29,6 +29,7 @@ def filter_from_query(
     sources: list[str] = Query(default_factory=list),
     currencies: list[str] = Query(default_factory=list),
     needs_review: Literal["any", "yes", "no"] = Query(default="any"),
+    paired: Literal["any", "yes", "no"] = Query(default="any"),
     q: str = Query(default=""),
     sort: Literal["occurred_at", "amount_native", "amount_usd"] = Query(
         default="occurred_at"
@@ -51,6 +52,7 @@ def filter_from_query(
         sources=sources,
         currencies=currencies,
         needs_review=needs_review,
+        paired=paired,
         q=q,
         sort=sort,
         direction=direction,
