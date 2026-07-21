@@ -358,3 +358,58 @@ def test_cli_rebuild_realized_reports_count(cli_db: Path) -> None:
 
     assert result.exit_code == 0, result.output
     assert "1" in result.output
+
+
+def test_fill_with_unparseable_description_is_treated_as_ves(
+    seeded_db: sqlite3.Connection,
+) -> None:
+    """ADR-013 §5: an unparseable description falls back to VES, not skipped.
+
+    The ledger is VES-only in practice, so a row whose text does not match the
+    ingester's shape is far more likely to be VES than a second currency.
+    """
+    account_id = _binance_account_id(seeded_db)
+    txn_repo.insert(
+        seeded_db,
+        Transaction(
+            account_id=account_id,
+            occurred_at=datetime(2025, 7, 1, 12, 0, tzinfo=UTC),
+            kind=TransactionKind.EXPENSE,
+            amount=Decimal("-100"),
+            currency="USDT",
+            description="hand-edited note with no fiat token",
+            user_rate=Decimal("40"),
+            source="binance",
+            source_ref="p2p:edited",
+        ),
+    )
+
+    results = realized_rates.compute_realized_rates(seeded_db)
+
+    assert len(results) == 1
+    assert results[0].rate == Decimal("40")
+
+
+def test_fill_with_null_description_is_treated_as_ves(
+    seeded_db: sqlite3.Connection,
+) -> None:
+    account_id = _binance_account_id(seeded_db)
+    txn_repo.insert(
+        seeded_db,
+        Transaction(
+            account_id=account_id,
+            occurred_at=datetime(2025, 7, 1, 12, 0, tzinfo=UTC),
+            kind=TransactionKind.EXPENSE,
+            amount=Decimal("-100"),
+            currency="USDT",
+            description=None,
+            user_rate=Decimal("40"),
+            source="binance",
+            source_ref="p2p:nodesc",
+        ),
+    )
+
+    results = realized_rates.compute_realized_rates(seeded_db)
+
+    assert len(results) == 1
+    assert results[0].rate == Decimal("40")
