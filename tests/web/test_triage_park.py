@@ -122,3 +122,38 @@ def test_modal_offers_park_not_skip(
 
     assert "data-park-btn" in html
     assert "data-skip-btn" not in html
+
+
+def test_parked_items_are_collected_separately(
+    park_db: sqlite3.Connection, web_client_factory
+) -> None:
+    from finances.web.services.triage import build_queue
+
+    client: TestClient = web_client_factory()
+    client.post("/_partial/triage/1/park")
+
+    queue = build_queue(park_db)
+
+    assert [i.item_id for i in queue.items] == ["txn:2", "txn:3"]
+    assert [i.item_id for i in queue.parked_items] == ["txn:1"]
+    assert queue.parked_count == 1
+
+
+def test_parked_group_renders_with_an_unpark_action(
+    park_db: sqlite3.Connection, web_client_factory
+) -> None:
+    client: TestClient = web_client_factory()
+    client.post("/_partial/triage/1/park")
+
+    html = client.get("/triage").text
+
+    assert "data-parked-group" in html
+    assert "/_partial/triage/1/unpark" in html
+
+
+def test_no_parked_group_when_nothing_is_parked(
+    park_db: sqlite3.Connection, web_client_factory
+) -> None:
+    client: TestClient = web_client_factory()
+
+    assert "data-parked-group" not in client.get("/triage").text
