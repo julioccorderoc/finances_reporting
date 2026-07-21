@@ -119,9 +119,10 @@ def _fetch_non_transfer_transactions(
 def _compute_row(conn: sqlite3.Connection, txn: Transaction) -> ConsolidatedRow:
     """Resolve one transaction into a :class:`ConsolidatedRow`.
 
-    Follows the same USD arithmetic as the ``v_transactions_usd`` SQL view so
-    report totals stay consistent with any other consumer that might read the
-    view directly. All math runs in ``Decimal``; floats never enter the path.
+    This is the authoritative USD arithmetic. The ``v_transactions_usd`` view
+    that used to duplicate it in SQL was dropped in migration 014 (ADR-013)
+    because it could not express the realized cost-basis tier. All math runs
+    in ``Decimal``; floats never enter the path.
     """
     assert txn.id is not None, "transactions persisted via the repo always have an id"
 

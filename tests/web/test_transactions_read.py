@@ -347,3 +347,23 @@ def test_rate_source_needs_review_when_no_rate(
         params={"q": "LEGACY", "date_from": "2000-01-01"},
     ).text
     assert 'data-needs-review="true"' in html
+
+
+def test_txn_query_base_selects_every_column_row_to_transaction_needs(
+    seeded_web_db: sqlite3.Connection,
+) -> None:
+    """One shared SELECT prefix, so adding a column has one place to update."""
+    from finances.web.services.transactions_query import (
+        TXN_QUERY_BASE,
+        _row_to_transaction,
+    )
+
+    row = seeded_web_db.execute(
+        TXN_QUERY_BASE + " WHERE t.source_ref = ?", ("prov-1",)
+    ).fetchone()
+    assert row is not None
+
+    txn = _row_to_transaction(row)
+    assert txn.source_ref == "prov-1"
+    assert row["account_name"] == "Provincial"
+    assert row["category_name"] == "Groceries"

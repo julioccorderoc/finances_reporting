@@ -13,8 +13,8 @@ keep ``total_usd`` limited to ``user_rate`` / ``binance_p2p_median`` /
 
 All rate resolution goes through :func:`finances.domain.rates.resolve` — this
 module must never reimplement the priority chain. The native-USD pass-through
-(USD / USDT / USDC) mirrors the ``v_transactions_usd`` SQL view so the
-sum-invariant in the epic's Definition of Done stays tight.
+(USD / USDT / USDC) matches the consolidated report, so the sum-invariant
+in the epic's Definition of Done stays tight.
 
 The module is read-only: it never mutates the DB. The resolver may toggle
 ``Transaction.needs_review`` on an in-memory copy for rows that fail to
@@ -179,7 +179,7 @@ class _RowAccumulator:
 
 
 # ---------------------------------------------------------------------------
-# Per-transaction USD contribution (mirrors v_transactions_usd math).
+# Per-transaction USD contribution (matches the consolidated report).
 # ---------------------------------------------------------------------------
 
 
@@ -191,9 +191,9 @@ def _resolve_contribution(
     ``bucket`` is one of ``"headline"``, ``"fallback"``, or ``"needs_review"``
     and routes the amount to the appropriate accumulator field.
 
-    Native-USD currencies (USD/USDT/USDC) bypass the resolver — same as the
-    ``v_transactions_usd`` view — so a transaction in one of those currencies
-    is always headline-eligible.
+    Native-USD currencies (USD/USDT/USDC) bypass the resolver — same as
+    :mod:`finances.reports.consolidated_usd` — so a transaction in one of
+    those currencies is always headline-eligible.
     """
     if txn.currency in _NATIVE_USD_CURRENCIES:
         return txn.amount, "headline"
@@ -219,9 +219,9 @@ def _fetch_transactions_in_range(
     """Fetch non-transfer transactions whose month is within ``[since, until]``.
 
     Month filtering happens in SQL via ``strftime('%Y-%m', occurred_at)`` so
-    we mirror the ``v_monthly_summary`` / ``v_transactions_usd`` behaviour
-    exactly. That keeps the epic's sum-invariant ("report rows sum to the
-    same total as ``v_transactions_usd`` for the month") tight.
+    we mirror the ``v_monthly_summary`` behaviour exactly. That keeps the
+    epic's sum-invariant ("report rows sum to the same total as the
+    consolidated report for the month") tight.
     """
     sql = [
         """

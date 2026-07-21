@@ -68,6 +68,7 @@
 
 - Author `finances/db/migrations/001_initial.sql` with tables: `accounts`, `categories`, `category_rules`, `transactions`, `rates`, `earn_positions`, `import_state`, `import_runs` (per the locked schema in the plan file).
 - Create SQL views: `v_account_balances`, `v_transactions_usd`, `v_monthly_summary`, `v_unreconciled_transfers`.
+  (`v_transactions_usd` was later dropped by migration 014 — see ADR-013.)
 - Implement `finances/db/connection.py` (sqlite3 with WAL mode, foreign keys ON).
 - Implement `finances/db/migrate.py` runner (idempotent, applies any unapplied `00X_*.sql` in order; tracks applied set in a `_migrations` table).
 - Implement `finances/domain/models.py` as **Pydantic v2** `BaseModel` subclasses (`Account`, `Category`, `Transaction`, `Rate`, `EarnPosition`) with strict validators per ADR-009.
@@ -401,7 +402,7 @@
 **Verification Criteria (Definition of Done):**
 
 - `finances cash add --amount 12 --description "lunch"` creates a row and exits 0.
-- The row appears in `v_account_balances` for `Cash USD` and `v_transactions_usd`.
+- The row appears in `v_account_balances` for `Cash USD` and in the consolidated report.
 
 **TDD discipline (per ADR-011 / rule-011):**
 
@@ -435,7 +436,7 @@
 - After cleanup: `SELECT COUNT(*) FROM transactions WHERE needs_review=1` = 0.
 - `SELECT COUNT(*) FROM transactions WHERE kind='transfer' AND transfer_id IS NULL` = 0.
 - Total transactions ≈ 172 (Binance) + 843 (Provincial) + paired transfer rows.
-- Spot-check: 5 random Bs transactions show the expected USD value via `v_transactions_usd`.
+- Spot-check: 5 random Bs transactions show the expected USD value via `finances report consolidated`.
 
 **TDD discipline (per ADR-011 / rule-011):**
 
@@ -465,7 +466,7 @@
 **Verification Criteria (Definition of Done):**
 
 - `finances report balances` returns Binance Spot, Funding, Earn, Provincial, Cash USD balances; each within 0.01 (native) of the source UI on a freshly-backfilled DB.
-- `finances report monthly` returns rows summing to the same total as `v_transactions_usd` for the month.
+- `finances report monthly` returns rows summing to the same total as `finances report consolidated` for the month.
 - `finances report consolidated --strict` exits non-zero if any headline row would use a BCV-sourced rate; `finances report consolidated` (default) annotates them.
 
 **TDD discipline (per ADR-011 / rule-011):**

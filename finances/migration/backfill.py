@@ -790,7 +790,7 @@ def run_backfill(
 
     Raises ``FileNotFoundError`` if either the Binance or Provincial CSV
     is missing. BCV is treated as optional — no BCV file is not fatal,
-    only the v_transactions_usd fallback becomes less precise.
+    only the last-resort rate fallback becomes less precise.
 
     Re-running the backfill resets ``needs_review``, ``category_id``, and
     ``transfer_id`` on every ingested row (``upsert_by_source_ref`` is

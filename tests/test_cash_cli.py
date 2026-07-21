@@ -317,14 +317,20 @@ def test_cli_cash_add_creates_row_visible_in_balance_and_usd_views(
         assert balance_row["currency"] == "USD"
         assert float(balance_row["balance_native"]) == pytest.approx(-12.0)
 
-        usd_row = conn.execute(
-            "SELECT amount, amount_usd, currency, source FROM v_transactions_usd "
-            "WHERE source = 'cash_cli' ORDER BY transaction_id DESC LIMIT 1"
-        ).fetchone()
-        assert usd_row is not None
-        assert usd_row["currency"] == "USD"
-        assert usd_row["source"] == "cash_cli"
-        assert float(usd_row["amount_usd"]) == pytest.approx(-12.0)
+        # v_transactions_usd was dropped in migration 014 (ADR-013); USD
+        # equivalence now comes from the resolver-backed consolidated report.
+        from finances.reports import consolidated_usd
+
+        cash_rows = [
+            row
+            for row in consolidated_usd.build_report(conn).rows
+            if row.description is not None and row.currency == "USD"
+        ]
+        assert cash_rows, "expected the cash_cli transaction in the consolidated report"
+        usd_row = cash_rows[-1]
+        assert usd_row.currency == "USD"
+        assert usd_row.rate_source == "native_usd"
+        assert float(usd_row.amount_usd) == pytest.approx(-12.0)
     finally:
         conn.close()
 

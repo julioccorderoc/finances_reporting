@@ -111,6 +111,20 @@
       <p class="text-sm text-slate-800 whitespace-pre-wrap break-words">{{ txn.description or '—' }}</p>
     </section>
 
+    {# 3b. Manual pairing — unpaired outgoing Binance rows only ---------- #}
+    {% if txn.transfer_id is none and txn.source == 'binance' and txn.amount < 0 %}
+    <section class="tx-modal-section">
+      <h3 class="tx-modal-section-title">Pair with deposit</h3>
+      <div
+        hx-get="/_partial/transactions/{{ txn.id }}/pair-candidates"
+        hx-trigger="load"
+        hx-swap="outerHTML"
+      >
+        <p class="text-sm text-slate-400">Loading candidates…</p>
+      </div>
+    </section>
+    {% endif %}
+
     {# 4. Editable form --------------------------------------------------- #}
     <form
       class="tx-modal-form"

@@ -35,6 +35,7 @@ _DEFAULT_WINDOW_DAYS = 30
 
 _KindLiteral = Literal["income", "expense", "transfer", "adjustment"]
 _NeedsReviewLiteral = Literal["any", "yes", "no"]
+_PairedLiteral = Literal["any", "yes", "no"]
 _SortLiteral = Literal["occurred_at", "amount_native", "amount_usd"]
 _DirectionLiteral = Literal["asc", "desc"]
 _PageSizeLiteral = Literal[25, 50, 100]
@@ -47,6 +48,21 @@ _SORT_COLUMN_MAP: dict[str, str] = {
     # surface will still echo "amount_usd" when requested.
     "amount_usd": "CAST(t.amount AS REAL)",
 }
+
+# Shared SELECT prefix for every row that will pass through
+# _row_to_transaction. Keep the column list and that function in sync —
+# they are the pair that breaks when a column is added to transactions.
+TXN_QUERY_BASE = """
+    SELECT
+        t.id, t.account_id, t.occurred_at, t.kind, t.amount, t.currency,
+        t.description, t.category_id, t.transfer_id, t.user_rate,
+        t.source, t.source_ref, t.needs_review, t.notes,
+        a.name AS account_name,
+        c.name AS category_name
+    FROM transactions t
+    LEFT JOIN accounts a ON a.id = t.account_id
+    LEFT JOIN categories c ON c.id = t.category_id
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -73,6 +89,7 @@ class TransactionsFilter(BaseModel):
     sources: list[str] = Field(default_factory=list)
     currencies: list[str] = Field(default_factory=list)
     needs_review: _NeedsReviewLiteral = "any"
+    paired: _PairedLiteral = "any"
     q: str = ""
     sort: _SortLiteral = "occurred_at"
     direction: _DirectionLiteral = "desc"
@@ -178,6 +195,13 @@ def _build_where(f: TransactionsFilter) -> tuple[str, list[Any]]:
         where.append("t.needs_review = 1")
     elif f.needs_review == "no":
         where.append("t.needs_review = 0")
+
+    # transfer_id IS NULL is what makes a row "unpaired" — kind never does,
+    # since backfilled rows can carry kind='transfer' with no counterpart.
+    if f.paired == "yes":
+        where.append("t.transfer_id IS NOT NULL")
+    elif f.paired == "no":
+        where.append("t.transfer_id IS NULL")
 
     if f.q:
         # Free-text search covers the statement description AND the manual

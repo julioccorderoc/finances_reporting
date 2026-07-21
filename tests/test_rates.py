@@ -468,3 +468,201 @@ def test_property_bcv_used_only_when_no_p2p_available(
     assert rate == Decimal("36.50")
     expected = "bcv_carry" if bcv_offset > 0 else "bcv"
     assert source == expected
+
+
+# ---------------------------------------------------------------------------
+# Realized cost-basis tier (ADR-013).
+#
+# Bolívars are spent at what they cost to acquire, not at the spend-day
+# market median. The realized tier sits between the manual user_rate override
+# and binance_p2p_median, and expires after REALIZED_MAX_AGE_DAYS so a stale
+# rate cannot silently misprice months of spending.
+# ---------------------------------------------------------------------------
+
+
+def _insert_realized(
+    conn: sqlite3.Connection, *, as_of_date: date, rate: Decimal
+) -> Rate:
+    return _insert_rate(
+        conn,
+        as_of_date=as_of_date,
+        base="USDT",
+        quote="VES",
+        source=rates_engine.REALIZED_SOURCE,
+        rate=rate,
+    )
+
+
+def test_realized_rate_beats_p2p_median_on_exact_date(
+    in_memory_db: sqlite3.Connection,
+) -> None:
+    day = date(2025, 7, 1)
+    _insert_realized(in_memory_db, as_of_date=day, rate=Decimal("40"))
+    _insert_rate(
+        in_memory_db,
+        as_of_date=day,
+        base="USDT",
+        quote="VES",
+        source="binance_p2p_median",
+        rate=Decimal("50"),
+    )
+
+    rate, source = rates_engine.resolve(in_memory_db, _txn_on(day))
+
+    assert rate == Decimal("40")
+    assert source == rates_engine.REALIZED_SOURCE
+
+
+def test_realized_rate_carries_forward_within_window(
+    in_memory_db: sqlite3.Connection,
+) -> None:
+    acquired = date(2025, 7, 1)
+    _insert_realized(in_memory_db, as_of_date=acquired, rate=Decimal("40"))
+    _insert_rate(
+        in_memory_db,
+        as_of_date=acquired + timedelta(days=5),
+        base="USDT",
+        quote="VES",
+        source="binance_p2p_median",
+        rate=Decimal("50"),
+    )
+
+    rate, source = rates_engine.resolve(
+        in_memory_db, _txn_on(acquired + timedelta(days=5))
+    )
+
+    assert rate == Decimal("40")
+    assert source == rates_engine.REALIZED_SOURCE + "_carry"
+
+
+def test_realized_rate_applies_on_final_day_of_window(
+    in_memory_db: sqlite3.Connection,
+) -> None:
+    """The age boundary is inclusive."""
+    acquired = date(2025, 7, 1)
+    _insert_realized(in_memory_db, as_of_date=acquired, rate=Decimal("40"))
+    spend_day = acquired + timedelta(days=rates_engine.REALIZED_MAX_AGE_DAYS)
+
+    rate, source = rates_engine.resolve(in_memory_db, _txn_on(spend_day))
+
+    assert rate == Decimal("40")
+    assert source == rates_engine.REALIZED_SOURCE + "_carry"
+
+
+def test_realized_rate_expires_one_day_past_window(
+    in_memory_db: sqlite3.Connection,
+) -> None:
+    acquired = date(2025, 7, 1)
+    _insert_realized(in_memory_db, as_of_date=acquired, rate=Decimal("40"))
+    spend_day = acquired + timedelta(days=rates_engine.REALIZED_MAX_AGE_DAYS + 1)
+    _insert_rate(
+        in_memory_db,
+        as_of_date=spend_day,
+        base="USDT",
+        quote="VES",
+        source="binance_p2p_median",
+        rate=Decimal("50"),
+    )
+
+    rate, source = rates_engine.resolve(in_memory_db, _txn_on(spend_day))
+
+    assert rate == Decimal("50")
+    assert source == "binance_p2p_median"
+
+
+def test_user_rate_still_beats_realized(in_memory_db: sqlite3.Connection) -> None:
+    day = date(2025, 7, 1)
+    _insert_realized(in_memory_db, as_of_date=day, rate=Decimal("40"))
+
+    rate, source = rates_engine.resolve(
+        in_memory_db, _txn_on(day, user_rate=Decimal("99"))
+    )
+
+    assert rate == Decimal("99")
+    assert source == "user_rate"
+
+
+def test_expired_realized_falls_through_to_bcv_when_no_median(
+    in_memory_db: sqlite3.Connection,
+) -> None:
+    acquired = date(2025, 7, 1)
+    _insert_realized(in_memory_db, as_of_date=acquired, rate=Decimal("40"))
+    spend_day = acquired + timedelta(days=rates_engine.REALIZED_MAX_AGE_DAYS + 1)
+    _insert_rate(
+        in_memory_db,
+        as_of_date=spend_day,
+        base="USD",
+        quote="VES",
+        source="bcv",
+        rate=Decimal("36"),
+    )
+
+    rate, source = rates_engine.resolve(in_memory_db, _txn_on(spend_day))
+
+    assert rate == Decimal("36")
+    assert source == "bcv"
+
+
+def test_no_realized_rates_preserves_legacy_behaviour(
+    in_memory_db: sqlite3.Connection,
+) -> None:
+    """With no realized history the chain must behave exactly as before."""
+    day = date(2025, 7, 1)
+    _insert_rate(
+        in_memory_db,
+        as_of_date=day,
+        base="USDT",
+        quote="VES",
+        source="binance_p2p_median",
+        rate=Decimal("50"),
+    )
+
+    rate, source = rates_engine.resolve(in_memory_db, _txn_on(day))
+
+    assert rate == Decimal("50")
+    assert source == "binance_p2p_median"
+
+
+@given(
+    offset=st.integers(min_value=0, max_value=60),
+    realized=_RATE_VALUES,
+    median=_RATE_VALUES,
+    txn_day=st.dates(min_value=date(2022, 1, 1), max_value=date(2030, 12, 31)),
+)
+@settings(
+    max_examples=50,
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
+def test_property_realized_wins_exactly_within_age_window(
+    in_memory_db: sqlite3.Connection,
+    offset: int,
+    realized: Decimal,
+    median: Decimal,
+    txn_day: date,
+) -> None:
+    """Realized wins iff its age <= the window; otherwise the median does."""
+    in_memory_db.execute("DELETE FROM rates")
+    _insert_realized(
+        in_memory_db, as_of_date=txn_day - timedelta(days=offset), rate=realized
+    )
+    _insert_rate(
+        in_memory_db,
+        as_of_date=txn_day,
+        base="USDT",
+        quote="VES",
+        source="binance_p2p_median",
+        rate=median,
+    )
+
+    txn = _txn_on(txn_day)
+    rate, source = rates_engine.resolve(in_memory_db, txn)
+
+    if offset <= rates_engine.REALIZED_MAX_AGE_DAYS:
+        assert rate == realized
+        expected = rates_engine.REALIZED_SOURCE + ("_carry" if offset else "")
+        assert source == expected
+    else:
+        assert rate == median
+        assert source == "binance_p2p_median"
+    assert txn.needs_review is False

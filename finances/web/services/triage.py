@@ -33,6 +33,7 @@ from finances.db.repos import categories as categories_repo
 from finances.domain import transfers as transfers_domain
 from finances.domain.transfers import BankAnchoredP2pPairing, create_transfer
 from finances.web.services.transactions_query import (
+    TXN_QUERY_BASE,
     TransactionCard,
     _project_card,
     _row_to_transaction,
@@ -96,22 +97,9 @@ class TriageQueue(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-_TXN_QUERY_BASE = """
-    SELECT
-        t.id, t.account_id, t.occurred_at, t.kind, t.amount, t.currency,
-        t.description, t.category_id, t.transfer_id, t.user_rate,
-        t.source, t.source_ref, t.needs_review, t.notes,
-        a.name AS account_name,
-        c.name AS category_name
-    FROM transactions t
-    LEFT JOIN accounts a ON a.id = t.account_id
-    LEFT JOIN categories c ON c.id = t.category_id
-"""
-
-
 def _fetch_txn_with_labels(conn: sqlite3.Connection, txn_id: int):
     return conn.execute(
-        _TXN_QUERY_BASE + " WHERE t.id = ?", (txn_id,)
+        TXN_QUERY_BASE + " WHERE t.id = ?", (txn_id,)
     ).fetchone()
 
 
@@ -141,7 +129,7 @@ def _collect_txn_items(
     would noise the queue per the Q9 spec.
     """
     rate_rows = conn.execute(
-        _TXN_QUERY_BASE
+        TXN_QUERY_BASE
         + """
         WHERE t.needs_review = 1
         ORDER BY t.occurred_at, t.id
@@ -149,7 +137,7 @@ def _collect_txn_items(
     ).fetchall()
 
     cat_rows = conn.execute(
-        _TXN_QUERY_BASE
+        TXN_QUERY_BASE
         + """
         WHERE t.category_id IS NULL
           AND t.kind NOT IN ('transfer', 'adjustment')

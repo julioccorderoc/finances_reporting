@@ -176,3 +176,73 @@ def test_monthly_clear_filters_link_resets_to_bare_url(
     body = resp.text
     assert '<a href="/monthly" data-clear-filters' in body
     assert ">Clear filters</a>" in body
+
+
+# ---------------------------------------------------------------------------
+# paired filter — isolate rows that still need a transfer_id.
+# ---------------------------------------------------------------------------
+
+
+def _pair_two_rows(conn: sqlite3.Connection) -> None:
+    """Stamp a transfer_id on the seeded Binance income row."""
+    conn.execute(
+        "UPDATE transactions SET transfer_id = 'tid-test' WHERE source_ref = ?",
+        ("bin-1",),
+    )
+
+
+def test_paired_no_returns_only_unpaired_rows(
+    seeded_web_db: sqlite3.Connection, web_client_factory
+) -> None:
+    _pair_two_rows(seeded_web_db)
+    client: TestClient = web_client_factory()
+
+    resp = client.get(
+        "/api/transactions", params={"paired": "no", "date_from": "2009-01-01"}
+    )
+
+    assert resp.status_code == 200, resp.text
+    descriptions = [row["description"] for row in resp.json()["rows"]]
+    assert "Earn payout" not in descriptions
+    assert "COM.PAGO bodega" in descriptions
+
+
+def test_paired_yes_returns_only_paired_rows(
+    seeded_web_db: sqlite3.Connection, web_client_factory
+) -> None:
+    _pair_two_rows(seeded_web_db)
+    client: TestClient = web_client_factory()
+
+    resp = client.get(
+        "/api/transactions", params={"paired": "yes", "date_from": "2009-01-01"}
+    )
+
+    assert resp.status_code == 200, resp.text
+    descriptions = [row["description"] for row in resp.json()["rows"]]
+    assert descriptions == ["Earn payout"]
+
+
+def test_paired_any_is_the_default_and_returns_everything(
+    seeded_web_db: sqlite3.Connection, web_client_factory
+) -> None:
+    _pair_two_rows(seeded_web_db)
+    client: TestClient = web_client_factory()
+
+    default = client.get("/api/transactions", params={"date_from": "2009-01-01"})
+    explicit = client.get(
+        "/api/transactions", params={"paired": "any", "date_from": "2009-01-01"}
+    )
+
+    assert default.status_code == 200 and explicit.status_code == 200
+    assert len(default.json()["rows"]) == len(explicit.json()["rows"])
+    assert len(default.json()["rows"]) > 1
+
+
+def test_paired_rejects_unknown_value(
+    seeded_web_db: sqlite3.Connection, web_client_factory
+) -> None:
+    client: TestClient = web_client_factory()
+
+    resp = client.get("/api/transactions", params={"paired": "maybe"})
+
+    assert resp.status_code == 422

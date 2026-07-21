@@ -25,6 +25,9 @@ app.add_typer(report_app, name="report")
 sync_app = typer.Typer(help="Mirror the ledger out to external read-only surfaces.")
 app.add_typer(sync_app, name="sync")
 
+rates_app = typer.Typer(help="Exchange-rate maintenance (ADR-005, ADR-013).")
+app.add_typer(rates_app, name="rates")
+
 
 @app.callback()
 def _root() -> None:
@@ -476,6 +479,32 @@ def _resolve_report_format(json_flag: bool, csv_flag: bool) -> str:
     if csv_flag:
         return "csv"
     return "table"
+
+
+@rates_app.command("rebuild-realized")
+def rates_rebuild_realized() -> None:
+    """Recompute realized VES cost-basis rates from Binance P2P sells (ADR-013).
+
+    Binance ingest already does this on every run. Use this for the one-time
+    backfill over existing P2P history, or to recover after a P2P transaction
+    is edited or deleted.
+
+    Idempotent — it derives from the fills and upserts, so re-running is safe
+    and no transaction rows are touched. Because ``amount_usd`` is computed on
+    every read, the next report reflects the new rates immediately.
+    """
+    from finances import config as _config
+    from finances.domain import realized_rates
+
+    conn = get_connection(_config.DB_PATH)
+    apply_migrations(conn)
+    try:
+        written = realized_rates.rebuild(conn)
+        conn.commit()
+    finally:
+        conn.close()
+
+    typer.echo(f"realized rates rebuilt: {written} day(s)")
 
 
 @report_app.command("balances")

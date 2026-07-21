@@ -349,15 +349,19 @@ def test_v_account_balances_exists(db_conn: sqlite3.Connection, seeded) -> None:
     assert by_name["Provincial"]["balance_native"] == pytest.approx(1000.00)
 
 
-def test_v_transactions_usd_exists(db_conn: sqlite3.Connection, seeded) -> None:
-    rows = db_conn.execute(
-        "SELECT transaction_id, kind, amount_usd, rate_source FROM v_transactions_usd"
-    ).fetchall()
-    assert len(rows) >= 2
-    # USDT/USDC/USD rows should resolve to native USD with rate_source='native_usd'
-    assert any(r["rate_source"] == "native_usd" for r in rows)
-    # At least one row should be VES resolved via the rates table.
-    assert any(r["rate_source"] == "rates_table" and r["amount_usd"] is not None for r in rows)
+def test_v_transactions_usd_is_dropped(db_conn: sqlite3.Connection, seeded) -> None:
+    """The view computed amount_usd inline with its own rate logic (rule-005).
+
+    It could not express the realized cost-basis tier (ADR-013) and would have
+    silently disagreed with the resolver, so migration 014 removes it.
+    ``finances.domain.rates.resolve`` is now the sole USD authority.
+    """
+    row = db_conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'view' AND name = ?",
+        ("v_transactions_usd",),
+    ).fetchone()
+
+    assert row is None, "v_transactions_usd must not exist; the resolver is authoritative"
 
 
 def test_v_monthly_summary_excludes_transfers(db_conn: sqlite3.Connection, seeded) -> None:

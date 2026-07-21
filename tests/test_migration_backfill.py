@@ -481,7 +481,7 @@ def test_provincial_rows_carry_user_rate_from_tasa_usdt(
     in_memory_db: sqlite3.Connection, backfill_data_dir: Path
 ) -> None:
     """Tasa USDT from the legacy Provincial CSV becomes the Provincial row
-    ``user_rate`` so ``v_transactions_usd`` can render USD correctly."""
+    ``user_rate`` so the consolidated report can render USD correctly."""
     from finances.migration.backfill import run_backfill
 
     run_backfill(in_memory_db, backfill_data_dir)

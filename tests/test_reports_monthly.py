@@ -405,13 +405,20 @@ def test_build_report_needs_review_excluded_from_totals(
 
 
 # ---------------------------------------------------------------------------
-# Invariant: sum of USD contributions == sum from v_transactions_usd view
+# Invariant: monthly USD contributions == consolidated report for the month.
+#
+# This replaces an older equality check against the v_transactions_usd SQL
+# view, dropped in migration 014 (ADR-013) because it computed amount_usd
+# inline with its own rate logic. Both sides of this assertion now run through
+# finances.domain.rates.resolve, so the cross-check compares two independent
+# report builders rather than two competing rate implementations.
 # ---------------------------------------------------------------------------
 
 
-def test_build_report_sum_matches_v_transactions_usd(
+def test_build_report_sum_matches_consolidated_report(
     in_memory_db: sqlite3.Connection,
 ) -> None:
+    from finances.reports import consolidated_usd
     from finances.reports.monthly import build_report
 
     acc_usd = _insert_account(in_memory_db, "USD Bank", currency="USD")
@@ -455,21 +462,22 @@ def test_build_report_sum_matches_v_transactions_usd(
         occurred_at=_dt(2026, 2, 20), source_ref="v-5",  # uses P2P
     )
 
-    row = in_memory_db.execute(
-        """
-        SELECT SUM(CAST(amount_usd AS REAL)) AS s FROM v_transactions_usd
-        WHERE kind <> 'transfer' AND strftime('%Y-%m', occurred_at) = ?
-        """,
-        ("2026-02",),
-    ).fetchone()
-    view_sum = Decimal(str(row["s"] or "0"))
+    consolidated = consolidated_usd.build_report(in_memory_db)
+    consolidated_sum = sum(
+        (
+            r.amount_usd
+            for r in consolidated.rows
+            if r.amount_usd is not None and r.occurred_at.strftime("%Y-%m") == "2026-02"
+        ),
+        Decimal("0"),
+    )
 
     report = build_report(in_memory_db, month="2026-02")
     report_sum = sum(
         (r.total_usd + r.fallback_usd for r in report.rows), Decimal("0")
     )
 
-    assert abs(report_sum - view_sum) < Decimal("0.01")
+    assert abs(report_sum - consolidated_sum) < Decimal("0.01")
 
 
 # ---------------------------------------------------------------------------
