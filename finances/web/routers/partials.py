@@ -357,6 +357,40 @@ def transactions_pair_candidates_partial(
     )
 
 
+@router.post("/transactions/{sell_id}/pair/{deposit_id}", include_in_schema=False)
+def transactions_pair_confirm_partial(
+    request: Request,
+    sell_id: int,
+    deposit_id: int,
+    f: TransactionsFilter = Depends(filter_from_query),
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Pair a sell with a hand-picked deposit, then refresh the list.
+
+    Delegates to confirm_pair → create_transfer mode 3, the single write
+    path for transfer_id (rule-002). Distinct from the triage confirm
+    route only in what it swaps back.
+    """
+    try:
+        confirm_pair(conn, deposit_id=deposit_id, sell_id=sell_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    page = query_transactions(conn, f)
+    templates = request.app.state.templates
+    response = templates.TemplateResponse(
+        request,
+        "partials/transactions_list.html",
+        {"page": page, "filter": page.filter},
+    )
+    response.headers["HX-Trigger"] = _hx_trigger_json(
+        "closeModal", toast_message="Paired"
+    )
+    return response
+
+
 @router.post("/transactions/{txn_id}/edit", include_in_schema=False)
 def transactions_edit_partial(
     request: Request,
