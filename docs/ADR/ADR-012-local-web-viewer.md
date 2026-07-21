@@ -86,3 +86,42 @@ The dashboard's "Net worth (USD)" tile aggregates balances across currencies usi
 **Injected Constraint:** Any code under `finances/web/` that performs a write must call existing functions in `finances/db/repos/*` or `finances/domain/*`. The viewer may not execute SQL `INSERT`/`UPDATE`/`DELETE` directly, may not implement its own categorization, rate-resolution, or transfer-pairing logic, and may not bypass Pydantic validation at the request boundary. The `needs_review` flag on transactions is derived from `rates.resolve` and must be recomputed on every transaction write — the viewer must not expose a manual toggle. The viewer is a thin HTTP/HTML wrapper over the existing domain; it adds no business logic of its own.
 
 The viewer must default to binding `127.0.0.1`. Binding `0.0.0.0` requires a non-empty bearer token enforced via middleware before any route handler runs.
+
+## Amendment — 2026-07-21: triage ordering, navigation, and durable parking
+
+**Status:** Accepted. Supersedes the queue-ordering and action-row clauses of
+§50 for the `/triage` surface only. The rest of ADR-012 stands.
+
+**Context.** The original decision optimised for auditability: strict
+oldest-issue-first ordering, and a skip that was deliberately session-local so
+no deferral could silently become permanent. In practice the queue holds 243
+items, of which only 25 need nothing but a category. Chronological interleaving
+forces the owner to context-switch between one-click rows and rows requiring
+recall of an eight-month-old exchange rate, and the session-local skip is erased
+by the Stop-server button that is the designed way to end a session.
+
+**Decision.**
+
+1. **Ordering** is by triage difficulty first, then chronology:
+   `(bucket, occurred_at, item_id)` where bucket 0 = missing category only,
+   1 = missing a rate, 2 = pair proposal. Within a bucket the original
+   oldest-first rule is preserved. `item_id` is a mandatory tiebreak, not a
+   preference: 204 of 243 live items share a timestamp, so without it the queue
+   order is undefined.
+2. **Deferral is durable.** `Skip → bottom of session queue` is replaced by
+   `Park`, backed by a `transactions.parked` column. Parked items leave the main
+   run and collect in a labelled group. Parking is a triage-queue grouping only;
+   it does not alter `needs_review` and does not remove rows from any
+   needs-review count.
+3. **The action row** becomes `[← →] [Park] [Cancel] [Save & next]`. Saving
+   marks an item done in place instead of removing it, so navigation indices
+   stay stable.
+
+**Consequences.** Chronological reading of the queue is no longer the default;
+`/transactions` remains the date-ordered surface. A parked item can outlive the
+condition that caused it to be parked, so the parked group shows its live issue
+badges. Ordering is now reproducible across renders, which is a prerequisite for
+the `N of M` counter and prev/next navigation.
+
+**References.** `docs/superpowers/specs/2026-07-21-triage-speedrun-design.md`
+§3.2, §4, §5.3, §5.5.

@@ -745,13 +745,13 @@
 **Technical Boundary:**
 
 - `services/triage.py` builds `TriageQueue` from `transactions WHERE needs_review=1`, `transactions WHERE category_id IS NULL` (excluding transfer/adjustment), and `BankAnchoredP2pPairing.match()` proposals. A txn with both rate and category issues appears once with both badges.
-- Skip-store is a per-app in-memory `set[str]` (session-local, intentionally not persisted).
+- Deferral is durable, backed by the `transactions.parked` column (migration 014). The former in-memory skip store is removed. See ADR-012 Amendment 2026-07-21.
 - `GET /triage`, `GET /api/triage[?type_filter=rate|category|pair]`, `POST /api/transfers`, plus six HTMX endpoints (queue, txn modal, txn edit, pair modal, pair confirm, skip).
 - Triage variant of the modal posts to `/_partial/triage/{id}/edit` and sets `HX-Trigger: closeModal, advanceQueue`.
 - Pair-confirm calls `transfers.create_transfer(conn, anchor_transaction_id=deposit_id, counterpart_transaction_id=sell_id, ...)` — no parallel SQL.
 - Cards on `/triage` use a `triage_modal_url` override on the canonical card so the Save & next modal opens; `/transactions` cards still use the Phase 3 modal (regression-tested).
 
-**Verification Criteria:** Queue is oldest-first with type-filter chips and unfiltered counts; merged items render once with two badges; pair-confirm creates a transfer (both legs share the new `transfer_id`); skip pushes items to the bottom of the queue; integrity warnings surface for any `transfer_id` with only one leg; full suite green.
+**Verification Criteria:** Queue is ordered `(bucket, occurred_at, item_id)` — category-only items first, then rate-missing, then pairs — with type-filter chips and unfiltered counts; merged items render once with two badges; pair-confirm creates a transfer (both legs share the new `transfer_id`); Park removes an item from the main run durably and it reappears in the Parked group after a server restart; integrity warnings surface for any `transfer_id` with only one leg; full suite green.
 
 ---
 
