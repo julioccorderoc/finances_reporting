@@ -200,3 +200,17 @@ def test_transactions_page_renders_saved_views_section(
     assert resp.status_code == 200
     assert 'id="saved-views"' in resp.text
     assert "Groceries VES" in resp.text
+
+
+def test_saved_view_round_trips_the_paired_filter(
+    web_db: sqlite3.Connection, web_client_factory
+) -> None:
+    """paired rides the stored query_string — no schema or repo change."""
+    client: TestClient = web_client_factory()
+
+    created = _create_view(client, "Unpaired P2P sells", "sources=binance&paired=no")
+    assert created.status_code == 200, created.text
+
+    resp = client.get("/_partial/views")
+    assert resp.status_code == 200, resp.text
+    assert any("paired=no" in href for href in _chip_hrefs(resp.text)), resp.text
