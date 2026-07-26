@@ -19,6 +19,8 @@ from finances.domain.models import Rate
 from finances.web.services.rates_view import rates_for_day
 
 DAY = date(2026, 4, 23)
+AMOUNT = Decimal("20000.00")
+CURRENCY = "VES"
 
 
 def _seed(conn: sqlite3.Connection, source: str, day: date, rate: str,
@@ -30,10 +32,27 @@ def _seed(conn: sqlite3.Connection, source: str, day: date, rate: str,
     )
 
 
+def _series(
+    conn: sqlite3.Connection,
+    winning_source: str,
+    *,
+    amount_native: Decimal = AMOUNT,
+    currency: str = CURRENCY,
+):
+    """Call the service for ``DAY`` with a default priced amount."""
+    return rates_for_day(
+        conn,
+        day=DAY,
+        winning_source=winning_source,
+        amount_native=amount_native,
+        currency=currency,
+    )
+
+
 def test_returns_three_series_in_resolver_priority_order(
     web_db: sqlite3.Connection,
 ) -> None:
-    series = rates_for_day(web_db, day=DAY, winning_source="bcv")
+    series = _series(web_db, "bcv")
 
     assert [s.source for s in series] == [
         "binance_p2p_realized",
@@ -46,7 +65,7 @@ def test_missing_series_renders_as_none_not_error(
     web_db: sqlite3.Connection,
 ) -> None:
     """binance_p2p_realized has no rows on this base — that is expected."""
-    series = rates_for_day(web_db, day=DAY, winning_source="needs_review")
+    series = _series(web_db, "needs_review")
     realized = series[0]
 
     assert realized.rate is None
@@ -58,7 +77,7 @@ def test_missing_series_renders_as_none_not_error(
 def test_exact_day_match_is_not_carry(web_db: sqlite3.Connection) -> None:
     _seed(web_db, "binance_p2p_median", DAY, "483.31")
 
-    series = rates_for_day(web_db, day=DAY, winning_source="binance_p2p_median")
+    series = _series(web_db, "binance_p2p_median")
     p2p = series[1]
 
     assert p2p.rate == Decimal("483.31")
@@ -70,7 +89,7 @@ def test_exact_day_match_is_not_carry(web_db: sqlite3.Connection) -> None:
 def test_older_rate_is_carried_and_flagged(web_db: sqlite3.Connection) -> None:
     _seed(web_db, "binance_p2p_median", date(2026, 4, 21), "481.00")
 
-    series = rates_for_day(web_db, day=DAY, winning_source="binance_p2p_median_carry")
+    series = _series(web_db, "binance_p2p_median_carry")
     p2p = series[1]
 
     assert p2p.rate == Decimal("481.00")
@@ -84,14 +103,14 @@ def test_carry_suffix_still_matches_the_winner(
     """'bcv_carry' must mark the 'bcv' series, not fall through to no winner."""
     _seed(web_db, "bcv", date(2026, 4, 20), "36.55", base="USD")
 
-    series = rates_for_day(web_db, day=DAY, winning_source="bcv_carry")
+    series = _series(web_db, "bcv_carry")
 
     assert [s.is_winner for s in series] == [False, False, True]
 
 
 def test_bcv_is_flagged_reference_only(web_db: sqlite3.Connection) -> None:
     """ADR-005: BCV is never a headline figure, even when it is the winner."""
-    series = rates_for_day(web_db, day=DAY, winning_source="bcv")
+    series = _series(web_db, "bcv")
 
     assert [s.is_reference_only for s in series] == [False, False, True]
 
@@ -103,7 +122,7 @@ def test_non_series_winners_mark_nothing(
     """user_rate / native_usd / needs_review are not table-backed series."""
     _seed(web_db, "binance_p2p_median", DAY, "483.31")
 
-    series = rates_for_day(web_db, day=DAY, winning_source=source)
+    series = _series(web_db, source)
 
     assert not any(s.is_winner for s in series)
 
@@ -114,9 +133,64 @@ def test_bcv_series_reads_usd_ves_not_usdt_ves(
     """The BCV pair is USD/VES; a USDT/VES bcv row must not be picked up."""
     _seed(web_db, "bcv", DAY, "99.99", base="USDT")
 
-    series = rates_for_day(web_db, day=DAY, winning_source="bcv")
+    series = _series(web_db, "bcv")
 
     assert series[2].rate is None
+
+
+# ---------------------------------------------------------------------------
+# Per-tier USD pricing: what the amount WOULD be worth under each rate.
+# ---------------------------------------------------------------------------
+
+
+def test_each_series_is_priced_in_usd_at_its_own_rate(
+    web_db: sqlite3.Connection,
+) -> None:
+    """The panel answers "what if?" for the tiers that did NOT win."""
+    _seed(web_db, "binance_p2p_realized", DAY, "500.00")
+    _seed(web_db, "binance_p2p_median", DAY, "400.00")
+    _seed(web_db, "bcv", DAY, "250.00", base="USD")
+
+    series = _series(web_db, "binance_p2p_realized")
+
+    assert [s.amount_usd for s in series] == [
+        Decimal("40.00"),
+        Decimal("50.00"),
+        Decimal("80.00"),
+    ]
+
+
+def test_a_missing_series_has_no_usd_figure(web_db: sqlite3.Connection) -> None:
+    _seed(web_db, "binance_p2p_median", DAY, "400.00")
+
+    series = _series(web_db, "binance_p2p_median")
+
+    assert series[0].rate is None
+    assert series[0].amount_usd is None
+    assert series[1].amount_usd == Decimal("50.00")
+
+
+def test_usd_keeps_the_sign_of_the_native_amount(
+    web_db: sqlite3.Connection,
+) -> None:
+    """Expenses are negative (project_expense_sign_convention)."""
+    _seed(web_db, "bcv", DAY, "250.00", base="USD")
+
+    series = _series(web_db, "bcv", amount_native=Decimal("-20000.00"))
+
+    assert series[2].amount_usd == Decimal("-80.00")
+
+
+def test_a_non_ves_amount_is_not_priced_by_a_ves_series(
+    web_db: sqlite3.Connection,
+) -> None:
+    """Dividing a COP amount by a VES/USDT rate would invent a number."""
+    _seed(web_db, "binance_p2p_median", DAY, "400.00")
+
+    series = _series(web_db, "needs_review", currency="COP")
+
+    assert series[1].rate == Decimal("400.00"), "the rate is still disclosed"
+    assert all(s.amount_usd is None for s in series)
 
 
 @pytest.mark.parametrize(
@@ -141,7 +215,7 @@ def test_every_resolver_tier_has_exactly_one_modal_winner(
     """
     winning_source = source + suffix
 
-    series = rates_for_day(web_db, day=DAY, winning_source=winning_source)
+    series = _series(web_db, winning_source)
 
     winners = [s for s in series if s.is_winner]
     assert len(winners) == 1, (

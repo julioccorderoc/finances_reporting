@@ -78,6 +78,32 @@ def panel_db(web_db: sqlite3.Connection) -> sqlite3.Connection:
     return web_db
 
 
+@pytest.fixture
+def priced_panel_db(panel_db: sqlite3.Connection) -> sqlite3.Connection:
+    """All three tiers present, each a different (round) number of dollars."""
+    rates_repo.upsert(
+        panel_db,
+        Rate(as_of_date=DAY, base="USDT", quote="VES",
+             rate=Decimal("500.00"), source="binance_p2p_realized"),
+    )
+    rates_repo.upsert(
+        panel_db,
+        Rate(as_of_date=DAY, base="USDT", quote="VES",
+             rate=Decimal("400.00"), source="binance_p2p_median"),
+    )
+    rates_repo.upsert(
+        panel_db,
+        Rate(as_of_date=DAY, base="USD", quote="VES",
+             rate=Decimal("250.00"), source="bcv"),
+    )
+    return panel_db
+
+
+def _row(html: str, source: str) -> str:
+    """The <dd> for one rate series."""
+    return html.split(f'data-rate-row="{source}"', 1)[1].split("</dd>", 1)[0]
+
+
 def test_panel_lists_all_three_series(
     panel_db: sqlite3.Connection, web_client_factory
 ) -> None:
@@ -132,6 +158,49 @@ def test_native_usd_row_has_no_panel(
     html = client.get("/_partial/triage/2/modal").text
 
     assert "data-rate-panel" not in html
+
+
+def test_every_priced_row_shows_its_own_dollar_figure(
+    priced_panel_db: sqlite3.Connection, web_client_factory
+) -> None:
+    """20,000 VES is $40 at 500, $50 at 400, $80 at 250 — show all three."""
+    client: TestClient = web_client_factory()
+    html = client.get("/_partial/triage/1/modal").text
+
+    assert "$40.00" in _row(html, "binance_p2p_realized")
+    assert "$50.00" in _row(html, "binance_p2p_median")
+    assert "$80.00" in _row(html, "bcv")
+
+
+def test_each_dollar_figure_is_tagged_for_its_own_row(
+    priced_panel_db: sqlite3.Connection, web_client_factory
+) -> None:
+    client: TestClient = web_client_factory()
+    html = client.get("/_partial/triage/1/modal").text
+
+    assert html.count("data-rate-usd") == 3
+
+
+def test_an_unpriced_row_shows_no_dollar_figure(
+    panel_db: sqlite3.Connection, web_client_factory
+) -> None:
+    """Only BCV exists in this fixture; realized must not invent a $."""
+    client: TestClient = web_client_factory()
+    html = client.get("/_partial/triage/1/modal").text
+
+    assert "$" not in _row(html, "binance_p2p_realized")
+
+
+def test_the_winner_row_is_still_the_one_tied_to_the_header_figure(
+    priced_panel_db: sqlite3.Connection, web_client_factory
+) -> None:
+    """Realized wins the resolver chain; its $ must match the header's."""
+    client: TestClient = web_client_factory()
+    html = client.get("/_partial/triage/1/modal").text
+
+    realized = _row(html, "binance_p2p_realized")
+    assert "data-rate-winner" in realized
+    assert "$40.00" in realized
 
 
 def test_panel_does_not_disturb_existing_modal_contract(
