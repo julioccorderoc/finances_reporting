@@ -91,6 +91,21 @@ class TriageQueue(BaseModel):
     parked_items: list[TriageItem]
     parked_count: int
 
+    @property
+    def total(self) -> int:
+        """Size of the UNFILTERED live queue.
+
+        ``items`` is the filtered list, so it cannot answer "how big is
+        the queue" once a chip is active — that is what made the "All"
+        chip shrink to the filtered count. ``counts`` is per-type on the
+        unfiltered set, so its sum is the honest total.
+
+        Parked rows are excluded, same as ``items`` and ``counts``:
+        parking is a durable "not now" and the parked group carries its
+        own ``parked_count``.
+        """
+        return sum(self.counts.values())
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers

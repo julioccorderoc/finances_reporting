@@ -8,13 +8,55 @@
                     save/park/unpark actions triggered from inside this
                     partial can carry it forward (Task 4 §3).
 
-   The bucket-count header lives INSIDE this partial (not the page shell)
-   so it stays truthful across every htmx swap that targets #triage-queue:
-   it is built from queue.bucket_counts, which is always computed on the
-   UNFILTERED item set, so the numbers don't lie when a type-filter chip
-   is active.
+   The filter chips and every count live INSIDE this partial (not the page
+   shell) so they stay truthful across every htmx swap that targets
+   #triage-queue — chip click, unpark, and the deferred queueDirty refresh
+   fired when a triage run ends. A count rendered in the shell is written
+   once, by the full page load, and is stale from the first save onward.
+
+   The per-type counts come from queue.counts and the "All" count from
+   queue.total, both computed on the UNFILTERED item set, so the chips
+   agree with each other while a type-filter chip is active. Only the
+   "Showing N of M" line reflects what is actually on screen.
+
+   data-active is display-only. The filter for the deferred refresh
+   travels in the queueDirty payload from the server; nothing reads it
+   back off the DOM (ADR-012 Amendment 2026-07-26 §3).
 #}
+<nav class="flex flex-wrap gap-2 mb-4 text-sm" data-triage-filter>
+  {% set chip_def = [
+      ("all", "All", queue.total),
+      ("rate", "Rates", queue.counts.get('rate', 0)),
+      ("category", "Categories", queue.counts.get('category', 0)),
+      ("pair", "Pairs", queue.counts.get('pair', 0)),
+  ] %}
+  {% for value, label, n in chip_def %}
+    {% set is_active = (active_filter == value) or (active_filter is none and value == 'all') %}
+    {# Stable id: the chip that fires the swap is inside the swapped
+       region, so htmx destroys it mid-click. htmx restores focus to the
+       element carrying the same id, which keeps keyboard use working. #}
+    <button
+      type="button"
+      id="triage-chip-{{ value }}"
+      class="px-3 py-1 border rounded
+             {% if is_active %}bg-slate-900 text-white border-slate-900{% else %}bg-white text-slate-700 border-slate-300 hover:bg-slate-50{% endif %}"
+      data-filter-chip="{{ value }}"
+      data-active="{{ 'true' if is_active else 'false' }}"
+      hx-get="/_partial/triage/queue{% if value != 'all' %}?type_filter={{ value }}{% endif %}"
+      hx-target="#triage-queue"
+      hx-push-url="true"
+      hx-swap="innerHTML"
+    >
+      {{ label }} ({{ n }})
+    </button>
+  {% endfor %}
+</nav>
 <div class="flex flex-wrap gap-x-4 gap-y-1 mb-3 text-sm text-slate-600" data-triage-bucket-header>
+  {% if active_filter %}
+    <span>Showing {{ queue.items | length }} of {{ queue.total }} items</span>
+  {% else %}
+    <span>{{ queue.total }} items</span>
+  {% endif %}
   <span>Ready to categorize &middot; {{ queue.bucket_counts.get(0, 0) }}</span>
   <span>Missing a rate &middot; {{ queue.bucket_counts.get(1, 0) }}</span>
   <span>Pairs &middot; {{ queue.bucket_counts.get(2, 0) }}</span>
