@@ -17,6 +17,7 @@ Per rule-012, this module reuses existing domain primitives:
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Sequence
 from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
@@ -374,6 +375,71 @@ def build_queue(
         parked_items=parked_items,
         parked_count=len(parked_items),
     )
+
+
+def next_item_after(
+    before: Sequence[TriageItem],
+    after: Sequence[TriageItem],
+    resolved_id: str,
+) -> TriageItem | None:
+    """Pick the item that now occupies the resolved item's slot.
+
+    Hold-position advance (ADR-012 Amendment 2026-07-26): the owner keeps
+    working down the queue from where they were, instead of being thrown
+    back to the top. ``before`` is the queue as the owner saw it,
+    ``after`` the same queue rebuilt post-write; both must carry the same
+    ``type_filter`` or the successor can be an item the active filter
+    chip hides.
+
+    Three rules, in order:
+
+    * The resolved item is never the answer. A partial fix (saving a rate
+      on a row that still lacks a category) leaves the row queued, and
+      re-opening the modal the owner just dismissed reads as a failed
+      save. The row keeps its place for a later pass.
+    * Otherwise the answer is the nearest item that was BELOW the
+      resolved one and is still queued.
+    * Resolving the bottom row has nothing below it, so it steps up to
+      the nearest surviving item above instead.
+
+    Selection is by identity, never by index. One write can remove more
+    than one row — confirming a pair promotes both legs to
+    ``kind='transfer'``, evicting them from the CATEGORY surface, and
+    legs (bucket 0/1) always sort above the pair (bucket 2). Carrying the
+    ``before`` index into ``after`` would overshoot by one per evicted
+    row and silently skip the proposals in between.
+
+    The returned item is the ``after`` instance, so the modal renders
+    post-write state rather than the snapshot.
+
+    Returns ``None`` when nothing is left to advance to, or when
+    ``resolved_id`` was not in ``before`` (the caller then closes the
+    modal rather than guessing).
+    """
+    index = next(
+        (n for n, item in enumerate(before) if item.item_id == resolved_id),
+        None,
+    )
+    if index is None:
+        return None
+
+    surviving = {
+        item.item_id: item for item in after if item.item_id != resolved_id
+    }
+    if not surviving:
+        return None
+
+    for item in before[index + 1 :]:
+        if item.item_id in surviving:
+            return surviving[item.item_id]
+
+    for item in reversed(before[:index]):
+        if item.item_id in surviving:
+            return surviving[item.item_id]
+
+    # Everything the owner could see is gone, but the queue is not empty
+    # (a write can surface items that were not proposable before).
+    return next(iter(surviving.values()))
 
 
 # ---------------------------------------------------------------------------

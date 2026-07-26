@@ -20,36 +20,79 @@
   </head>
   <body
     class="min-h-screen bg-slate-50 text-slate-900"
-    x-data="{ advanceNext: false }"
-    @close-modal.window="document.getElementById('tx-modal-host').replaceChildren()"
-    @htmx:after-on-load.window="
-      const raw = $event.detail && $event.detail.xhr && $event.detail.xhr.getResponseHeader('HX-Trigger');
-      if (raw) {
-        let names = [];
-        let toast = null;
+    {# queueDirty: a triage run mutates rows while the modal stays mounted,
+       so the list behind it goes stale by design (ADR-012 Amendment
+       2026-07-26). It reconciles ONCE, when the run ends — re-rendering
+       200+ cards per save is what made the page visibly repaint. #}
+    x-data="{
+      queueDirty: false,
+      queueFilter: null,
+      modalDismissed: false,
+      triggersFrom(xhr) {
+        const raw = xhr && xhr.getResponseHeader('HX-Trigger');
+        if (!raw) return null;
         try {
           const parsed = JSON.parse(raw);
-          names = Object.keys(parsed);
-          toast = parsed.toast || null;
+          return { names: Object.keys(parsed), toast: parsed.toast || null, payload: parsed };
         } catch (err) {
-          names = raw.split(',').map(s => s.trim());
+          return { names: raw.split(',').map(s => s.trim()), toast: null, payload: {} };
         }
-        if (names.includes('closeModal')) {
-          window.dispatchEvent(new CustomEvent('close-modal'));
-        }
-        if (names.includes('advanceQueue')) {
-          advanceNext = true;
-        }
-        if (toast) {
-          window.dispatchEvent(new CustomEvent('show-toast', { detail: toast }));
-        }
+      },
+      armQueueRefresh(t) {
+        if (!t || !t.names.includes('queueDirty')) return;
+        this.queueDirty = true;
+        this.queueFilter = (t.payload.queueDirty && t.payload.queueDirty.typeFilter) || null;
+      },
+      refreshQueue() {
+        if (!this.queueDirty) return;
+        this.queueDirty = false;
+        if (!document.getElementById('triage-queue')) return;
+        const query = this.queueFilter ? ('?type_filter=' + this.queueFilter) : '';
+        htmx.ajax('GET', '/_partial/triage/queue' + query, { target: '#triage-queue', swap: 'innerHTML' });
+      },
+      showToast(t) {
+        if (t && t.toast) window.dispatchEvent(new CustomEvent('show-toast', { detail: t.toast }));
+      }
+    }"
+    @close-modal.window="
+      modalDismissed = true;
+      document.getElementById('tx-modal-host').replaceChildren();
+      refreshQueue();
+    "
+    {# A modal-open request means the owner wants a dialog again. #}
+    @htmx:before-request.window="
+      const path = $event.detail && $event.detail.requestConfig && $event.detail.requestConfig.path;
+      if (typeof path === 'string' && path.indexOf('/modal') !== -1) {
+        modalDismissed = false;
       }
     "
-    @htmx:after-settle.window="
-      if (advanceNext && $event.detail.target && $event.detail.target.id === 'triage-queue') {
-        advanceNext = false;
-        const next = document.querySelector('#triage-queue [hx-get*=\'/modal\']');
-        if (next) next.click();
+    {# Escape/Cancel during an in-flight save must stay dismissed: the
+       response is the NEXT modal, and swapping it in would resurrect a
+       dialog the owner already closed, showing a different transaction.
+       htmx fires NOTHING after a suppressed swap — no afterOnLoad, no
+       afterRequest — so this branch has to finish the job itself, or the
+       write's queueDirty and toast are silently dropped. #}
+    @htmx:before-swap.window="
+      if (modalDismissed && $event.detail.target && $event.detail.target.id === 'tx-modal-host') {
+        $event.detail.shouldSwap = false;
+        const t = triggersFrom($event.detail.xhr);
+        armQueueRefresh(t);
+        refreshQueue();
+        showToast(t);
+      }
+    "
+    @htmx:after-on-load.window="
+      const t = triggersFrom($event.detail && $event.detail.xhr);
+      if (t) {
+        {# Arm BEFORE closing: an exhausted queue sends both, and the
+           close handler is what fires the one refresh. The filter comes
+           from the server — the chips render outside the swapped region
+           and their data-active goes stale the moment one is clicked. #}
+        armQueueRefresh(t);
+        if (t.names.includes('closeModal')) {
+          window.dispatchEvent(new CustomEvent('close-modal'));
+        }
+        showToast(t);
       }
     "
     @htmx:response-error.window="
