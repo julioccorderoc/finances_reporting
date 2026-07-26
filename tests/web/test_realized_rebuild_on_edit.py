@@ -209,15 +209,20 @@ def test_the_edit_reprices_bolivar_spending_immediately(
     """The point of the fix: no waiting for the next ingest.
 
     7500 VES at the old 50 basis is 150 USD; at the rebuilt 75 it is 100.
+
+    The spend is two days after the fill, so the resolver reports the
+    carried-forward label (ADR-013 §3) rather than the bare source.
     """
+    carried = REALIZED_SOURCE + "_carry"
+
     before_rate, before_source = _spend_rate(fills_db)
-    assert before_source == REALIZED_SOURCE
+    assert before_source == carried
     assert before_rate == Decimal("50")
 
     apply_edit(fills_db, txn_id=_txn_id(fills_db, "p2p:b"), req=_rate_edit("100"))
 
     after_rate, after_source = _spend_rate(fills_db)
-    assert after_source == REALIZED_SOURCE
+    assert after_source == carried
     assert after_rate == Decimal("75")
 
 
