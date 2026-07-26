@@ -18,6 +18,7 @@ arrow simply points at that item's existing modal URL, and renders
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -239,10 +240,29 @@ def nav_db(web_db: sqlite3.Connection) -> sqlite3.Connection:
 
 
 def _nav_button(html: str, which: str) -> str:
+    """Attribute text of the arrow button itself.
+
+    The marker also appears inside the keydown handler's
+    ``[data-nav-prev]:not([disabled])`` selector, which sits earlier in
+    the document, so match only an occurrence that is actually inside a
+    ``<button`` tag.
+    """
     marker = f"data-nav-{which}"
     assert marker in html, f"{which} arrow not rendered"
-    at = html.index(marker)
-    return html[html.rindex("<button", 0, at) : html.index(">", at)]
+
+    at = html.find(marker)
+    while at != -1:
+        start = html.rfind("<button", 0, at)
+        if start != -1 and ">" not in html[start:at]:
+            return html[start : html.index(">", at)]
+        at = html.find(marker, at + 1)
+
+    raise AssertionError(f"{which} arrow marker never appears inside a <button")
+
+
+def _is_disabled(attrs: str) -> bool:
+    """The bare ``disabled`` attribute, not Tailwind's ``disabled:`` variant."""
+    return re.search(r"\sdisabled(?=[\s>]|$)", attrs) is not None
 
 
 def _groceries_id(conn: sqlite3.Connection) -> int:
@@ -260,8 +280,8 @@ def test_a_middle_modal_offers_both_arrows(
 
     assert "/_partial/triage/1/modal" in _nav_button(body, "prev")
     assert "/_partial/triage/3/modal" in _nav_button(body, "next")
-    assert "disabled" not in _nav_button(body, "prev")
-    assert "disabled" not in _nav_button(body, "next")
+    assert not _is_disabled(_nav_button(body, "prev"))
+    assert not _is_disabled(_nav_button(body, "next"))
 
 
 def test_the_first_modal_disables_prev(
@@ -272,7 +292,7 @@ def test_the_first_modal_disables_prev(
 
     body = client.get("/_partial/triage/1/modal").text
 
-    assert "disabled" in _nav_button(body, "prev")
+    assert _is_disabled(_nav_button(body, "prev"))
     assert "/_partial/triage/2/modal" in _nav_button(body, "next")
 
 
@@ -284,7 +304,7 @@ def test_the_last_modal_disables_next(
     body = client.get("/_partial/triage/4/modal").text
 
     assert "/_partial/triage/3/modal" in _nav_button(body, "prev")
-    assert "disabled" in _nav_button(body, "next")
+    assert _is_disabled(_nav_button(body, "next"))
 
 
 def test_arrows_never_target_a_parked_row(
@@ -372,24 +392,40 @@ def test_the_advance_response_is_still_only_a_modal(
 def test_the_arrows_navigate_through_the_shared_handler(
     nav_db: sqlite3.Connection, web_client_factory
 ) -> None:
+    """Pins the JS quoting, not just the handler name.
+
+    ``{{ url | tojson }}`` emits double quotes, which terminate the
+    double-quoted ``@click`` attribute and truncate the expression to
+    ``navigateModal(`` — Alpine then throws SyntaxError at runtime while
+    a substring assertion on "navigateModal" still passes.
+    """
     client: TestClient = web_client_factory()
 
     body = client.get("/_partial/triage/2/modal").text
 
-    assert "navigateModal" in _nav_button(body, "prev")
-    assert "navigateModal" in _nav_button(body, "next")
+    assert "navigateModal('/_partial/triage/1/modal')" in _nav_button(body, "prev")
+    assert "navigateModal('/_partial/triage/3/modal')" in _nav_button(body, "next")
+    assert '"' not in _nav_button(body, "prev").split("@click=", 1)[1][1:].split(
+        '"', 1
+    )[0]
 
 
-def test_arrow_keys_are_bound(
+def test_arrow_keys_click_the_arrow_buttons(
     nav_db: sqlite3.Connection, web_client_factory
 ) -> None:
-    """Keyboard parity with Enter (save) and s (park)."""
+    """Keyboard parity with Enter (save) and s (park), which also click.
+
+    Going through the button rather than re-inlining the URL means the
+    disabled state at the ends is honoured in one place.
+    """
     client: TestClient = web_client_factory()
 
     body = client.get("/_partial/triage/2/modal").text
 
     assert "ArrowLeft" in body
     assert "ArrowRight" in body
+    assert "[data-nav-prev]:not([disabled])" in body
+    assert "[data-nav-next]:not([disabled])" in body
     # The existing isTyping() guard keeps arrows out of the rate field.
     assert "isTyping" in body
 

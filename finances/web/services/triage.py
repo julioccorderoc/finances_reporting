@@ -392,6 +392,64 @@ def build_queue(
     )
 
 
+def _index_of(items: Sequence[TriageItem], item_id: str) -> int | None:
+    return next(
+        (n for n, item in enumerate(items) if item.item_id == item_id),
+        None,
+    )
+
+
+def _first_surviving(
+    before: Sequence[TriageItem],
+    surviving: dict[str, TriageItem],
+    index: int,
+    *,
+    step: int,
+) -> TriageItem | None:
+    """Scan ``before`` from ``index`` in ``step`` direction for a survivor.
+
+    Shared by the two things that move around the queue: the post-write
+    advance (which hunts past every row the write removed) and arrow
+    navigation (which walks exactly one slot, because nothing was
+    removed). Returns the ``surviving`` instance, never the ``before``
+    snapshot, so callers render post-write state.
+    """
+    n = index + step
+    while 0 <= n < len(before):
+        item_id = before[n].item_id
+        if item_id in surviving:
+            return surviving[item_id]
+        n += step
+    return None
+
+
+def neighbours_of(
+    items: Sequence[TriageItem],
+    item_id: str,
+) -> tuple[TriageItem | None, TriageItem | None]:
+    """Return ``(previous, next)`` — the items adjacent to ``item_id``.
+
+    Positional navigation for the modal's arrows (ADR-012 Amendment
+    2026-07-21). Both ends return ``None``, which the template renders as
+    a disabled arrow rather than a dead one. An ``item_id`` that is not in
+    ``items`` yields ``(None, None)``: the open modal is not part of this
+    queue, so both arrows go dead instead of guessing.
+
+    Navigation performs no write, so ``items`` is both the snapshot and
+    the live queue — unlike :func:`next_item_after`, which reconciles two
+    different queues and therefore keeps scanning past removed rows.
+    """
+    index = _index_of(items, item_id)
+    if index is None:
+        return (None, None)
+
+    surviving = {it.item_id: it for it in items if it.item_id != item_id}
+    return (
+        _first_surviving(items, surviving, index, step=-1),
+        _first_surviving(items, surviving, index, step=1),
+    )
+
+
 def next_item_after(
     before: Sequence[TriageItem],
     after: Sequence[TriageItem],
@@ -431,10 +489,7 @@ def next_item_after(
     ``resolved_id`` was not in ``before`` (the caller then closes the
     modal rather than guessing).
     """
-    index = next(
-        (n for n, item in enumerate(before) if item.item_id == resolved_id),
-        None,
-    )
+    index = _index_of(before, resolved_id)
     if index is None:
         return None
 
@@ -444,13 +499,13 @@ def next_item_after(
     if not surviving:
         return None
 
-    for item in before[index + 1 :]:
-        if item.item_id in surviving:
-            return surviving[item.item_id]
+    below = _first_surviving(before, surviving, index, step=1)
+    if below is not None:
+        return below
 
-    for item in reversed(before[:index]):
-        if item.item_id in surviving:
-            return surviving[item.item_id]
+    above = _first_surviving(before, surviving, index, step=-1)
+    if above is not None:
+        return above
 
     # Everything the owner could see is gone, but the queue is not empty
     # (a write can surface items that were not proposable before).
@@ -519,4 +574,6 @@ __all__ = [
     "TriageType",
     "build_queue",
     "confirm_pair",
+    "neighbours_of",
+    "next_item_after",
 ]
