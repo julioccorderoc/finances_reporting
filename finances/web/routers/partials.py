@@ -220,7 +220,11 @@ def _parse_optional_text(value: str | None) -> str | None:
     return s or None
 
 
-def _hx_trigger_json(*events: str, toast_message: str) -> str:
+def _hx_trigger_json(
+    *events: str,
+    toast_message: str,
+    queue_filter: str | None = None,
+) -> str:
     """Build an ``HX-Trigger`` header value: named events + a success toast.
 
     htmx accepts a JSON object in ``HX-Trigger``: each key is dispatched
@@ -228,8 +232,17 @@ def _hx_trigger_json(*events: str, toast_message: str) -> str:
     listener re-dispatches ``closeModal`` as the ``close-modal`` window
     event and ``toast`` as ``show-toast`` (WP2 toast contract; error
     toasts come from the global htmx:responseError listener instead).
+
+    ``queueDirty`` carries the active type filter as its detail rather
+    than a bare ``true``. The deferred queue refresh happens long after
+    the request that set the filter, and the filter chips render outside
+    the swapped region — their ``data-active`` is only ever written by a
+    full page load, so reading the filter back off the DOM would refresh
+    an unfiltered queue over a filtered one.
     """
     payload: dict[str, object] = {name: True for name in events}
+    if "queueDirty" in payload:
+        payload["queueDirty"] = {"typeFilter": queue_filter}
     payload["toast"] = {"level": "success", "message": toast_message}
     return json.dumps(payload)
 
@@ -466,13 +479,17 @@ def _render_queue_partial(
     """Render only the inner queue list (pairs with hx-target=#triage-queue).
 
     ``type_filter`` must be threaded through by the caller — it must NOT be
-    hardcoded to ``None`` here. Every save/park/unpark/pair-confirm swaps
-    this partial into ``#triage-queue`` while the filter-chip UI and the
-    URL (via ``hx-push-url``) may already reflect an active type filter; a
+    hardcoded to ``None`` here. The filter-chip UI and the URL (via
+    ``hx-push-url``) may already reflect an active type filter; a
     hardcoded ``None`` would silently swap in the unfiltered queue,
     contradicting both. ``active_filter`` is passed to the template so
     nested card/modal partials can carry the same filter forward on their
     own save/park/confirm actions (Task 4 §3).
+
+    Since ADR-012 Amendment 2026-07-26 the callers are the filter chips,
+    ``unpark``, and the deferred ``queueDirty`` refresh fired when the
+    modal closes. Save/park/pair-confirm no longer render the queue at
+    all — they answer with the next item's modal.
     """
     queue = build_queue(conn, type_filter=type_filter)
     templates = request.app.state.templates
@@ -603,15 +620,18 @@ def _advance_after_write(
     """
     after = build_queue(conn, type_filter=type_filter)
     nxt = next_item_after(before, after.items, resolved_id)
+    filter_value = type_filter.value if type_filter is not None else None
 
     if nxt is None:
         response = Response(content="", media_type="text/html")
         response.headers["HX-Trigger"] = _hx_trigger_json(
-            "closeModal", "queueDirty", toast_message=toast_message
+            "closeModal",
+            "queueDirty",
+            toast_message=toast_message,
+            queue_filter=filter_value,
         )
         return response
 
-    filter_value = type_filter.value if type_filter is not None else None
     if nxt.type is TriageType.PAIR and nxt.pair_proposal is not None:
         response = _render_triage_pair_modal(
             request,
@@ -626,7 +646,7 @@ def _advance_after_write(
         )
 
     response.headers["HX-Trigger"] = _hx_trigger_json(
-        "queueDirty", toast_message=toast_message
+        "queueDirty", toast_message=toast_message, queue_filter=filter_value
     )
     return response
 

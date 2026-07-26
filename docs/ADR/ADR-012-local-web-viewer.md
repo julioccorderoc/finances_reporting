@@ -152,11 +152,23 @@ DOM. Three defects followed.
 
 **Decision.**
 
-1. **Advance holds position.** After an item is resolved, the queue is rebuilt
-   and the item now occupying the resolved item's slot is opened —
-   `after[min(index_before, len(after) - 1)]`. Resolving the last item steps up
-   to the new last item; an empty queue advances to nothing. Selection reads
-   `queue.items`, so a parked row can never be an advance target.
+1. **Advance holds position, selected by identity.** After an item is resolved
+   the queue is rebuilt, and the successor is the nearest item that was *below*
+   the resolved one and is still queued; if nothing below survived, the nearest
+   surviving item *above* it. Resolving the last item therefore steps up, and an
+   empty queue advances to nothing. Selection reads `queue.items`, so a parked
+   row can never be an advance target.
+
+   Selection must not carry an index from the pre-write queue into the
+   post-write one. A single write can remove more than one row — confirming a
+   pair promotes both legs to `kind='transfer'`, evicting them from the CATEGORY
+   surface, and legs (bucket 0/1) always sort above the pair (bucket 2) — so an
+   index would overshoot by one per evicted row and silently skip the proposals
+   in between. With the list no longer refreshing mid-run, nothing on screen
+   would reveal the skip.
+
+   The successor is returned as its post-write instance, so the modal shows
+   current state rather than the snapshot.
 2. **The response body is the next modal**, not the queue. `POST .../edit`,
    `.../park` and `.../pair/{a}/{b}/confirm` target `#tx-modal-host` and return
    the next item's modal HTML — one round trip, and the overlay element is
@@ -167,6 +179,17 @@ DOM. Three defects followed.
    `#triage-queue` once, when the run ends. Consequently `closeModal` must not
    be emitted by a mid-run save — the global handler clears the modal host and
    would discard the modal the same response just delivered.
+
+   `queueDirty` carries the active type filter as its detail
+   (`{"typeFilter": "rate"}`). The refresh fires long after the request that
+   applied the filter, and the filter chips render *outside* `#triage-queue` —
+   their `data-active` is only ever written by a full page load — so the filter
+   must come from the server, never be read back off the DOM.
+
+   Because the response body is the next modal, a dismissal that races an
+   in-flight write would otherwise resurrect the dialog showing a different
+   transaction. The client tracks dismissal and suppresses a late swap into
+   `#tx-modal-host`, then runs the deferred refresh anyway.
 4. **Full re-render stays the only correct queue refresh.** Surgical DOM removal
    of the resolved card is prohibited. Resolving one item is not a local edit:
    saving a `user_rate` can invalidate an unrelated pair proposal (the

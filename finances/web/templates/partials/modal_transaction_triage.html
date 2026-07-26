@@ -1,11 +1,14 @@
 {# Triage variant of the transaction-edit modal (EPIC-025 / Phase 4).
 
    Same fields as Phase 3's modal_transaction.html, but the buttons are
-   [Save & next] [Park for later] [Cancel]. The form posts to the triage
-   edit endpoint, which returns a fresh queue partial and sets
-   ``HX-Trigger: closeModal, advanceQueue`` on the response. Park writes
-   the durable ``transactions.parked`` column (spec §5.3) instead of the
-   old session-local Skip.
+   [Save & next] [Park for later] [Cancel]. Both post to the triage
+   endpoints, which answer with the NEXT item's modal straight into
+   #tx-modal-host — this overlay is replaced in place, never unmounted
+   (ADR-012 Amendment 2026-07-26). The response carries
+   ``HX-Trigger: queueDirty`` so the list behind reconciles once, on
+   close; ``closeModal`` arrives only when the queue is exhausted. Park
+   writes the durable ``transactions.parked`` column (spec §5.3) instead
+   of the old session-local Skip.
 
    Inputs:
      txn            Transaction (Pydantic)
@@ -13,10 +16,9 @@
      categories     list[Category]
      account_name   str
      active_filter  str | None — carried into the Save/Park POST URLs so
-                    the returned queue partial stays filtered the same
-                    way the queue was when this modal was opened (Task 4
-                    §3: _render_queue_partial no longer hardcodes
-                    type_filter=None).
+                    the successor is picked from a queue filtered the
+                    same way this one was, and so the next modal's own
+                    actions keep carrying it (Task 4 §3).
 #}
 {% from "_macros.html" import rate_source_badge, needs_review_badge,
                               kind_class, format_date, format_amount %}
@@ -35,6 +37,9 @@
   @keydown.escape.window="window.dispatchEvent(new CustomEvent('close-modal'))"
   @keydown.window="
     if (isTyping($event)) return;
+    {# Key repeat would submit each modal the advance swaps in, walking
+       the queue and resolving rows the owner never saw. #}
+    if ($event.repeat) return;
     const key = $event.key;
     if (key.length === 1 && key >= '1' && key <= '8') {
       const chip = $el.querySelectorAll('[data-chip]')[Number(key) - 1];
@@ -143,6 +148,7 @@
       hx-post="/_partial/triage/{{ txn.id }}/edit{% if active_filter %}?type_filter={{ active_filter }}{% endif %}"
       hx-target="#tx-modal-host"
       hx-swap="innerHTML"
+      hx-disabled-elt="find button[type=submit]"
       x-data="{ catDirty: false, rateDirty: false, notesDirty: false }"
       x-init="$nextTick(() => { const el = $root.querySelector('[name=category_id]'); if (el) el.focus(); })"
     >

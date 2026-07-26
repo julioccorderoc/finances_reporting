@@ -152,21 +152,24 @@ def test_header_renders_counts_inside_the_swapped_region(
 # ---------------------------------------------------------------------------
 
 
-def test_save_while_a_chip_is_active_returns_a_filtered_queue(
+def test_a_queue_render_under_an_active_chip_stays_filtered(
     web_db: sqlite3.Connection, web_client_factory
 ) -> None:
-    """A save made while the "Rates" chip is active must not swap in the
-    unfiltered queue.
+    """A queue partial rendered under the "Rates" chip must stay filtered.
 
     Before the fix, ``_render_queue_partial`` hardcoded
     ``type_filter=None``, so every save/park/unpark/pair-confirm always
     swapped an unfiltered queue into ``#triage-queue`` regardless of the
     filter chip the user had active (and which ``hx-push-url`` had
-    already written into the address bar). This POSTs to the edit
-    endpoint with ``?type_filter=rate`` — the same query string a save
-    triggered from a filtered queue would carry — and asserts the
-    returned partial keeps ONLY rate-type rows: the category-only row
-    must not reappear.
+    already written into the address bar).
+
+    This used to POST to the edit endpoint. Since ADR-012 Amendment
+    2026-07-26 that endpoint answers with the next item's MODAL, so the
+    assertion below would have been satisfied by whatever text the modal
+    happened to contain — green for the wrong reason. It now exercises
+    ``unpark``, the one mutating triage route still returning a queue.
+    The modal-advance half of the filter contract is covered by
+    tests/web/test_triage_modal_advance.py.
     """
     account = accounts_repo.insert(
         web_db, Account(name="Provincial", kind=AccountKind.BANK, currency="VES")
@@ -199,22 +202,17 @@ def test_save_while_a_chip_is_active_returns_a_filtered_queue(
 
     client: TestClient = web_client_factory()
 
-    # Edit id 2 (a no-op edit — nothing set) while the Rates chip is
-    # "active", exactly like the modal form now carries ?type_filter=...
-    # forward once opened from a filtered queue.
+    # Unpark id 2 while the Rates chip is "active", exactly like the
+    # queue partial carries ?type_filter=... forward into its own action
+    # URLs once rendered from a filtered queue.
+    transactions_repo.update(web_db, id=2, parked=True)
     resp = client.post(
-        "/_partial/triage/2/edit",
+        "/_partial/triage/2/unpark",
         params={"type_filter": "rate"},
-        data={
-            "set_category": "false",
-            "category_id": "",
-            "set_user_rate": "false",
-            "user_rate": "",
-            "set_notes": "false",
-            "notes": "",
-        },
     )
     assert resp.status_code == 200, resp.text
+    # It really is the queue partial, not some other fragment.
+    assert "data-triage-queue" in resp.text
 
     # id 1 is still a RATE item and must survive the filter.
     assert "RATE-A-MARKER" in resp.text

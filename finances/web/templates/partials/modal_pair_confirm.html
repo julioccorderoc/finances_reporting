@@ -4,11 +4,14 @@
    POSTs to /_partial/triage/pair/{deposit_id}/{sell_id}/confirm which
    delegates to ``confirm_pair`` → :func:`create_transfer`.
 
+   Confirm answers with the NEXT item's modal into #tx-modal-host, same
+   as the txn modal (ADR-012 Amendment 2026-07-26).
+
    Inputs:
      proposal       PairProposal
      active_filter  str | None — carried into the Confirm POST URL so the
-                    returned queue partial stays filtered the same way
-                    the queue was when this modal was opened (Task 4 §3).
+                    successor is picked from a queue filtered the same
+                    way this one was (Task 4 §3).
 #}
 {% from "_macros.html" import format_date, format_amount, rate_source_badge %}
 
@@ -21,9 +24,12 @@
   data-deposit-id="{{ deposit.id }}"
   data-sell-id="{{ sell.id }}"
   x-data="{}"
+  {# Advancing INTO this modal replaces the element that had focus, so
+     it has to claim focus itself or the keyboard is left on <body>. #}
+  x-init="$nextTick(() => { const c = $el.querySelector('.tx-modal-card'); if (c) c.focus(); })"
   @keydown.escape.window="window.dispatchEvent(new CustomEvent('close-modal'))"
 >
-  <div class="tx-modal-card" role="dialog" aria-modal="true">
+  <div class="tx-modal-card" role="dialog" aria-modal="true" tabindex="-1">
     <header class="tx-modal-header">
       <div class="text-sm font-semibold">Confirm transfer pair</div>
       <div class="text-xs text-slate-500">

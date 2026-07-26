@@ -397,10 +397,20 @@ def next_item_after(
       on a row that still lacks a category) leaves the row queued, and
       re-opening the modal the owner just dismissed reads as a failed
       save. The row keeps its place for a later pass.
-    * Otherwise the answer is whatever fell into the vacated slot — the
-      item that was directly below.
+    * Otherwise the answer is the nearest item that was BELOW the
+      resolved one and is still queued.
     * Resolving the bottom row has nothing below it, so it steps up to
-      the new last item.
+      the nearest surviving item above instead.
+
+    Selection is by identity, never by index. One write can remove more
+    than one row — confirming a pair promotes both legs to
+    ``kind='transfer'``, evicting them from the CATEGORY surface, and
+    legs (bucket 0/1) always sort above the pair (bucket 2). Carrying the
+    ``before`` index into ``after`` would overshoot by one per evicted
+    row and silently skip the proposals in between.
+
+    The returned item is the ``after`` instance, so the modal renders
+    post-write state rather than the snapshot.
 
     Returns ``None`` when nothing is left to advance to, or when
     ``resolved_id`` was not in ``before`` (the caller then closes the
@@ -413,10 +423,23 @@ def next_item_after(
     if index is None:
         return None
 
-    remaining = [item for item in after if item.item_id != resolved_id]
-    if not remaining:
+    surviving = {
+        item.item_id: item for item in after if item.item_id != resolved_id
+    }
+    if not surviving:
         return None
-    return remaining[min(index, len(remaining) - 1)]
+
+    for item in before[index + 1 :]:
+        if item.item_id in surviving:
+            return surviving[item.item_id]
+
+    for item in reversed(before[:index]):
+        if item.item_id in surviving:
+            return surviving[item.item_id]
+
+    # Everything the owner could see is gone, but the queue is not empty
+    # (a write can surface items that were not proposable before).
+    return next(iter(surviving.values()))
 
 
 # ---------------------------------------------------------------------------

@@ -191,7 +191,7 @@ def test_triage_edit_hx_trigger_carries_toast_and_queue_dirty(
     assert resp.status_code == 200, resp.text
     payload = json.loads(resp.headers["HX-Trigger"])
     assert "closeModal" not in payload
-    assert payload["queueDirty"] is True
+    assert payload["queueDirty"] == {"typeFilter": None}
     assert payload["toast"] == {"level": "success", "message": "Saved"}
 
 
@@ -204,7 +204,7 @@ def test_pair_confirm_hx_trigger_carries_toast_json(
     resp = client.post(f"/_partial/triage/pair/{deposit_id}/{sell_id}/confirm")
     assert resp.status_code == 200, resp.text
     payload = json.loads(resp.headers["HX-Trigger"])
-    assert payload["queueDirty"] is True
+    assert payload["queueDirty"] == {"typeFilter": None}
     assert payload["toast"] == {"level": "success", "message": "Pair confirmed"}
 
 

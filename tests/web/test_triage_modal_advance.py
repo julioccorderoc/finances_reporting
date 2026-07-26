@@ -9,7 +9,8 @@ first modal trigger left in the DOM. Two consequences the owner hit daily:
 * the advance always landed on position 0, never on the neighbour of the
   item just resolved.
 
-The replacement: the server picks the successor by POSITION and returns
+The replacement: the server picks the successor by IDENTITY — the nearest
+item that was below the resolved one and is still queued — and returns
 that item's modal as the response body. Nothing clicks anything, and the
 queue list is not part of the response at all.
 """
@@ -103,6 +104,32 @@ def test_a_partial_fix_does_not_reopen_the_same_item() -> None:
     after = _queue("b", "a", "c")  # 'b' survived and moved (bucket 1 -> 0)
 
     assert next_item_after(before, after, "b").item_id == "c"
+
+
+def test_items_removed_above_the_slot_do_not_shift_the_successor() -> None:
+    """A write can evict rows ABOVE the one being resolved.
+
+    Confirming a pair promotes both legs to ``kind='transfer'``, which
+    drops them from the CATEGORY surface. Legs are bucket 0/1 and pairs
+    are bucket 2, so those two removals always land above the resolved
+    slot. Indexing ``after`` with the ``before`` index therefore
+    overshoots by one per evicted row and silently skips proposals.
+    """
+    before = _queue("leg-a", "leg-b", "pair-1", "pair-2", "pair-3")
+    after = _queue("pair-2", "pair-3")  # both legs AND pair-1 are gone
+
+    assert next_item_after(before, after, "pair-1").item_id == "pair-2"
+
+
+def test_successor_is_the_post_write_instance_not_the_snapshot() -> None:
+    """The advance must render current state, not the stale snapshot."""
+    before = _queue("a", "b")
+    fresh = _item("b")
+    fresh.bucket = 1  # 'b' mutated while 'a' was being resolved
+
+    result = next_item_after(before, [fresh], "a")
+
+    assert result is fresh
 
 
 def test_advance_never_returns_a_parked_item() -> None:
@@ -270,7 +297,7 @@ def test_save_on_the_final_remaining_item_closes_the_modal(
     assert resp.text.strip() == ""
     payload = json.loads(resp.headers["HX-Trigger"])
     assert payload["closeModal"] is True
-    assert payload["queueDirty"] is True
+    assert payload["queueDirty"] == {"typeFilter": None}
 
 
 def test_mid_run_save_must_not_send_closeModal(
@@ -284,7 +311,7 @@ def test_mid_run_save_must_not_send_closeModal(
 
     payload = json.loads(resp.headers["HX-Trigger"])
     assert "closeModal" not in payload
-    assert payload["queueDirty"] is True
+    assert payload["queueDirty"] == {"typeFilter": None}
     assert payload["toast"] == {"level": "success", "message": "Saved"}
 
 
@@ -299,7 +326,7 @@ def test_park_advances_to_the_next_item(
     assert 'data-tx-id="3"' in resp.text
     payload = json.loads(resp.headers["HX-Trigger"])
     assert "closeModal" not in payload
-    assert payload["queueDirty"] is True
+    assert payload["queueDirty"] == {"typeFilter": None}
 
 
 def test_unpark_still_returns_the_queue_partial(
@@ -367,8 +394,13 @@ def test_advance_respects_an_active_type_filter(
     assert resp.status_code == 200, resp.text
     assert 'data-tx-id="2"' in resp.text
     assert 'data-tx-id="3"' not in resp.text
-    # The filter must survive into the next modal's own actions.
+    # The filter must survive into the next modal's own actions...
     assert "type_filter=rate" in resp.text
+    # ...and into the deferred queue refresh, which happens long after
+    # the request that applied the filter. The chips render outside the
+    # swapped region, so their data-active cannot be trusted for this.
+    payload = json.loads(resp.headers["HX-Trigger"])
+    assert payload["queueDirty"] == {"typeFilter": "rate"}
 
 
 # ---------------------------------------------------------------------------
@@ -465,7 +497,90 @@ def test_pair_confirm_advances_like_a_save(
     assert 'data-tx-modal="triage"' in resp.text
     payload = json.loads(resp.headers["HX-Trigger"])
     assert "closeModal" not in payload
-    assert payload["queueDirty"] is True
+    assert payload["queueDirty"]["typeFilter"] is None
+
+
+@pytest.fixture
+def multi_pair_db(web_db: sqlite3.Connection) -> sqlite3.Connection:
+    """Three pair proposals whose six legs also sit in the queue.
+
+    Confirming the first pair promotes its two legs to ``transfer``,
+    evicting them from the CATEGORY surface — two removals ABOVE the
+    resolved pair, because legs are bucket 0 and pairs are bucket 2.
+    """
+    provincial = accounts_repo.insert(
+        web_db,
+        Account(
+            name="Provincial",
+            kind=AccountKind.BANK,
+            currency="VES",
+            institution="Provincial",
+        ),
+    )
+    binance = accounts_repo.insert(
+        web_db,
+        Account(
+            name="Binance Spot",
+            kind=AccountKind.CRYPTO_SPOT,
+            currency="USDT",
+            institution="Binance",
+        ),
+    )
+
+    for n in range(3):
+        when = datetime(2026, 5, 10 + n, 12, 0, tzinfo=UTC)
+        amount = Decimal("100.00") * (n + 1)
+        transactions_repo.insert(
+            web_db,
+            Transaction(
+                account_id=provincial.id,
+                occurred_at=when,
+                kind=TransactionKind.INCOME,
+                amount=amount * Decimal("36.5"),
+                currency="VES",
+                description=f"ABONO P2P sell {n}",
+                source="provincial",
+                source_ref=f"bank-deposit-{n}",
+            ),
+        )
+        transactions_repo.insert(
+            web_db,
+            Transaction(
+                account_id=binance.id,
+                occurred_at=when,
+                kind=TransactionKind.EXPENSE,
+                amount=-amount,
+                currency="USDT",
+                description=f"P2P sell USDT {n}",
+                source="binance",
+                source_ref=f"p2p:sell-{n}",
+                user_rate=Decimal("36.50"),
+            ),
+        )
+    return web_db
+
+
+def test_confirming_a_pair_does_not_skip_the_next_proposal(
+    multi_pair_db: sqlite3.Connection, web_client_factory
+) -> None:
+    """Regression: the two evicted legs must not shift the successor.
+
+    Queue is [6 legs as category rows..., pair 1, pair 2, pair 3].
+    Confirming pair 1 removes THREE items, two of them above it. Indexing
+    the rebuilt queue with the old position lands on pair 3 and silently
+    skips pair 2 — and since the list no longer refreshes mid-run, the
+    owner never sees that it happened.
+    """
+    queue = build_queue(multi_pair_db)
+    pairs = [i.item_id for i in queue.items if i.type == TriageType.PAIR]
+    assert pairs == ["pair:1:2", "pair:3:4", "pair:5:6"], pairs
+
+    client = web_client_factory()
+    resp = client.post("/_partial/triage/pair/1/2/confirm")
+
+    assert resp.status_code == 200, resp.text
+    assert 'data-tx-modal="pair"' in resp.text
+    assert 'data-deposit-id="3"' in resp.text and 'data-sell-id="4"' in resp.text
 
 
 # ---------------------------------------------------------------------------
@@ -498,6 +613,59 @@ def test_close_modal_refreshes_a_dirty_queue(
     assert "queueDirty" in body
     assert "/_partial/triage/queue" in body
     assert "htmx.ajax" in body
+
+
+def test_refresh_filter_comes_from_the_server_not_the_chips(
+    advance_db: sqlite3.Connection, web_client_factory
+) -> None:
+    """data-active is only ever written by a full page load.
+
+    Clicking a chip swaps #triage-queue, which the chip <nav> sits
+    outside of — so reading the filter back off the chip would refresh an
+    unfiltered queue over the filtered one the owner was working in.
+    """
+    body = _page(web_client_factory)
+
+    assert "queueFilter" in body
+    assert "typeFilter" in body
+    assert "data-active=" not in body.split("<body", 1)[1].split("</nav>", 1)[0]
+
+
+def test_a_dismissed_modal_is_not_resurrected_by_a_late_response(
+    advance_db: sqlite3.Connection, web_client_factory
+) -> None:
+    """Escape during an in-flight save must stay closed.
+
+    The response body is the NEXT modal; swapping it in after the owner
+    dismissed the dialog pops a different transaction back up.
+    """
+    body = _page(web_client_factory)
+
+    assert "modalDismissed" in body
+    assert "htmx:before-swap.window" in body
+    assert "shouldSwap" in body
+
+
+def test_the_modal_guards_against_key_repeat_and_double_submit(
+    advance_db: sqlite3.Connection, web_client_factory
+) -> None:
+    """Held Enter would submit each modal the advance swaps in."""
+    client = web_client_factory()
+    modal = client.get("/_partial/triage/1/modal").text
+
+    assert "$event.repeat" in modal
+    assert 'hx-disabled-elt="find button[type=submit]"' in modal
+
+
+def test_the_pair_modal_takes_focus_when_advanced_into(
+    pair_advance_db: sqlite3.Connection, web_client_factory
+) -> None:
+    """Pairs sort last, so a run normally ENDS by advancing into one."""
+    client = web_client_factory()
+    modal = client.get("/_partial/triage/pair/3/4/modal").text
+
+    assert 'tabindex="-1"' in modal
+    assert "x-init" in modal and ".focus()" in modal
 
 
 def test_modal_actions_target_the_modal_host(
