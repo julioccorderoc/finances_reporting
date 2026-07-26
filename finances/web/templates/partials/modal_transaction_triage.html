@@ -78,31 +78,45 @@
       <dl class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
         {% for r in day_rates %}
           <dt class="text-slate-600">{{ r.label }}</dt>
+          {# Every tier carries its own dollar figure, not just the winner:
+             "what would this be worth at BCV?" is the question the panel
+             exists to answer, and making the owner divide by hand was the
+             whole gap. ``amount_usd`` is computed service-side by
+             ``rates_for_day`` the same way ``_project_card`` prices the
+             winner, so the winning row and the header cannot disagree. #}
           <dd class="tabular-nums" data-rate-row="{{ r.source }}">
             {% if r.rate is none %}
               <span class="text-slate-400">&mdash;</span>
             {% else %}
-              <span class="{% if r.is_winner %}font-semibold text-slate-900{% else %}text-slate-600{% endif %}">
-                {{ r.rate | fmt_number }}
-              </span>
-              {% if r.is_carry %}
-                <span class="text-slate-500">(from {{ r.as_of_date | fmt_date }})</span>
-              {% endif %}
-              {% if r.is_winner %}
-                <span class="text-emerald-700" data-rate-winner>
-                  &larr; used for {{ card.amount_usd | fmt_money }}
+              <div class="flex flex-wrap items-baseline gap-2">
+                <span class="{% if r.is_winner %}font-semibold text-slate-900{% else %}text-slate-600{% endif %}">
+                  {{ r.rate | fmt_number }}
                 </span>
-              {% endif %}
-              {% if r.is_reference_only %}
-                <span class="text-amber-700">reference only</span>
-              {% endif %}
+                {% if r.amount_usd is not none %}
+                  <span
+                    data-rate-usd
+                    class="{% if r.is_winner %}font-semibold text-slate-900{% else %}text-slate-500{% endif %}"
+                  >{{ r.amount_usd | fmt_money }}</span>
+                {% endif %}
+              </div>
+              <div class="text-[11px] text-slate-500">
+                {% if r.is_carry %}
+                  <span>from {{ r.as_of_date | fmt_date }}</span>
+                {% endif %}
+                {% if r.is_winner %}
+                  <span class="text-emerald-700" data-rate-winner>&larr; used</span>
+                {% endif %}
+                {% if r.is_reference_only %}
+                  <span class="text-amber-700">reference only</span>
+                {% endif %}
+              </div>
             {% endif %}
           </dd>
         {% endfor %}
       </dl>
       {% if card.rate_source == 'user_rate' %}
         <p class="mt-1 text-[11px] text-slate-500">
-          The $ above uses your own rate, not any of these.
+          The header $ uses your own rate &mdash; none of these produced it.
         </p>
       {% elif card.amount_usd is none %}
         <p class="mt-1 text-[11px] text-slate-500">

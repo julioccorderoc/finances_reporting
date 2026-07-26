@@ -83,7 +83,13 @@ _REFERENCE_ONLY_SOURCES = frozenset({"bcv"})
 
 
 class DayRate(BaseModel):
-    """One candidate rate for a transaction's day, as the modal shows it."""
+    """One candidate rate for a transaction's day, as the modal shows it.
+
+    ``amount_usd`` is the counterfactual: what the transaction's native
+    amount would be worth priced at THIS tier, whether or not this tier
+    won. ``None`` when the tier has no rate for the day, or when the
+    transaction's currency is not the tier's quote currency.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -91,6 +97,7 @@ class DayRate(BaseModel):
     source: str
     rate: Decimal | None
     as_of_date: date | None
+    amount_usd: Decimal | None
     is_carry: bool
     is_winner: bool
     is_reference_only: bool
@@ -187,15 +194,29 @@ def build_latest_rates(conn: sqlite3.Connection) -> list[LatestRateCard]:
 
 
 def rates_for_day(
-    conn: sqlite3.Connection, *, day: date, winning_source: str
+    conn: sqlite3.Connection,
+    *,
+    day: date,
+    winning_source: str,
+    amount_native: Decimal,
+    currency: str,
 ) -> list[DayRate]:
-    """Return the three candidate rate series for ``day``.
+    """Return the three candidate rate series for ``day``, each priced.
 
     ``winning_source`` is the ``rate_source`` already computed by
     ``rates.resolve`` via ``_project_card``. This function NEVER re-derives
     the winner — duplicating resolver logic here is exactly what rule-012
     forbids. Sources with no table-backed series (``user_rate``,
     ``native_usd``, ``needs_review``) simply mark nothing.
+
+    ``amount_native``/``currency`` are the transaction's own, and are
+    required rather than defaulted: a caller that forgets them would
+    silently strip every dollar figure off the panel. Each series is
+    priced the same way ``_project_card`` prices the winner —
+    ``amount / rate``, no quantize, formatting left to ``fmt_money`` — so
+    the winner's row and the modal header cannot disagree. A series whose
+    quote currency is not the transaction's is left unpriced: dividing,
+    say, COP by a VES rate would invent a number.
     """
     winner = winning_source.removesuffix(CARRY_SUFFIX)
 
@@ -204,12 +225,18 @@ def rates_for_day(
         found = rates_repo.latest_on_or_before(
             conn, as_of_date=day, base=base, quote=quote, source=source
         )
+        amount_usd = (
+            amount_native / found.rate
+            if found is not None and found.rate and currency == quote
+            else None
+        )
         series.append(
             DayRate(
                 label=label,
                 source=source,
                 rate=found.rate if found is not None else None,
                 as_of_date=found.as_of_date if found is not None else None,
+                amount_usd=amount_usd,
                 is_carry=found is not None and found.as_of_date < day,
                 is_winner=source == winner,
                 is_reference_only=source in _REFERENCE_ONLY_SOURCES,

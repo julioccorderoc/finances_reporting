@@ -560,6 +560,8 @@ def _render_triage_txn_modal(
             conn,
             day=txn.occurred_at.date(),
             winning_source=card.rate_source,
+            amount_native=card.amount_native,
+            currency=card.currency,
         )
     )
 
