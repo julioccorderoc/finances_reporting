@@ -80,3 +80,78 @@ The invariant the view anchored — monthly totals equal view totals — is re-p
 **Target file:** `docs/architecture/rules/rule-005-single-rate-resolver.md`
 
 **Injected constraint:** The locked priority order gains the realized tier at position 2, subject to `REALIZED_MAX_AGE_DAYS`. `binance_p2p_realized` is headline-eligible. No SQL view may compute `amount_usd`; `v_transactions_usd` is dropped and must not be recreated. All realized rates must be produced by `finances.domain.realized_rates`, never derived ad hoc.
+
+## Amendment — 2026-07-26: a web rate edit rebuilds the basis in the same request
+
+**Status:** Accepted. Extends §2's `rebuild()` clause to the web write
+path. Nothing in the resolver chain, the age cap, or §5 changes.
+
+**Context.** §2 accepts materialisation and buys off the resulting drift
+with `rebuild()`, "called at the end of every Binance ingest and exposed
+as `finances rates rebuild-realized`." That enumeration was complete when
+it was written. The ADR-012 viewer's write path landed independently and
+never joined the bargain: nothing under `finances/web/` calls `rebuild()`.
+
+`SQL_P2P_SELLS` selects on `source_ref LIKE 'p2p:%' AND amount < 0 AND
+user_rate IS NOT NULL`, so saving a `user_rate` through the triage modal
+edits an *input* to the materialised tier without recomputing it. The
+edit is invisible in the basis until the next Binance ingest, at which
+point every bolívar row re-prices at once — attributable to an ingest
+that changed nothing rather than to the edit that did. At present: 1172
+VES rows priced off this basis, 123 qualifying fills, 3 P2P sells still
+missing a `user_rate`, 20 P2P sells reachable from the triage queue.
+
+This is not one of the drifts §5 accepts. §5 documents inference and
+precision limits; this is the maintenance call the design depends on
+simply not being wired up.
+
+**Decision.**
+
+1. **Rebuild synchronously, inside the write.** A web edit that changes
+   `user_rate` on a row matching `SQL_P2P_SELLS` calls
+   `realized_rates.rebuild()` in the same request, before the response is
+   composed. Measured at **5.1 ms** against the live ledger (123 fills →
+   101 daily rates) — under a third of the 16 ms `build_queue` that the
+   same triage save already pays twice (ADR-012 Amendment 2026-07-26).
+
+   Rejected: deferring to the end of a triage run (covers only the triage
+   surface, and a browser closed mid-run leaves the basis silently stale
+   — the very failure being fixed), and a manual "basis is stale" banner
+   (makes correctness opt-in, and needs drift detection the sync path
+   makes unnecessary).
+
+2. **The hook lives in `apply_edit`, not in the triage route.** That
+   service function is the single choke point for every web `user_rate`
+   write — the triage modal, the `/transactions` modal, and
+   `PATCH /api/transactions/{id}`. Bulk edit is category-only. A stale
+   basis is not triage-specific: editing a fill's rate from the
+   transactions list has the identical effect on all 1172 VES rows.
+
+3. **Rebuild runs BEFORE the post-write `rates.resolve`.** `apply_edit`
+   derives `needs_review` from a resolve that runs after the update.
+   Clearing a `user_rate` on a fill drops it to the realized tier, so
+   resolving against a basis that still contains the cleared fill would
+   store a `needs_review` derived from a rate that no longer exists.
+
+4. **The trigger is narrow, and symmetric.** Rebuild fires only when the
+   request set `user_rate`, the post-write row satisfies the
+   `SQL_P2P_SELLS` shape (`source_ref LIKE 'p2p:%'`, negative amount),
+   and the value actually changed. Clearing a rate to `NULL` counts: it
+   removes a fill from the average and must re-derive the day. Category-
+   or notes-only saves never rebuild, and neither does re-saving the same
+   rate.
+
+5. **Rebuild stays whole-history.** No incremental "just this day" path.
+   `rebuild()` upserts all days idempotently, and a second derivation
+   would be exactly the ad-hoc realized rate rule-005 forbids.
+
+**Consequences.** One modal save can re-price every VES row from that
+fill's day forward. That blast radius is not new — it is what the next
+ingest would have applied — but it now lands at the moment the owner
+caused it, where it is attributable. The rebuild is not wrapped in an
+explicit transaction: the connection runs in autocommit and `apply_edit`
+already issues several statements unwrapped, so a failure part-way
+through leaves the fill saved and the basis partly upserted. Both are
+recoverable by re-running, since `rebuild()` is idempotent, or by
+`finances rates rebuild-realized`. Any future non-ingest CLI path that
+writes `user_rate` must make the same call; there is none today.
