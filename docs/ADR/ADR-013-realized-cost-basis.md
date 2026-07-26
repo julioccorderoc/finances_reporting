@@ -128,10 +128,16 @@ simply not being wired up.
    transactions list has the identical effect on all 1172 VES rows.
 
 3. **Rebuild runs BEFORE the post-write `rates.resolve`.** `apply_edit`
-   derives `needs_review` from a resolve that runs after the update.
-   Clearing a `user_rate` on a fill drops it to the realized tier, so
-   resolving against a basis that still contains the cleared fill would
-   store a `needs_review` derived from a rate that no longer exists.
+   derives `needs_review` from a resolve that runs after the update, and
+   the invariant is that nothing in the response is derived from a basis
+   the same request already invalidated.
+
+   This ordering is defensive, not load-bearing: every P2P fill in the
+   ledger is denominated in USDT (43 `expense` + 83 `transfer`, all
+   `needs_review=0`), so the edited row itself always takes the
+   `native_usd` path and its own `needs_review` cannot depend on the
+   realized tier. The ordering costs nothing and holds the invariant for
+   a fill that is one day not USDT-denominated.
 
 4. **The trigger is narrow, and symmetric.** Rebuild fires only when the
    request set `user_rate`, the post-write row satisfies the
@@ -155,3 +161,11 @@ through leaves the fill saved and the basis partly upserted. Both are
 recoverable by re-running, since `rebuild()` is idempotent, or by
 `finances rates rebuild-realized`. Any future non-ingest CLI path that
 writes `user_rate` must make the same call; there is none today.
+
+One pre-existing limit is inherited rather than introduced: `rebuild()`
+upserts, it never deletes. Clearing the *last* remaining fill of a day
+makes `compute_realized_rates` stop emitting that day, but the rate row
+already materialised for it survives. Clearing a rate on a day that still
+has other fills re-derives correctly. This affects the ingest and CLI
+callers identically and is out of scope here; it is noted so the
+narrower claim in clause 4 is not read as a stronger one.
