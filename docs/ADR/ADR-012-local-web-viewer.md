@@ -126,3 +126,65 @@ the `N of M` counter and prev/next navigation.
 
 **References.** `docs/superpowers/specs/2026-07-21-triage-speedrun-design.md`
 §3.2, §4, §5.3, §5.5.
+
+## Amendment — 2026-07-26: the triage response is the next modal
+
+**Status:** Accepted. Supersedes clause 3 of the 2026-07-21 amendment (the
+"navigation indices stay stable" rationale) and the response-shape assumption
+behind it, for the `/triage` surface only. The rest of ADR-012 stands.
+
+**Context.** Clause 3 above assumed a saved item stays in the queue. It does
+not: resolving an item removes it (or mutates its bucket and sort position), so
+there are no stable indices to navigate. The shipped flow therefore advanced by
+re-rendering the whole queue and then clicking the first modal trigger in the
+DOM. Three defects followed.
+
+1. The advance always landed on DOM position 0, never a neighbour.
+2. The parked `<details>` group renders above `queue.items`, so position 0 is a
+   *parked* row whenever any exist — every save dropped the owner into an item
+   they had deliberately deferred.
+3. Each save shipped the entire queue (208 live + 8 parked cards, ~400 KB) into
+   `#triage-queue`, emptied `#tx-modal-host` via `HX-Trigger: closeModal`, then
+   issued a *second* request 20 ms later to fetch the next modal. The overlay is
+   `rgba(15,23,42,0.45)` — translucent — so the owner watched the list repaint
+   through a gap where no dialog existed, losing focus and keyboard bindings
+   with it.
+
+**Decision.**
+
+1. **Advance holds position.** After an item is resolved, the queue is rebuilt
+   and the item now occupying the resolved item's slot is opened —
+   `after[min(index_before, len(after) - 1)]`. Resolving the last item steps up
+   to the new last item; an empty queue advances to nothing. Selection reads
+   `queue.items`, so a parked row can never be an advance target.
+2. **The response body is the next modal**, not the queue. `POST .../edit`,
+   `.../park` and `.../pair/{a}/{b}/confirm` target `#tx-modal-host` and return
+   the next item's modal HTML — one round trip, and the overlay element is
+   replaced in place rather than unmounted. An exhausted queue returns an empty
+   body plus `HX-Trigger: closeModal`.
+3. **The queue list refreshes on modal close, not on every save.** Mutating
+   responses carry `HX-Trigger: queueDirty`; the `close-modal` handler refreshes
+   `#triage-queue` once, when the run ends. Consequently `closeModal` must not
+   be emitted by a mid-run save — the global handler clears the modal host and
+   would discard the modal the same response just delivered.
+4. **Full re-render stays the only correct queue refresh.** Surgical DOM removal
+   of the resolved card is prohibited. Resolving one item is not a local edit:
+   saving a `user_rate` can invalidate an unrelated pair proposal (the
+   `len(surviving) != 1` gate in `transfers.py`), confirming a pair promotes both
+   legs to `kind='transfer'` and evicts up to two further cards, and every action
+   recomputes `counts`, `bucket_counts` and the badge/bucket/sort position of the
+   row itself.
+
+**Consequences.** During a triage run the list behind the overlay is stale by
+design; it reconciles when the modal closes. Per-save payload drops from ~400 KB
+to ~23 KB and from two round trips to one. `build_queue` now runs twice per
+mutation (once to locate the slot, once to pick the successor), measured at
+16 ms each against the live 216-item ledger — negligible next to the render it
+replaces. Advance selection must thread `type_filter`, or a save made under an
+active filter chip would advance into an item the owner cannot see.
+
+**Not addressed here.** The filter-chip counts render outside `#triage-queue`
+and still do not update after a save. Triage rate edits still never call
+`realized_rates.rebuild()`, so editing a P2P sell's rate leaves materialised
+`binance_p2p_realized` rows stale until the next ingest (ADR-013 §3). Both are
+pre-existing and independently ticketed.
