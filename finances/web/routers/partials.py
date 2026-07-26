@@ -35,9 +35,11 @@ from finances.web.services.transactions_write import (
     apply_edit,
 )
 from finances.web.services.triage import (
+    TriageItem,
     TriageType,
     build_queue,
     confirm_pair,
+    next_item_after,
 )
 from finances.web.services.monthly_view import (
     MonthlyFilter,
@@ -495,19 +497,17 @@ def triage_queue_partial(
     return _render_queue_partial(request, conn, type_filter=parsed)
 
 
-@router.get("/triage/{txn_id}/modal", include_in_schema=False)
-def triage_modal_partial(
+def _render_triage_txn_modal(
     request: Request,
+    conn: sqlite3.Connection,
     txn_id: int,
-    type_filter: str | None = Query(default=None),
-    conn: sqlite3.Connection = Depends(get_conn),
+    type_filter: str | None,
 ):
     """Render the Save & next variant of the txn-edit modal.
 
-    ``type_filter`` is the filter active on the queue this modal was
-    opened from (threaded by the card partial's modal URL); it is echoed
-    back into the modal so its own Save/Park POSTs carry the same filter
-    forward (Task 4 §3).
+    Shared by the click-to-open GET route and by the advance path, so an
+    item opened by hand and an item advanced into are byte-identical
+    (ADR-012 Amendment 2026-07-26).
     """
     txn = transactions_repo.get_by_id(conn, txn_id)
     if txn is None:
@@ -562,6 +562,75 @@ def triage_modal_partial(
     )
 
 
+@router.get("/triage/{txn_id}/modal", include_in_schema=False)
+def triage_modal_partial(
+    request: Request,
+    txn_id: int,
+    type_filter: str | None = Query(default=None),
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Open the txn-edit modal from a queue card.
+
+    ``type_filter`` is the filter active on the queue this modal was
+    opened from (threaded by the card partial's modal URL); it is echoed
+    back into the modal so its own Save/Park POSTs carry the same filter
+    forward (Task 4 §3).
+    """
+    return _render_triage_txn_modal(request, conn, txn_id, type_filter)
+
+
+def _advance_after_write(
+    request: Request,
+    conn: sqlite3.Connection,
+    *,
+    before: list[TriageItem],
+    resolved_id: str,
+    type_filter: TriageType | None,
+    toast_message: str,
+):
+    """Return the modal of whichever item took the resolved item's slot.
+
+    The response body IS the next modal (ADR-012 Amendment 2026-07-26) —
+    the queue list is deliberately absent. Re-rendering 200+ cards to
+    replace one row is what made the list visibly repaint mid-run, and
+    surgical removal is not a legal substitute (resolving one item can
+    invalidate an unrelated pair proposal). The list reconciles once, on
+    modal close, driven by the ``queueDirty`` trigger below.
+
+    ``closeModal`` is emitted ONLY when the queue is exhausted. The
+    base.html handler clears ``#tx-modal-host`` unconditionally, so a
+    mid-run ``closeModal`` would discard the modal in this very response.
+    """
+    after = build_queue(conn, type_filter=type_filter)
+    nxt = next_item_after(before, after.items, resolved_id)
+
+    if nxt is None:
+        response = Response(content="", media_type="text/html")
+        response.headers["HX-Trigger"] = _hx_trigger_json(
+            "closeModal", "queueDirty", toast_message=toast_message
+        )
+        return response
+
+    filter_value = type_filter.value if type_filter is not None else None
+    if nxt.type is TriageType.PAIR and nxt.pair_proposal is not None:
+        response = _render_triage_pair_modal(
+            request,
+            conn,
+            deposit_id=int(nxt.pair_proposal.details["bank_transaction_id"]),
+            sell_id=int(nxt.pair_proposal.details["binance_transaction_id"]),
+            type_filter=filter_value,
+        )
+    else:
+        response = _render_triage_txn_modal(
+            request, conn, int(nxt.item_id.split(":")[1]), filter_value
+        )
+
+    response.headers["HX-Trigger"] = _hx_trigger_json(
+        "queueDirty", toast_message=toast_message
+    )
+    return response
+
+
 @router.post("/triage/{txn_id}/edit", include_in_schema=False)
 def triage_edit_partial(
     request: Request,
@@ -575,14 +644,15 @@ def triage_edit_partial(
     type_filter: str | None = Query(default=None),
     conn: sqlite3.Connection = Depends(get_conn),
 ):
-    """Apply the edit and return a fresh queue partial.
+    """Apply the edit and return the NEXT item's modal.
 
-    Sets ``HX-Trigger: closeModal, advanceQueue`` so the base.html
-    Alpine listener clears the modal host and the page advances to the
-    next item. ``type_filter`` is threaded through to
-    ``_render_queue_partial`` (Task 4 §3) so a save made while a filter
-    chip is active returns a queue filtered the same way, instead of the
-    previously-hardcoded unfiltered one.
+    Hold-position advance (ADR-012 Amendment 2026-07-26): the queue is
+    snapshotted before the write so the successor can be picked by
+    position, then the modal of whatever landed in the vacated slot is
+    returned straight into ``#tx-modal-host``. ``type_filter`` is
+    threaded into both the snapshot and the successor's modal (Task 4
+    §3) — a save made under an active filter chip must not advance into
+    an item that chip hides.
     """
     req = TransactionEditRequest(
         set_category=_parse_form_bool(set_category),
@@ -593,6 +663,9 @@ def triage_edit_partial(
         notes=_parse_optional_text(notes),
     )
 
+    parsed = _parse_triage_type_partial(type_filter)
+    before = build_queue(conn, type_filter=parsed).items
+
     try:
         apply_edit(conn, txn_id=txn_id, req=req)
     except LookupError as exc:
@@ -600,30 +673,30 @@ def triage_edit_partial(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    parsed = _parse_triage_type_partial(type_filter)
-    response = _render_queue_partial(request, conn, type_filter=parsed)
-    response.headers["HX-Trigger"] = _hx_trigger_json(
-        "closeModal", "advanceQueue", toast_message="Saved"
+    return _advance_after_write(
+        request,
+        conn,
+        before=before,
+        resolved_id=f"txn:{txn_id}",
+        type_filter=parsed,
+        toast_message="Saved",
     )
-    return response
 
 
-@router.get(
-    "/triage/pair/{deposit_id}/{sell_id}/modal",
-    include_in_schema=False,
-)
-def triage_pair_modal_partial(
+def _render_triage_pair_modal(
     request: Request,
+    conn: sqlite3.Connection,
+    *,
     deposit_id: int,
     sell_id: int,
-    type_filter: str | None = Query(default=None),
-    conn: sqlite3.Connection = Depends(get_conn),
+    type_filter: str | None,
 ):
     """Render the pair-confirm modal for the (deposit, sell) pair.
 
     The modal carries the proposal so the user can confirm or skip.
     ``type_filter`` is echoed back so the Confirm POST carries the same
-    filter forward (Task 4 §3).
+    filter forward (Task 4 §3). Shared by the click-to-open GET route and
+    by the advance path, same as the txn modal.
     """
     from finances.web.services.transactions_query import _project_card
     from finances.web.services.triage import PairProposal
@@ -674,6 +747,27 @@ def triage_pair_modal_partial(
     )
 
 
+@router.get(
+    "/triage/pair/{deposit_id}/{sell_id}/modal",
+    include_in_schema=False,
+)
+def triage_pair_modal_partial(
+    request: Request,
+    deposit_id: int,
+    sell_id: int,
+    type_filter: str | None = Query(default=None),
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Open the pair-confirm modal from a queue card."""
+    return _render_triage_pair_modal(
+        request,
+        conn,
+        deposit_id=deposit_id,
+        sell_id=sell_id,
+        type_filter=type_filter,
+    )
+
+
 @router.post(
     "/triage/pair/{deposit_id}/{sell_id}/confirm",
     include_in_schema=False,
@@ -685,11 +779,15 @@ def triage_pair_confirm_partial(
     type_filter: str | None = Query(default=None),
     conn: sqlite3.Connection = Depends(get_conn),
 ):
-    """Confirm the pair → calls :func:`confirm_pair` → fresh queue.
+    """Confirm the pair → :func:`confirm_pair` → the next item's modal.
 
-    ``type_filter`` is threaded through to ``_render_queue_partial``
-    (Task 4 §3) instead of the previously-hardcoded ``None``.
+    Confirming promotes both legs to ``kind='transfer'``, which can evict
+    up to two further cards from the queue — the successor is therefore
+    picked from a queue rebuilt after the write, never assumed.
     """
+    parsed = _parse_triage_type_partial(type_filter)
+    before = build_queue(conn, type_filter=parsed).items
+
     try:
         confirm_pair(conn, deposit_id=deposit_id, sell_id=sell_id)
     except LookupError as exc:
@@ -697,29 +795,27 @@ def triage_pair_confirm_partial(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    parsed = _parse_triage_type_partial(type_filter)
-    response = _render_queue_partial(request, conn, type_filter=parsed)
-    response.headers["HX-Trigger"] = _hx_trigger_json(
-        "closeModal", toast_message="Pair confirmed"
+    return _advance_after_write(
+        request,
+        conn,
+        before=before,
+        resolved_id=f"pair:{deposit_id}:{sell_id}",
+        type_filter=parsed,
+        toast_message="Pair confirmed",
     )
-    return response
 
 
 def _set_parked(
-    request: Request,
     conn: sqlite3.Connection,
     txn_id: int,
     *,
     parked: bool,
-    type_filter: TriageType | None = None,
-):
+) -> None:
     """Durably defer (or restore) ``txn_id`` via the parked column.
 
     Per rule-012 the route issues no SQL of its own — the write goes
     through :func:`transactions_repo.update`. Never touches
-    ``needs_review``. ``type_filter`` is threaded through to
-    ``_render_queue_partial`` (Task 4 §3) instead of the
-    previously-hardcoded ``None``.
+    ``needs_review``.
     """
     txn = transactions_repo.get_by_id(conn, txn_id)
     if txn is None:
@@ -729,10 +825,6 @@ def _set_parked(
 
     transactions_repo.update(conn, id=txn_id, parked=parked)
 
-    response = _render_queue_partial(request, conn, type_filter=type_filter)
-    response.headers["HX-Trigger"] = "closeModal"
-    return response
-
 
 @router.post("/triage/{txn_id}/park", include_in_schema=False)
 def triage_park_partial(
@@ -741,9 +833,25 @@ def triage_park_partial(
     type_filter: str | None = Query(default=None),
     conn: sqlite3.Connection = Depends(get_conn),
 ):
-    """Defer a transaction durably (spec §5.3). Never touches needs_review."""
+    """Defer a transaction durably (spec §5.3), then advance.
+
+    Parking is a decision about an item, same as saving one, so it hands
+    back the next item's modal rather than dumping the owner on the list
+    (ADR-012 Amendment 2026-07-26). Never touches ``needs_review``.
+    """
     parsed = _parse_triage_type_partial(type_filter)
-    return _set_parked(request, conn, txn_id, parked=True, type_filter=parsed)
+    before = build_queue(conn, type_filter=parsed).items
+
+    _set_parked(conn, txn_id, parked=True)
+
+    return _advance_after_write(
+        request,
+        conn,
+        before=before,
+        resolved_id=f"txn:{txn_id}",
+        type_filter=parsed,
+        toast_message="Parked",
+    )
 
 
 @router.post("/triage/{txn_id}/unpark", include_in_schema=False)
@@ -753,8 +861,14 @@ def triage_unpark_partial(
     type_filter: str | None = Query(default=None),
     conn: sqlite3.Connection = Depends(get_conn),
 ):
+    """Restore a parked row to the live queue.
+
+    Unlike park, this is triggered from the list itself with no modal
+    open, so it stays a queue swap.
+    """
     parsed = _parse_triage_type_partial(type_filter)
-    return _set_parked(request, conn, txn_id, parked=False, type_filter=parsed)
+    _set_parked(conn, txn_id, parked=False)
+    return _render_queue_partial(request, conn, type_filter=parsed)
 
 
 # ---------------------------------------------------------------------------

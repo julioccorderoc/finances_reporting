@@ -20,8 +20,24 @@
   </head>
   <body
     class="min-h-screen bg-slate-50 text-slate-900"
-    x-data="{ advanceNext: false }"
-    @close-modal.window="document.getElementById('tx-modal-host').replaceChildren()"
+    {# queueDirty: a triage run mutates rows while the modal stays mounted,
+       so the list behind it goes stale by design (ADR-012 Amendment
+       2026-07-26). It reconciles ONCE, when the run ends — re-rendering
+       200+ cards per save is what made the page visibly repaint. #}
+    x-data="{ queueDirty: false }"
+    @close-modal.window="
+      document.getElementById('tx-modal-host').replaceChildren();
+      if (queueDirty) {
+        queueDirty = false;
+        const region = document.getElementById('triage-queue');
+        if (region) {
+          const chip = document.querySelector('[data-filter-chip][data-active=\'true\']');
+          const value = chip ? chip.getAttribute('data-filter-chip') : 'all';
+          const query = (value && value !== 'all') ? ('?type_filter=' + value) : '';
+          htmx.ajax('GET', '/_partial/triage/queue' + query, { target: '#triage-queue', swap: 'innerHTML' });
+        }
+      }
+    "
     @htmx:after-on-load.window="
       const raw = $event.detail && $event.detail.xhr && $event.detail.xhr.getResponseHeader('HX-Trigger');
       if (raw) {
@@ -34,22 +50,17 @@
         } catch (err) {
           names = raw.split(',').map(s => s.trim());
         }
+        {# Arm BEFORE closing: an exhausted queue sends both, and the
+           close handler is what fires the one refresh. #}
+        if (names.includes('queueDirty')) {
+          queueDirty = true;
+        }
         if (names.includes('closeModal')) {
           window.dispatchEvent(new CustomEvent('close-modal'));
-        }
-        if (names.includes('advanceQueue')) {
-          advanceNext = true;
         }
         if (toast) {
           window.dispatchEvent(new CustomEvent('show-toast', { detail: toast }));
         }
-      }
-    "
-    @htmx:after-settle.window="
-      if (advanceNext && $event.detail.target && $event.detail.target.id === 'triage-queue') {
-        advanceNext = false;
-        const next = document.querySelector('#triage-queue [hx-get*=\'/modal\']');
-        if (next) next.click();
       }
     "
     @htmx:response-error.window="

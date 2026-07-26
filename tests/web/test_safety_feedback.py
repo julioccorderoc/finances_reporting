@@ -167,9 +167,15 @@ def test_edit_endpoint_hx_trigger_carries_toast_json(
     assert payload["toast"] == {"level": "success", "message": "Saved"}
 
 
-def test_triage_edit_hx_trigger_carries_toast_and_advance(
+def test_triage_edit_hx_trigger_carries_toast_and_queue_dirty(
     seeded_web_db: sqlite3.Connection, web_client_factory
 ) -> None:
+    """Mid-run: toast + queueDirty, and pointedly NO closeModal.
+
+    ADR-012 Amendment 2026-07-26 — the response body is the next item's
+    modal, and the base.html close handler clears #tx-modal-host
+    unconditionally, so closeModal here would discard it.
+    """
     client = web_client_factory()
     txn_id = _txn_id(seeded_web_db, "prov-needs-review")
 
@@ -184,8 +190,8 @@ def test_triage_edit_hx_trigger_carries_toast_and_advance(
     )
     assert resp.status_code == 200, resp.text
     payload = json.loads(resp.headers["HX-Trigger"])
-    assert payload["closeModal"] is True
-    assert payload["advanceQueue"] is True
+    assert "closeModal" not in payload
+    assert payload["queueDirty"] is True
     assert payload["toast"] == {"level": "success", "message": "Saved"}
 
 
@@ -198,7 +204,7 @@ def test_pair_confirm_hx_trigger_carries_toast_json(
     resp = client.post(f"/_partial/triage/pair/{deposit_id}/{sell_id}/confirm")
     assert resp.status_code == 200, resp.text
     payload = json.loads(resp.headers["HX-Trigger"])
-    assert payload["closeModal"] is True
+    assert payload["queueDirty"] is True
     assert payload["toast"] == {"level": "success", "message": "Pair confirmed"}
 
 

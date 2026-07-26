@@ -89,7 +89,7 @@
         type="button"
         class="px-3 py-1.5 text-sm border border-slate-900 rounded bg-slate-900 text-white hover:bg-slate-800"
         hx-post="/_partial/triage/pair/{{ deposit.id }}/{{ sell.id }}/confirm{% if active_filter %}?type_filter={{ active_filter }}{% endif %}"
-        hx-target="#triage-queue"
+        hx-target="#tx-modal-host"
         hx-swap="innerHTML"
       >Confirm pair</button>
     </div>

@@ -545,9 +545,15 @@ def test_triage_modal_endpoint_renders_save_and_next_button(
     assert "Cancel" in body
 
 
-def test_triage_modal_form_post_advances_queue(
+def test_triage_modal_form_post_returns_the_next_modal(
     triage_seeded_db: sqlite3.Connection, web_client_factory
 ) -> None:
+    """The response IS the successor's modal, not a queue refresh.
+
+    ADR-012 Amendment 2026-07-26. Position-level assertions live in
+    tests/web/test_triage_modal_advance.py; this pins the response SHAPE
+    for the canonical triage fixture.
+    """
     client = web_client_factory()
     rate_only_id = _txn_id(triage_seeded_db, "rate-only-1")
 
@@ -561,11 +567,11 @@ def test_triage_modal_form_post_advances_queue(
         },
     )
     assert resp.status_code == 200, resp.text
-    # Returned partial = the triage_queue refresh.
-    assert "triage-queue" in resp.text or "data-card-row" in resp.text or "data-pair-row" in resp.text
+    assert "tx-modal-overlay" in resp.text
+    assert "data-triage-queue" not in resp.text
 
 
-def test_triage_modal_save_triggers_close_and_advance_headers(
+def test_triage_modal_save_triggers_queue_dirty_header(
     triage_seeded_db: sqlite3.Connection, web_client_factory
 ) -> None:
     client = web_client_factory()
@@ -582,8 +588,8 @@ def test_triage_modal_save_triggers_close_and_advance_headers(
     )
     assert resp.status_code == 200, resp.text
     trigger = resp.headers.get("HX-Trigger", "")
-    assert "closeModal" in trigger
-    assert "advanceQueue" in trigger
+    assert "queueDirty" in trigger
+    assert "advanceQueue" not in trigger
 
 
 # ---------------------------------------------------------------------------

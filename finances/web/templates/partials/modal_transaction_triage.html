@@ -141,7 +141,7 @@
     <form
       class="tx-modal-form"
       hx-post="/_partial/triage/{{ txn.id }}/edit{% if active_filter %}?type_filter={{ active_filter }}{% endif %}"
-      hx-target="#triage-queue"
+      hx-target="#tx-modal-host"
       hx-swap="innerHTML"
       x-data="{ catDirty: false, rateDirty: false, notesDirty: false }"
       x-init="$nextTick(() => { const el = $root.querySelector('[name=category_id]'); if (el) el.focus(); })"
@@ -195,7 +195,7 @@
           data-park-btn
           class="px-3 py-1.5 text-sm border border-amber-300 rounded bg-amber-50 text-amber-800 hover:bg-amber-100"
           hx-post="/_partial/triage/{{ txn.id }}/park{% if active_filter %}?type_filter={{ active_filter }}{% endif %}"
-          hx-target="#triage-queue"
+          hx-target="#tx-modal-host"
           hx-swap="innerHTML"
         >Park for later</button>
         <button
