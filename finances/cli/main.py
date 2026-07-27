@@ -680,14 +680,28 @@ def serve_cmd(
         envvar="FINANCES_WEB_TOKEN",
         help="Bearer token required for non-localhost binds (ADR-012).",
     ),
+    reload: bool | None = typer.Option(
+        None,
+        "--reload/--no-reload",
+        help="Restart the server when finances/** changes. Defaults ON for "
+        "the 127.0.0.1 bind; unavailable on LAN binds.",
+    ),
 ) -> None:
     """Run the local web viewer (EPIC-022)."""
+    import os
     import threading
     import webbrowser
 
     import uvicorn
 
-    from finances.web.app import create_app
+    from finances.web.app import (
+        IMPORT_STRING,
+        PACKAGE_DIR,
+        RELOAD_DIRS,
+        RELOAD_EXCLUDES,
+        RELOAD_INCLUDES,
+        create_app,
+    )
     from finances.web.settings import WebSettings
 
     try:
@@ -700,7 +714,30 @@ def serve_cmd(
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=2) from exc
 
-    fastapi_app = create_app(settings)
+    # Reload is localhost-only (ADR-012 Amendment 2026-07-26). The reloader
+    # spawns a fresh interpreter that rebuilds WebSettings from the
+    # environment; if that ever fell back to defaults it would come up with
+    # host="127.0.0.1" — the value BearerTokenMiddleware short-circuits on —
+    # behind a socket the parent bound to the LAN. from_env fails closed,
+    # but refusing the combination outright means the question never arises.
+    is_local = settings.host == "127.0.0.1"
+    if reload is None:
+        reload = is_local
+    if reload and not is_local:
+        typer.echo(
+            "--reload is localhost-only: a spawned child cannot safely "
+            "rebuild a LAN bind (it would default host to 127.0.0.1 and "
+            "bypass the bearer middleware). Re-run without --reload.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    # Under reload this process outlives every child, so it owns the one
+    # report.html regen; the child would otherwise run a full export on
+    # every source edit.
+    settings = settings.model_copy(
+        update={"regen_report_on_shutdown": not reload}
+    )
 
     base_url = f"http://localhost:{settings.port}/"
     if settings.token:
@@ -714,18 +751,52 @@ def serve_cmd(
     else:
         typer.echo(f"finances serve: {base_url}")
 
+    if reload:
+        typer.echo(
+            f"finances serve: watching {PACKAGE_DIR} (*.py, *.html, *.j2) — "
+            "code edits restart the server automatically."
+        )
+
     if open_browser:
         threading.Timer(
             1.0,
             lambda: webbrowser.open(base_url),
         ).start()
 
-    uvicorn.run(
-        fastapi_app,
-        host=settings.host,
-        port=settings.port,
-        log_level="info",
-    )
+    if not reload:
+        uvicorn.run(
+            create_app(settings),
+            host=settings.host,
+            port=settings.port,
+            log_level="info",
+        )
+        return
+
+    # The reloader re-imports the app in a spawn()'ed child, so it gets an
+    # import string and a factory — and the environment is the only thing
+    # that crosses into it.
+    os.environ.update(settings.to_env())
+    try:
+        uvicorn.run(
+            IMPORT_STRING,
+            factory=True,
+            reload=True,
+            reload_dirs=list(RELOAD_DIRS),
+            reload_includes=list(RELOAD_INCLUDES),
+            reload_excludes=list(RELOAD_EXCLUDES),
+            host=settings.host,
+            port=settings.port,
+            log_level="info",
+            # Bounds the terminate()+join() the supervisor does on every
+            # restart, so a request wedged on a SQLite lock cannot hang the
+            # reloader indefinitely.
+            timeout_graceful_shutdown=10,
+        )
+    finally:
+        # The regen the child no longer does, run once, here, on the way out.
+        from finances.web import app as web_app
+
+        web_app._regen_report_on_shutdown(settings)
 
 
 if __name__ == "__main__":
