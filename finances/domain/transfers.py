@@ -10,9 +10,10 @@ used for monetary arithmetic (per ADR-009).
 """
 from __future__ import annotations
 
+import re
 import sqlite3
 import uuid
-from datetime import datetime, timedelta
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -39,24 +40,36 @@ SQL_BANK_DEPOSITS = """
     ORDER BY occurred_at ASC, id ASC
 """
 
-# Bank-anchored P2P pairing: fetch candidate Binance sells within the
-# ±window_days band. We include expense, income and transfer kinds because
-# historical data is inconsistent on sign-kind pairing; backfilled sells in
-# particular landed as kind='transfer' with a NULL transfer_id (orphan
-# half-transfers) and would otherwise be invisible here. The
-# ``transfer_id IS NULL`` guard is what actually establishes "unreconciled";
-# kind alone never does. We filter by amount < 0 and require a user_rate.
+# Bank-anchored P2P pairing: fetch every unreconciled Binance sell. The
+# ±window_days band is applied in Python rather than here because the
+# assignment is global — every (deposit, sell) pair is scored before any
+# is claimed, so the whole candidate set has to be in hand at once.
+#
+# We include expense, income and transfer kinds because historical data is
+# inconsistent on sign-kind pairing; backfilled sells in particular landed
+# as kind='transfer' with a NULL transfer_id (orphan half-transfers) and
+# would otherwise be invisible here. The ``transfer_id IS NULL`` guard is
+# what actually establishes "unreconciled"; kind alone never does. We
+# filter by amount < 0 and require a user_rate.
 SQL_BINANCE_CANDIDATES = """
-    SELECT id, account_id, occurred_at, amount, currency, user_rate
+    SELECT id, account_id, occurred_at, amount, currency, user_rate, description
     FROM transactions
     WHERE source = :binance_source
       AND kind IN ('expense', 'income', 'transfer')
       AND transfer_id IS NULL
       AND CAST(amount AS REAL) < 0
       AND user_rate IS NOT NULL
-      AND occurred_at BETWEEN :start AND :end
     ORDER BY occurred_at ASC, id ASC
 """
+
+# The fiat a P2P order was priced in survives only in the description that
+# ``finances.ingest.binance`` writes:
+#
+#     P2P SELL USDT @ 630.5170239596469104665825977 VES (order 2289...)
+#
+# ``user_rate`` itself is a bare number, so without reading this back a
+# USD-priced sell converts to a plausible-looking bolivar figure.
+_FIAT_IN_DESCRIPTION_RE = re.compile(r"@\s+\S+\s+([A-Za-z]{3,})\s+\(order\b")
 
 # All legs sharing a transfer_id. Used by ``validate``.
 SQL_TRANSFER_LEGS = """
@@ -505,10 +518,28 @@ class BankAnchoredP2pPairing:
     """Strategy: pair a bank P2P deposit with the Binance-side sell.
 
     A bank row (income, positive amount) and a Binance row (negative
-    amount, non-null ``user_rate``) within ±``window_days`` are paired
-    when the USD-equivalents agree within ``amount_tolerance_ratio``.
-    Ambiguous matches (0 or 2+ candidates for a given bank row) are
-    skipped rather than guessed.
+    amount, non-null ``user_rate``) whose dates are within
+    ±``window_days`` are eligible when the bolivar-equivalents agree
+    within ``amount_tolerance_ratio``.
+
+    Every eligible (deposit, sell) pair is scored, then claimed greedily
+    in order of *closest date, then tightest drift, then id* — a global
+    assignment rather than a per-deposit decision. Each deposit and each
+    sell is consumed at most once; whatever is left over stays unpaired
+    and visible for triage.
+
+    **Why not refuse when several sells fit?** Provincial statements
+    carry a date and no transaction id, so which deposit belongs to
+    which sell is unknowable in principle. Three 20 000 Bs deposits
+    against three ~20 000 Bs sells on one day admit no correct answer,
+    only correct *totals*. The earlier exactly-one rule treated that as
+    a reason to pair nothing, which stranded both halves and left the
+    sells counted as expenses they are not. Consuming N sells against N
+    deposits produces the same balances under any assignment, so the
+    ledger is right either way. See ADR-002 (2026-07-26 amendment).
+
+    Dates are compared by calendar day, not by instant: bank rows carry
+    no time component, so hour-level precision would be false rigour.
     """
 
     name: str = "bank_anchored_p2p_pairing"
@@ -517,7 +548,7 @@ class BankAnchoredP2pPairing:
         self,
         conn: sqlite3.Connection,
         *,
-        window_days: int = 2,
+        window_days: int = 1,
         bank_source: str = "provincial",
         binance_source: str = "binance",
         amount_tolerance_ratio: Decimal = Decimal("0.02"),
@@ -535,59 +566,75 @@ class BankAnchoredP2pPairing:
             SQL_BANK_DEPOSITS,
             {"bank_source": self._bank_source},
         ).fetchall()
+        sell_rows = self._conn.execute(
+            SQL_BINANCE_CANDIDATES,
+            {"binance_source": self._binance_source},
+        ).fetchall()
 
+        scored = self._score_candidates(bank_rows, sell_rows)
+
+        # Claim greedily down the sorted list. Because the sort key ends in
+        # (sell id, bank id) the assignment is total-ordered, so identical
+        # inputs always produce an identical result.
+        used_banks: set[int] = set()
+        used_sells: set[int] = set()
         proposals: list[MatchProposal] = []
-        reserved_binance_ids: set[int] = set()
-
-        for bank in bank_rows:
-            bank_amount = _to_decimal(bank["amount"])
-            if bank_amount == 0:
+        for _gap, _drift, sell_id, bank_id in scored:
+            if bank_id in used_banks or sell_id in used_sells:
                 continue
-            bank_when = self._parse_datetime(bank["occurred_at"])
-            start = bank_when - timedelta(days=self._window_days)
-            end = bank_when + timedelta(days=self._window_days)
-
-            candidates = self._conn.execute(
-                SQL_BINANCE_CANDIDATES,
-                {
-                    "binance_source": self._binance_source,
-                    "start": start.isoformat(),
-                    "end": end.isoformat(),
-                },
-            ).fetchall()
-
-            surviving: list[sqlite3.Row] = []
-            for cand in candidates:
-                cand_id = int(cand["id"])
-                if cand_id in reserved_binance_ids:
-                    continue
-                cand_amount = _to_decimal(cand["amount"])
-                cand_rate = _to_decimal_or_none(cand["user_rate"])
-                if cand_rate is None or cand_rate <= 0:
-                    continue
-                expected = abs(cand_amount) * cand_rate
-                drift_ratio = abs(bank_amount - expected) / bank_amount
-                if drift_ratio <= self._amount_tolerance_ratio:
-                    surviving.append(cand)
-
-            # Uniqueness gate: only act when exactly one candidate matches.
-            if len(surviving) != 1:
-                continue
-
-            chosen = surviving[0]
-            chosen_id = int(chosen["id"])
-            reserved_binance_ids.add(chosen_id)
+            used_banks.add(bank_id)
+            used_sells.add(sell_id)
             proposals.append(
                 MatchProposal(
                     strategy=self.name,
                     details={
-                        "bank_transaction_id": int(bank["id"]),
-                        "binance_transaction_id": chosen_id,
+                        "bank_transaction_id": bank_id,
+                        "binance_transaction_id": sell_id,
                     },
                 )
             )
 
         return proposals
+
+    def _score_candidates(
+        self,
+        bank_rows: list[sqlite3.Row],
+        sell_rows: list[sqlite3.Row],
+    ) -> list[tuple[int, Decimal, int, int]]:
+        """Every eligible (deposit, sell) pairing, best fit first.
+
+        Sorted by day gap, then drift ratio, then sell id, then bank id.
+        """
+        scored: list[tuple[int, Decimal, int, int]] = []
+
+        for bank in bank_rows:
+            bank_amount = _to_decimal(bank["amount"])
+            if bank_amount == 0:
+                continue
+            bank_day = self._parse_datetime(bank["occurred_at"]).date()
+            bank_currency = bank["currency"]
+
+            for sell in sell_rows:
+                rate = _to_decimal_or_none(sell["user_rate"])
+                if rate is None or rate <= 0:
+                    continue
+                if not self._fiat_is_compatible(sell["description"], bank_currency):
+                    continue
+
+                sell_day = self._parse_datetime(sell["occurred_at"]).date()
+                day_gap = self._day_gap(bank_day, sell_day)
+                if day_gap > self._window_days:
+                    continue
+
+                expected = abs(_to_decimal(sell["amount"])) * rate
+                drift_ratio = abs(bank_amount - expected) / bank_amount
+                if drift_ratio > self._amount_tolerance_ratio:
+                    continue
+
+                scored.append((day_gap, drift_ratio, int(sell["id"]), int(bank["id"])))
+
+        scored.sort()
+        return scored
 
     def apply(self, proposal: MatchProposal) -> None:
         bank_id = proposal.details["bank_transaction_id"]
@@ -599,6 +646,34 @@ class BankAnchoredP2pPairing:
         )
 
     # -- helpers -----------------------------------------------------------
+    @staticmethod
+    def _day_gap(bank_day: date, sell_day: date) -> int:
+        """Calendar days between a deposit and a sell.
+
+        Provincial rows have a date but no time, and the two sources sit
+        in different timezones (bank in Caracas, Binance in UTC), so a
+        sell late at night can land on the neighbouring calendar day.
+        That is precisely what the ±1 day default absorbs.
+        """
+        return abs((sell_day - bank_day).days)
+
+    @staticmethod
+    def _fiat_is_compatible(description: Any, bank_currency: Any) -> bool:
+        """Whether a sell may anchor against a deposit in ``bank_currency``.
+
+        Rejects only a *known* mismatch. A description that does not carry
+        the ingest-written ``@ <rate> <FIAT> (order ...)`` shape — legacy
+        or backfilled rows, or none at all — is allowed through, so this
+        guard closes the USD-priced hole without silently dropping rows
+        whose denomination was never recorded.
+        """
+        if description is None:
+            return True
+        found = _FIAT_IN_DESCRIPTION_RE.search(str(description))
+        if found is None:
+            return True
+        return found.group(1).upper() == str(bank_currency).upper()
+
     @staticmethod
     def _parse_datetime(value: Any) -> datetime:
         """Parse an ISO-8601 timestamp from sqlite back into datetime.

@@ -177,9 +177,9 @@ def ingest_provincial(
         help="Path to a Provincial statement CSV (semicolon-delimited).",
     ),
     pairing_window_days: int = typer.Option(
-        2,
+        1,
         "--pairing-window-days",
-        help="±Day window used for bank-anchored P2P pairing (default 2).",
+        help="±Day window used for bank-anchored P2P pairing (default 1).",
     ),
     no_pairing: bool = typer.Option(
         False,
@@ -419,9 +419,9 @@ def backfill(
         help="Directory holding the legacy CSVs (Finanzas - *.csv).",
     ),
     pairing_window_days: int = typer.Option(
-        2,
+        1,
         "--pairing-window-days",
-        help="±Day window used for bank-anchored P2P pairing (default 2).",
+        help="±Day window used for bank-anchored P2P pairing (default 1).",
     ),
     force: bool = typer.Option(
         False,
