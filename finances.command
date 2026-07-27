@@ -17,10 +17,12 @@
 #   5. on exit (Ctrl-C or closing the window), regenerate report.html so the
 #      static file reflects any edits made this session.
 #
-# The server's own shutdown hook also regenerates report.html; the EXIT trap
-# below is a harmless belt-and-suspenders for the cases where it can't (e.g. a
-# hard window close before the server finishes teardown). `finances update`
-# regenerates report.html too.
+# `finances serve` also regenerates report.html on the way out — from the
+# lifespan hook normally, or from serve_cmd itself under the reload supervisor
+# (where the child is SIGTERM'd on every source edit and must NOT export each
+# time). The EXIT trap below is a harmless belt-and-suspenders for the cases
+# where neither can (e.g. a hard window close before teardown finishes).
+# `finances update` regenerates report.html too.
 
 set -euo pipefail
 
@@ -40,8 +42,15 @@ if ! command -v uv >/dev/null 2>&1; then
   exit 1
 fi
 
+# "Running" now means answering, not merely bound. Under the reload
+# supervisor (ADR-012 Amendment 2026-07-26) the parent holds the socket even
+# when its child is dead on a broken edit — so a bare lsof check would report
+# "already running", open the browser onto a hang, and exit 0. If the port is
+# bound but /health does not answer, fall through to the start path and let it
+# fail loudly on "Address already in use": a visible error beats a silent hang.
 port_in_use() {
-  lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1
+  lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1 || return 1
+  curl -fs --max-time 2 "${URL}health" >/dev/null 2>&1
 }
 
 if port_in_use; then
