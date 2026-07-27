@@ -211,3 +211,57 @@ and still do not update after a save. Triage rate edits still never call
 `realized_rates.rebuild()`, so editing a P2P sell's rate leaves materialised
 `binance_p2p_realized` rows stale until the next ingest (ADR-013 §3). Both are
 pre-existing and independently ticketed.
+
+## Closing note — 2026-07-26: the deferred triage items are done
+
+**Status:** Informational. Records that the "Not addressed here" list above
+is closed and that the 2026-07-21 action row finally exists. Decides
+nothing new; the amendments above stand as written and are deliberately
+left uncorrected, since each is a dated record of what was true when it
+shipped.
+
+1. **Filter-chip counts** are truthful and self-refreshing. "All" now reads
+   `TriageQueue.total` — the sum of `counts`, always computed on the
+   unfiltered set — instead of `queue.items | length`, which is the
+   *filtered* length and made the chip contradict its own siblings. The
+   chip row and the counts line moved inside `#triage-queue`, the target
+   of every swap on the screen, exactly as the bucket-count header
+   already had. No out-of-band swap was introduced; the repo still has
+   none. The `<h1>` count was deleted rather than relocated — a number in
+   the page shell can never be refreshed, and an `<h1>` does not belong in
+   an HTMX fragment.
+
+   `data-active` is accurate again as a side effect, but the amendment
+   above still holds where it matters: the refresh filter travels in the
+   `queueDirty` payload from the server and is never read back off the
+   DOM.
+
+2. **Web rate edits rebuild the realized cost basis** in the same request.
+   The hook is in `apply_edit`, the single choke point for every web
+   `user_rate` write, so the `/transactions` modal and
+   `PATCH /api/transactions/{id}` are covered alongside triage. See the
+   ADR-013 amendment of this date for the trigger predicate, the measured
+   cost, and the pruning follow-up it forced.
+
+3. **The action row is `[← →] [Park] [Cancel] [Save & next]`**, as the
+   2026-07-21 amendment promised. `←` is positional — the item above this
+   one in the live queue. A history stack was rejected: it reaches rows
+   already resolved, and saving from one returns `None` from
+   `next_item_after` (an unknown `resolved_id` is the exhausted-queue
+   signal), which would end the run. Arrows introduce no endpoint; the
+   neighbour is known at render time, so each points at that item's
+   existing modal URL and renders `disabled` at the ends. Selection reads
+   `queue.items`, so an arrow can never land on a parked row.
+
+   The "nearest surviving neighbour in direction D" walk is now shared:
+   `next_item_after` keeps hunting past every row a write removed, while
+   `neighbours_of` steps exactly one slot because nothing was removed.
+
+**One lesson worth keeping.** The first cut of the arrows rendered their
+URLs with `{{ url | tojson }}`, which emits double quotes and therefore
+terminated the double-quoted `@click` attribute, leaving Alpine to throw
+`SyntaxError` on a truncated `navigateModal(`. Every server-side test
+passed — the response was a valid 200 whose markup still contained the
+handler name. Only driving a real browser against a copy of the ledger
+surfaced it. Template changes that emit JS into an attribute need a
+browser pass, and their tests should assert the exact rendered call.
