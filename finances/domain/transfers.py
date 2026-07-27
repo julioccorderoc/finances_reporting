@@ -143,9 +143,21 @@ def _promote_to_transfer(
     transaction_id: int,
     transfer_id: str,
 ) -> None:
+    """Promote a row into a transfer leg and retire its review flag.
+
+    ``needs_review`` asks "could the importer categorise this?" — for a
+    paired transfer the question no longer applies, because transfers
+    are not categorised at all (rule-006) and triage already drops
+    ``kind='transfer'`` from the review surface. Leaving the flag up
+    stranded the row: triage called it resolved while every surface
+    reading the column directly kept queueing it.
+
+    Only the flag is cleared. ``category_id`` is left as-is so a
+    category the owner set by hand survives the promotion.
+    """
     conn.execute(
         "UPDATE transactions SET kind = 'transfer', transfer_id = ?, "
-        "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        "needs_review = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
         (transfer_id, transaction_id),
     )
 
