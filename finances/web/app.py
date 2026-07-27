@@ -28,6 +28,7 @@ from fastapi.templating import Jinja2Templates
 
 from finances.format import fmt_date, fmt_money, fmt_month, fmt_number
 from finances.web.auth import BearerTokenMiddleware
+from finances.web.errors import install_exception_handlers
 from finances.web.routers import api as api_router
 from finances.web.routers import pages as pages_router
 from finances.web.routers import partials as partials_router
@@ -140,6 +141,8 @@ def create_app(settings: WebSettings) -> FastAPI:
     app.include_router(pages_router.router)
     app.include_router(partials_router.router)
     app.include_router(api_router.router)
+
+    install_exception_handlers(app)
 
     @app.middleware("http")
     async def _stamp_boot_id(request, call_next):  # type: ignore[no-untyped-def]
