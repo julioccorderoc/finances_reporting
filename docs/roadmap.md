@@ -682,11 +682,13 @@
 - New package `finances/web/` with `app.py` factory, `deps.py` (`get_conn`), `auth.py` (BearerTokenMiddleware), `settings.py` (Pydantic v2), `routers/{pages,partials,api}.py` empty stubs.
 - `finances/web/templates/base.html` with vendored HTMX/Alpine/Chart.js.
 - `finances/web/static/vendor/` with pinned htmx 2.0.x, alpinejs 3.14.x, chart.js 4.4.x.
-- `finances serve --host --port --open --token` Typer command.
+- `finances serve --host --port --open --token --reload/--no-reload` Typer
+  command. Reload defaults ON for the `127.0.0.1` bind and is refused on LAN
+  binds (ADR-012 Amendment 2026-07-26).
 - Add `fastapi`, `uvicorn[standard]`, `jinja2`, `python-multipart` deps to `pyproject.toml`.
 - Tests: `tests/test_web_app.py` covers boot, auth middleware (LAN bind requires token), static-file serving.
 
-**Verification Criteria:** `uv pip install -e .` succeeds; `finances serve --port 8765` boots; `/health` returns ok JSON; LAN bind without token exits non-zero; `pytest tests/test_web_app.py` all green.
+**Verification Criteria:** `uv pip install -e .` succeeds; `finances serve --port 8765` boots; `/health` returns ok JSON; LAN bind without token exits non-zero; `pytest tests/test_web_app.py` all green; editing a watched file under `finances/` restarts the server while the socket keeps answering (`pytest -m integration tests/web/test_serve_reload_smoke.py`); a `TemplateResponse` call site that omits a variable its template reads fails `pytest tests/web/test_template_contract.py`.
 
 ---
 

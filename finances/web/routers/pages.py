@@ -23,6 +23,7 @@ from finances.db.repos import accounts as accounts_repo
 from finances.db.repos import categories as categories_repo
 from finances.db.repos import saved_views as saved_views_repo
 from finances.web.deps import get_conn
+from finances.web.settings import ENV_RELOAD_CHILD
 from finances.web.routers._monthly_filter_dep import monthly_filter_from_query
 from finances.web.routers._tx_filter_dep import filter_from_query
 from finances.web.services.accounts_view import build_account_cards
@@ -81,6 +82,18 @@ _GOODBYE_HTML = """<!doctype html>
 
 
 def _terminate() -> None:
+    # Under the reload supervisor this process is a spawn()'ed child and the
+    # parent is the supervisor holding the listening socket. Signalling
+    # ourselves would kill the child only: the supervisor never checks child
+    # liveness (it iterates on file events), so the port stays bound and the
+    # next source edit respawns the server the owner just stopped. Signal the
+    # parent instead — SIGTERM is in uvicorn's handled set, so it drains the
+    # child, returns from uvicorn.run, and lets serve_cmd's finally run the
+    # one report.html regen.
+    if os.environ.get(ENV_RELOAD_CHILD) == "1" and os.getppid() > 1:
+        os.kill(os.getppid(), signal.SIGTERM)
+        return
+
     # SIGINT = the same signal as Ctrl-C in the launcher terminal: uvicorn
     # shuts down gracefully and the lifespan hook regenerates report.html.
     os.kill(os.getpid(), signal.SIGINT)

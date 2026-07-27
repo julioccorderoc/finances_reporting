@@ -37,6 +37,8 @@ from finances.domain.models import (
     Transaction,
     TransactionKind,
 )
+from jinja2 import StrictUndefined
+
 from finances.web.app import create_app
 from finances.web.settings import WebSettings
 
@@ -87,6 +89,12 @@ def web_client_factory(
 
     def _make() -> TestClient:
         app = create_app(WebSettings(host="127.0.0.1", db_path=web_db_path))
+        # Strict in tests, lenient in production (jinja's default Undefined
+        # renders empty for {{ x }} and only raises on operations). One line
+        # turns every web test in this suite into a missing-context check —
+        # the runtime deliberately stays lenient, because an em dash where a
+        # number belongs is worse in a ledger than a loud failure in CI.
+        app.state.templates.env.undefined = StrictUndefined
         return TestClient(app)
 
     return _make

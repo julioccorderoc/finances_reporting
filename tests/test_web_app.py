@@ -16,6 +16,10 @@ contract from docs/plans/web-viewer-v1.md Phase 1:
 
 from __future__ import annotations
 
+import os
+from types import SimpleNamespace
+
+import pytest
 from typer.testing import CliRunner
 
 from fastapi import FastAPI
@@ -280,3 +284,184 @@ def test_serve_cli_command_validates_lan_token() -> None:
     assert result.exit_code != 0
     combined = result.output or ""
     assert "token" in combined.lower()
+
+
+# ---------------------------------------------------------------------------
+# serve_cmd under the reload supervisor (ADR-012 Amendment 2026-07-26).
+#
+# The reloader cannot be handed an app object — it re-imports the app in a
+# spawn()'ed child — so serve_cmd's call shape changes, and with it the way
+# every setting reaches the server. These tests pin that shape, because a
+# regression here is invisible until it is a wrong ledger or an open socket.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def uvicorn_recorder(monkeypatch):
+    """Capture the uvicorn.run call and the environment it was made in.
+
+    Also neutralises the shutdown regen: under reload the CLI owns it, and
+    an unpatched run would rewrite the repo's real report.html from the
+    repo's real ledger during the test suite.
+    """
+    import uvicorn
+
+    from finances.web import app as web_app
+
+    calls: list[dict] = []
+    regen_calls: list[object] = []
+
+    def _fake_run(*args, **kwargs) -> None:
+        calls.append(
+            {"args": args, "kwargs": kwargs, "environ": dict(os.environ)}
+        )
+
+    monkeypatch.setattr(uvicorn, "run", _fake_run)
+    monkeypatch.setattr(
+        web_app,
+        "_regen_report_on_shutdown",
+        lambda settings: regen_calls.append(settings),
+    )
+    monkeypatch.setattr(os, "environ", dict(os.environ))
+
+    return SimpleNamespace(calls=calls, regen_calls=regen_calls)
+
+
+def _invoke_serve(*argv: str):
+    from finances.cli.main import app as cli_app
+
+    return CliRunner().invoke(cli_app, ["serve", *argv])
+
+
+def test_serve_defaults_to_an_import_string_and_factory(
+    uvicorn_recorder,
+) -> None:
+    from finances.web.app import (
+        IMPORT_STRING,
+        RELOAD_DIRS,
+        RELOAD_EXCLUDES,
+        RELOAD_INCLUDES,
+    )
+
+    result = _invoke_serve("--port", "18765")
+    assert result.exit_code == 0, result.output
+
+    (call,) = uvicorn_recorder.calls
+    assert call["args"][0] == IMPORT_STRING
+    assert call["kwargs"]["factory"] is True
+    assert call["kwargs"]["reload"] is True
+    assert call["kwargs"]["reload_dirs"] == list(RELOAD_DIRS)
+    assert call["kwargs"]["reload_includes"] == list(RELOAD_INCLUDES)
+    assert call["kwargs"]["reload_excludes"] == list(RELOAD_EXCLUDES)
+    assert call["kwargs"]["timeout_graceful_shutdown"] == 10
+    assert call["kwargs"]["host"] == "127.0.0.1"
+    assert call["kwargs"]["port"] == 18765
+
+
+def test_serve_no_reload_passes_the_app_object(uvicorn_recorder) -> None:
+    """The pre-supervisor path must stay exactly as it was."""
+    result = _invoke_serve("--no-reload", "--port", "18765")
+    assert result.exit_code == 0, result.output
+
+    (call,) = uvicorn_recorder.calls
+    assert isinstance(call["args"][0], FastAPI)
+    assert "reload" not in call["kwargs"]
+    assert "factory" not in call["kwargs"]
+
+
+def test_serve_exports_full_settings_before_uvicorn_run(
+    uvicorn_recorder,
+) -> None:
+    """The child inherits only os.environ, so everything must be in it.
+
+    --token is the sharp case: Typer consumes it into a local and nothing
+    propagates it, so a child would otherwise rebuild settings with
+    token=None.
+    """
+    from finances.web.settings import (
+        ENV_DB_PATH,
+        ENV_HOST,
+        ENV_PORT,
+        ENV_REGEN,
+        ENV_RELOAD_CHILD,
+        ENV_TOKEN,
+    )
+
+    result = _invoke_serve("--port", "18765", "--token", "from-argv")
+    assert result.exit_code == 0, result.output
+
+    env = uvicorn_recorder.calls[0]["environ"]
+    assert env[ENV_RELOAD_CHILD] == "1"
+    assert env[ENV_HOST] == "127.0.0.1"
+    assert env[ENV_PORT] == "18765"
+    assert env[ENV_TOKEN] == "from-argv"
+    assert env[ENV_DB_PATH]
+    assert env[ENV_REGEN] == "0"
+
+
+def test_reload_moves_regen_to_the_supervisor(uvicorn_recorder) -> None:
+    from finances.web.settings import ENV_REGEN
+
+    result = _invoke_serve("--port", "18765")
+    assert result.exit_code == 0, result.output
+
+    assert uvicorn_recorder.calls[0]["environ"][ENV_REGEN] == "0"
+    assert len(uvicorn_recorder.regen_calls) == 1
+
+
+def test_no_reload_leaves_regen_with_the_lifespan_hook(
+    uvicorn_recorder,
+) -> None:
+    result = _invoke_serve("--no-reload", "--port", "18765")
+    assert result.exit_code == 0, result.output
+
+    app_object = uvicorn_recorder.calls[0]["args"][0]
+    assert app_object.state.settings.regen_report_on_shutdown is True
+    assert uvicorn_recorder.regen_calls == []
+
+
+def test_lan_bind_refuses_reload(uvicorn_recorder) -> None:
+    """A reload child rebuilds settings from env and is localhost-only.
+
+    Allowing --reload on a LAN bind would spawn a child that defaults host
+    back to 127.0.0.1 — which is the value the bearer middleware
+    short-circuits on — while the parent holds a LAN socket.
+    """
+    result = _invoke_serve(
+        "--host", "0.0.0.0", "--token", "t", "--port", "18765", "--reload"
+    )
+
+    assert result.exit_code == 2
+    assert "localhost" in result.output.lower()
+    assert uvicorn_recorder.calls == []
+
+
+def test_lan_bind_defaults_to_no_reload(uvicorn_recorder) -> None:
+    result = _invoke_serve(
+        "--host", "0.0.0.0", "--token", "t", "--port", "18765"
+    )
+    assert result.exit_code == 0, result.output
+
+    (call,) = uvicorn_recorder.calls
+    assert isinstance(call["args"][0], FastAPI)
+    assert "reload" not in call["kwargs"]
+
+
+def test_lifespan_skips_regen_when_the_caller_owns_it(
+    tmp_path, monkeypatch
+) -> None:
+    from finances import config
+    from finances.web.app import create_app
+    from finances.web.settings import WebSettings
+
+    db_path = _seed_db_with_txn(tmp_path)
+    report = tmp_path / "report.html"
+    monkeypatch.setattr(config, "REPORT_HTML_PATH", report)
+
+    app = create_app(
+        WebSettings(db_path=db_path, regen_report_on_shutdown=False)
+    )
+    with TestClient(app) as client:
+        assert client.get("/health").status_code == 200
+
+    assert not report.exists()
