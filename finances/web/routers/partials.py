@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Sequence
 from decimal import Decimal, InvalidOperation
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, Response
@@ -39,6 +40,7 @@ from finances.web.services.triage import (
     TriageType,
     build_queue,
     confirm_pair,
+    neighbours_of,
     next_item_after,
 )
 from finances.web.services.monthly_view import (
@@ -514,17 +516,64 @@ def triage_queue_partial(
     return _render_queue_partial(request, conn, type_filter=parsed)
 
 
+def _modal_url_for(item: TriageItem, type_filter: str | None) -> str:
+    """URL of the modal that opens ``item``.
+
+    Arrow navigation needs no endpoint of its own: the neighbour is known
+    at render time, so an arrow points straight at the existing
+    click-to-open route for that item. ``type_filter`` rides along so an
+    arrow lands in the same filtered queue the owner is working.
+    """
+    if item.type is TriageType.PAIR and item.pair_proposal is not None:
+        deposit_id = int(item.pair_proposal.details["bank_transaction_id"])
+        sell_id = int(item.pair_proposal.details["binance_transaction_id"])
+        path = f"/_partial/triage/pair/{deposit_id}/{sell_id}/modal"
+    else:
+        path = f"/_partial/triage/{item.item_id.split(':')[1]}/modal"
+
+    return path if not type_filter else f"{path}?type_filter={type_filter}"
+
+
+def _nav_urls(
+    conn: sqlite3.Connection,
+    item_id: str,
+    type_filter: str | None,
+    queue_items: Sequence[TriageItem] | None,
+) -> tuple[str | None, str | None]:
+    """``(prev_url, next_url)`` for the modal on ``item_id``.
+
+    ``queue_items`` lets the advance path hand over the queue it already
+    rebuilt to pick the successor; the click-to-open routes have no such
+    queue and build one. Either way navigation reads ``queue.items``, so
+    an arrow can never target a parked row.
+    """
+    if queue_items is None:
+        queue_items = build_queue(
+            conn, type_filter=_parse_triage_type_partial(type_filter)
+        ).items
+
+    prev_item, next_item = neighbours_of(queue_items, item_id)
+    return (
+        None if prev_item is None else _modal_url_for(prev_item, type_filter),
+        None if next_item is None else _modal_url_for(next_item, type_filter),
+    )
+
+
 def _render_triage_txn_modal(
     request: Request,
     conn: sqlite3.Connection,
     txn_id: int,
     type_filter: str | None,
+    *,
+    queue_items: Sequence[TriageItem] | None = None,
 ):
     """Render the Save & next variant of the txn-edit modal.
 
     Shared by the click-to-open GET route and by the advance path, so an
     item opened by hand and an item advanced into are byte-identical
-    (ADR-012 Amendment 2026-07-26).
+    (ADR-012 Amendment 2026-07-26) — including their arrows, which is why
+    the advance passes down the queue it already built rather than
+    letting this build a third one.
     """
     txn = transactions_repo.get_by_id(conn, txn_id)
     if txn is None:
@@ -563,6 +612,10 @@ def _render_triage_txn_modal(
         )
     )
 
+    prev_url, next_url = _nav_urls(
+        conn, f"txn:{txn_id}", type_filter, queue_items
+    )
+
     templates = request.app.state.templates
     return templates.TemplateResponse(
         request,
@@ -575,6 +628,8 @@ def _render_triage_txn_modal(
             "account_name": account_name,
             "day_rates": day_rates,
             "active_filter": type_filter,
+            "prev_url": prev_url,
+            "next_url": next_url,
         },
     )
 
@@ -639,10 +694,15 @@ def _advance_after_write(
             deposit_id=int(nxt.pair_proposal.details["bank_transaction_id"]),
             sell_id=int(nxt.pair_proposal.details["binance_transaction_id"]),
             type_filter=filter_value,
+            queue_items=after.items,
         )
     else:
         response = _render_triage_txn_modal(
-            request, conn, int(nxt.item_id.split(":")[1]), filter_value
+            request,
+            conn,
+            int(nxt.item_id.split(":")[1]),
+            filter_value,
+            queue_items=after.items,
         )
 
     response.headers["HX-Trigger"] = _hx_trigger_json(
@@ -710,6 +770,7 @@ def _render_triage_pair_modal(
     deposit_id: int,
     sell_id: int,
     type_filter: str | None,
+    queue_items: Sequence[TriageItem] | None = None,
 ):
     """Render the pair-confirm modal for the (deposit, sell) pair.
 
@@ -759,11 +820,20 @@ def _render_triage_pair_modal(
         },
     )
 
+    prev_url, next_url = _nav_urls(
+        conn, f"pair:{deposit_id}:{sell_id}", type_filter, queue_items
+    )
+
     templates = request.app.state.templates
     return templates.TemplateResponse(
         request,
         "partials/modal_pair_confirm.html",
-        {"proposal": proposal, "active_filter": type_filter},
+        {
+            "proposal": proposal,
+            "active_filter": type_filter,
+            "prev_url": prev_url,
+            "next_url": next_url,
+        },
     )
 
 

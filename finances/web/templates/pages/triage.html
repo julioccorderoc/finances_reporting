@@ -3,42 +3,16 @@
 {% block content %}
 {% from "_macros.html" import triage_type_badge %}
 
+  {# No count here. Anything numeric must live inside #triage-queue — the
+     target of every swap on this screen — or it freezes at page load.
+     The chip row and the counts line moved into partials/triage_queue.html
+     for exactly that reason. #}
   <header class="mb-4">
-    <h1 class="text-2xl font-semibold">
-      Triage
-      <span class="ml-2 text-sm font-normal text-slate-500">({{ queue.items | length }} items)</span>
-    </h1>
+    <h1 class="text-2xl font-semibold">Triage</h1>
     <p class="mt-1 text-sm text-slate-600">
       Oldest unresolved issue first. Save advances; Park for later removes an item durably.
     </p>
   </header>
-
-  {# Filter chips: All / Rates / Categories / Pairs. Active state from
-     ``active_filter`` (passed in by router; None = "all"). #}
-  <nav class="flex flex-wrap gap-2 mb-4 text-sm" data-triage-filter>
-    {% set chip_def = [
-        ("all", "All", queue.items | length),
-        ("rate", "Rates", queue.counts.get('rate', 0)),
-        ("category", "Categories", queue.counts.get('category', 0)),
-        ("pair", "Pairs", queue.counts.get('pair', 0)),
-    ] %}
-    {% for value, label, n in chip_def %}
-      {% set is_active = (active_filter == value) or (active_filter is none and value == 'all') %}
-      <button
-        type="button"
-        class="px-3 py-1 border rounded
-               {% if is_active %}bg-slate-900 text-white border-slate-900{% else %}bg-white text-slate-700 border-slate-300 hover:bg-slate-50{% endif %}"
-        data-filter-chip="{{ value }}"
-        data-active="{{ 'true' if is_active else 'false' }}"
-        hx-get="/_partial/triage/queue{% if value != 'all' %}?type_filter={{ value }}{% endif %}"
-        hx-target="#triage-queue"
-        hx-push-url="true"
-        hx-swap="innerHTML"
-      >
-        {{ label }} ({{ n }})
-      </button>
-    {% endfor %}
-  </nav>
 
   {% if queue.integrity_warnings %}
   <section class="mb-4 p-3 border border-amber-300 bg-amber-50 rounded text-sm" data-integrity-warnings>

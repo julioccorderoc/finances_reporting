@@ -52,6 +52,27 @@
       },
       showToast(t) {
         if (t && t.toast) window.dispatchEvent(new CustomEvent('show-toast', { detail: t.toast }));
+      },
+      {# Queue navigation (ADR-012 Amendment 2026-07-21). Lives here, not
+         in the modal, so the txn and pair variants share one
+         implementation and the same htmx.ajax swap the queue refresh
+         above already uses. #}
+      modalDirty() {
+        const form = document.querySelector('#tx-modal-host form.tx-modal-form');
+        if (!form) return false;
+        {# Read the hidden set_* sentinels, not the Alpine flags: the WP4
+           category picker tracks its own dirty state in its own scope,
+           and the form's catDirty is never written. The sentinels are
+           where all three fields' dirtiness actually lands. #}
+        return ['set_category', 'set_user_rate', 'set_notes'].some(name => {
+          const el = form.querySelector('[name=' + name + ']');
+          return el && el.value === 'true';
+        });
+      },
+      navigateModal(url) {
+        if (!url) return;
+        if (this.modalDirty() && !window.confirm('Discard unsaved changes?')) return;
+        htmx.ajax('GET', url, { target: '#tx-modal-host', swap: 'innerHTML' });
       }
     }"
     @close-modal.window="

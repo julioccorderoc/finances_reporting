@@ -28,6 +28,18 @@
      it has to claim focus itself or the keyboard is left on <body>. #}
   x-init="$nextTick(() => { const c = $el.querySelector('.tx-modal-card'); if (c) c.focus(); })"
   @keydown.escape.window="window.dispatchEvent(new CustomEvent('close-modal'))"
+  {# Arrow parity with the txn modal. No text inputs here, so there is
+     nothing for an arrow key to mean other than "move in the queue". #}
+  @keydown.window="
+    if ($event.repeat) return;
+    if ($event.key === 'ArrowLeft') {
+      const prev = $el.querySelector('[data-nav-prev]:not([disabled])');
+      if (prev) { prev.click(); $event.preventDefault(); }
+    } else if ($event.key === 'ArrowRight') {
+      const next = $el.querySelector('[data-nav-next]:not([disabled])');
+      if (next) { next.click(); $event.preventDefault(); }
+    }
+  "
 >
   <div class="tx-modal-card" role="dialog" aria-modal="true" tabindex="-1">
     <header class="tx-modal-header">
@@ -86,6 +98,7 @@
     </section>
 
     <div class="tx-modal-actions">
+      {% include "partials/triage_modal_nav.html" %}
       <button
         type="button"
         class="px-3 py-1.5 text-sm border border-slate-300 rounded bg-white hover:bg-slate-50"

@@ -20,19 +20,29 @@ import pytest
 from typer.testing import CliRunner
 
 from finances.db.repos import accounts as accounts_repo
+from finances.db.repos import rates as rates_repo
 from finances.db.repos import transactions as txn_repo
+from finances.domain import rates as rates_engine
 from finances.domain import realized_rates
-from finances.domain.models import Transaction, TransactionKind
+from finances.domain.models import Rate, Transaction, TransactionKind
 
 REALIZED_SOURCE = "binance_p2p_realized"
 
 
-def _binance_account_id(conn: sqlite3.Connection) -> int:
+def _account_id(conn: sqlite3.Connection, name: str) -> int:
     for account in accounts_repo.list_all(conn):
-        if account.name == "Binance Spot":
+        if account.name == name:
             assert account.id is not None
             return account.id
-    raise AssertionError("seeded_db should provide a 'Binance Spot' account")
+    raise AssertionError(f"seeded_db should provide a {name!r} account")
+
+
+def _binance_account_id(conn: sqlite3.Connection) -> int:
+    return _account_id(conn, "Binance Spot")
+
+
+def _ves_account_id(conn: sqlite3.Connection) -> int:
+    return _account_id(conn, "Provincial Bolivares")
 
 
 def _p2p_fill(
@@ -295,6 +305,153 @@ def test_rebuild_with_no_p2p_history_writes_nothing(
 ) -> None:
     assert realized_rates.rebuild(seeded_db) == 0
     assert _rates_by_day(seeded_db) == {}
+
+
+# ---------------------------------------------------------------------------
+# Pruning: the materialised set mirrors the fills, it does not accumulate.
+#
+# rebuild() used to only upsert, so a day that stopped qualifying kept the
+# rate row it was last given. The resolver would then price bolivar spending
+# off a fill that no longer exists — and because the realized tier outranks
+# the market median, a stale row wins over a correct one.
+# ---------------------------------------------------------------------------
+
+
+def test_rebuild_drops_a_day_whose_last_fill_lost_its_rate(
+    seeded_db: sqlite3.Connection,
+) -> None:
+    """Clearing the only fill of a day must remove that day's rate."""
+    account_id = _binance_account_id(seeded_db)
+    fill = _p2p_fill(
+        seeded_db, account_id=account_id, day=date(2025, 7, 1),
+        usdt="100", rate="40", order="1",
+    )
+    realized_rates.rebuild(seeded_db)
+    assert _rates_by_day(seeded_db) != {}
+
+    txn_repo.update(seeded_db, id=fill.id, user_rate=None)
+
+    assert realized_rates.rebuild(seeded_db) == 0
+    assert _rates_by_day(seeded_db) == {}
+
+
+def test_rebuild_keeps_days_that_still_qualify(
+    seeded_db: sqlite3.Connection,
+) -> None:
+    """Pruning is surgical: only the day that stopped qualifying goes."""
+    account_id = _binance_account_id(seeded_db)
+    gone = _p2p_fill(
+        seeded_db, account_id=account_id, day=date(2025, 7, 1),
+        usdt="100", rate="40", order="1",
+    )
+    _p2p_fill(
+        seeded_db, account_id=account_id, day=date(2025, 7, 2),
+        usdt="100", rate="44", order="2",
+    )
+    realized_rates.rebuild(seeded_db)
+
+    txn_repo.update(seeded_db, id=gone.id, user_rate=None)
+    realized_rates.rebuild(seeded_db)
+
+    _assert_stored(_rates_by_day(seeded_db), {date(2025, 7, 2): Decimal("44")})
+
+
+def test_rebuild_drops_a_day_whose_fill_was_deleted(
+    seeded_db: sqlite3.Connection,
+) -> None:
+    """The other drift ADR-013 §2 names: a P2P transaction deleted."""
+    account_id = _binance_account_id(seeded_db)
+    fill = _p2p_fill(
+        seeded_db, account_id=account_id, day=date(2025, 7, 1),
+        usdt="100", rate="40", order="1",
+    )
+    realized_rates.rebuild(seeded_db)
+
+    seeded_db.execute("DELETE FROM transactions WHERE id = ?", (fill.id,))
+    realized_rates.rebuild(seeded_db)
+
+    assert _rates_by_day(seeded_db) == {}
+
+
+def test_rebuild_leaves_other_sources_alone(
+    seeded_db: sqlite3.Connection,
+) -> None:
+    """Pruning is scoped to the source this module owns.
+
+    ``binance_p2p_median`` and ``bcv`` rows on the same day belong to the
+    ingesters, and rule-005 keeps them as independent tiers.
+    """
+    account_id = _binance_account_id(seeded_db)
+    fill = _p2p_fill(
+        seeded_db, account_id=account_id, day=date(2025, 7, 1),
+        usdt="100", rate="40", order="1",
+    )
+    for source in ("binance_p2p_median", "bcv"):
+        rates_repo.upsert(
+            seeded_db,
+            Rate(
+                as_of_date=date(2025, 7, 1),
+                base="USDT" if source != "bcv" else "USD",
+                quote="VES",
+                rate=Decimal("41"),
+                source=source,
+            ),
+        )
+    realized_rates.rebuild(seeded_db)
+
+    txn_repo.update(seeded_db, id=fill.id, user_rate=None)
+    realized_rates.rebuild(seeded_db)
+
+    survivors = seeded_db.execute(
+        "SELECT source FROM rates ORDER BY source"
+    ).fetchall()
+    assert [row["source"] for row in survivors] == ["bcv", "binance_p2p_median"]
+
+
+def test_pruning_a_stale_day_restores_the_market_tier(
+    seeded_db: sqlite3.Connection,
+) -> None:
+    """Why it matters: the realized tier outranks the market median.
+
+    A stale realized row does not merely linger — it keeps winning the
+    resolver chain over the market rate that is now the honest answer.
+    """
+    account_id = _binance_account_id(seeded_db)
+    day = date(2025, 7, 1)
+    fill = _p2p_fill(
+        seeded_db, account_id=account_id, day=day,
+        usdt="100", rate="40", order="1",
+    )
+    rates_repo.upsert(
+        seeded_db,
+        Rate(
+            as_of_date=day, base="USDT", quote="VES",
+            rate=Decimal("55"), source="binance_p2p_median",
+        ),
+    )
+    realized_rates.rebuild(seeded_db)
+
+    spend = txn_repo.insert(
+        seeded_db,
+        Transaction(
+            account_id=_ves_account_id(seeded_db),
+            occurred_at=datetime(2025, 7, 1, 15, 0, tzinfo=UTC),
+            kind=TransactionKind.EXPENSE,
+            amount=Decimal("-4000.00"),
+            currency="VES",
+            description="COM.PAGO bodega",
+            source="provincial",
+            source_ref="prune-spend",
+        ),
+    )
+    assert rates_engine.resolve(seeded_db, spend)[1] == REALIZED_SOURCE
+
+    txn_repo.update(seeded_db, id=fill.id, user_rate=None)
+    realized_rates.rebuild(seeded_db)
+
+    rate, source = rates_engine.resolve(seeded_db, spend)
+    assert source == "binance_p2p_median"
+    assert rate == Decimal("55")
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Collection
 from datetime import date
 from decimal import Decimal
 
@@ -83,6 +84,36 @@ def get(
         (as_of_date.isoformat(), base, quote, source),
     ).fetchone()
     return _row_to_rate(row) if row else None
+
+
+def delete_source_except(
+    conn: sqlite3.Connection,
+    *,
+    base: str,
+    quote: str,
+    source: str,
+    keep_dates: Collection[date],
+) -> int:
+    """Delete every ``source`` row for this pair except the given dates.
+
+    Exists for derived sources, where the stored set must mirror the
+    derivation rather than accumulate: a day that stops qualifying has to
+    lose its row, not keep the last value it was given. Scoped to one
+    ``(base, quote, source)`` so pruning one tier cannot touch another.
+
+    An empty ``keep_dates`` clears the source for that pair — the correct
+    result when the derivation yields nothing at all.
+
+    Returns the number of rows deleted.
+    """
+    kept = sorted({d.isoformat() for d in keep_dates})
+    placeholders = ",".join("?" * len(kept))
+    sql = (
+        "DELETE FROM rates WHERE base = ? AND quote = ? AND source = ?"
+        + (f" AND as_of_date NOT IN ({placeholders})" if kept else "")
+    )
+    cur = conn.execute(sql, (base, quote, source, *kept))
+    return cur.rowcount
 
 
 def latest_on_or_before(
