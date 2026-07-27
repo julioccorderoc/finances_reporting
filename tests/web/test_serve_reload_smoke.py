@@ -120,12 +120,23 @@ def test_watch_restart_socket_survives_then_stop() -> None:
         assert after is not None, (
             "touching a watched template did not restart the server"
         )
-        restarted_status, boot_after = after
+        _, boot_after = after
 
-        # The whole point: the listening socket never went away, so a
-        # request landing mid-restart is answered late, not refused.
-        assert restarted_status == 200
+        # A new boot id proves the child was replaced.
         assert boot_after != boot_before
+
+        # And this proves the socket holder was NOT: _health only ever
+        # returns on success, so asserting 200 here would be
+        # non-falsifiable — the poll simply waits until something answers.
+        # The real continuity claim is that the supervisor, which owns the
+        # listening socket, never exited across the swap. If a future
+        # refactor re-execs the whole server instead of respawning a child,
+        # the listener closes, in-flight requests are refused, and this is
+        # what notices.
+        assert proc.poll() is None, (
+            "the process holding the listening socket exited during the "
+            "restart — a request in flight would have been refused"
+        )
 
         urllib.request.urlopen(
             urllib.request.Request(

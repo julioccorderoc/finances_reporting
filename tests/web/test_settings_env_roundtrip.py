@@ -61,6 +61,45 @@ def test_every_model_field_has_an_env_key() -> None:
     assert set(WebSettings.model_fields) == set(_FIELD_TO_ENV)
 
 
+def test_the_mapping_is_what_to_env_actually_emits() -> None:
+    """Guard the mapping against becoming a mirror nothing executes.
+
+    ``model_fields == _FIELD_TO_ENV`` only proves the mapping is complete.
+    If ``to_env`` kept its own hardcoded dict, a field could be added to
+    the mapping — satisfying the test above — and still never be exported.
+    Both sides must be pinned to the same source.
+    """
+    emitted = set(WebSettings().to_env())
+
+    assert emitted == set(_FIELD_TO_ENV.values()) | {ENV_RELOAD_CHILD}
+
+
+def test_a_fully_non_default_settings_object_survives_the_round_trip(
+    tmp_path: Path,
+) -> None:
+    """Every field carries a value it could not have gotten by defaulting.
+
+    A field dropped anywhere along the wire — ``_FIELD_TO_ENV``, the
+    encoder, the required-key check, the decoder — reverts to its default,
+    which is exactly what a same-as-default fixture cannot see.
+    """
+    defaults = WebSettings()
+    settings = _settings(
+        tmp_path, host="127.0.0.1", port=24601, token="not-the-default"
+    )
+
+    restored = WebSettings.from_env(settings.to_env())
+
+    assert restored == settings
+    for field in WebSettings.model_fields:
+        if field == "host":  # the reload child is localhost-only by rule
+            continue
+        assert getattr(restored, field) != getattr(defaults, field), (
+            f"{field} round-tripped to its default — the fixture cannot "
+            "distinguish a carried value from a dropped one"
+        )
+
+
 def test_from_env_refuses_without_the_handshake() -> None:
     with pytest.raises(RuntimeError, match=ENV_RELOAD_CHILD):
         WebSettings.from_env({})

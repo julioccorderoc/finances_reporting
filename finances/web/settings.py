@@ -49,6 +49,19 @@ _FIELD_TO_ENV = {
 }
 
 
+def _encode(value: object) -> str:
+    """Field value -> environment string. Empty string means "unset"."""
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    return str(value)
+
+
+def _decode(value: str) -> str | None:
+    return value.strip() or None
+
+
 class WebSettings(BaseModel):
     """Runtime configuration for the FastAPI viewer.
 
@@ -85,15 +98,19 @@ class WebSettings(BaseModel):
             )
 
     def to_env(self) -> dict[str, str]:
-        """Serialise every field for the reload child's environment."""
-        return {
-            ENV_RELOAD_CHILD: "1",
-            ENV_HOST: self.host,
-            ENV_PORT: str(self.port),
-            ENV_TOKEN: self.token or "",
-            ENV_DB_PATH: str(self.db_path),
-            ENV_REGEN: "1" if self.regen_report_on_shutdown else "0",
-        }
+        """Serialise every field for the reload child's environment.
+
+        Driven by ``_FIELD_TO_ENV`` rather than a hand-written dict, so a
+        new field cannot be exported by one half of this contract and
+        forgotten by the other. A hardcoded literal here would make the
+        reflective ``model_fields`` test guard a mirror that nothing
+        executes — green while the value silently reverted to its default
+        across the spawn boundary.
+        """
+        env = {ENV_RELOAD_CHILD: "1"}
+        for field, key in _FIELD_TO_ENV.items():
+            env[key] = _encode(getattr(self, field))
+        return env
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> WebSettings:
@@ -114,11 +131,10 @@ class WebSettings(BaseModel):
                 "127.0.0.1 and disable the bearer middleware)."
             )
 
-        missing = [
-            key
-            for key in (ENV_HOST, ENV_PORT, ENV_DB_PATH, ENV_REGEN)
-            if key not in env
-        ]
+        # Every mapped key must be PRESENT (empty is allowed and means
+        # "unset"). Driven by the same mapping as ``to_env`` so a new field
+        # becomes required here the moment it becomes exportable there.
+        missing = [key for key in _FIELD_TO_ENV.values() if key not in env]
         if missing:
             raise RuntimeError(
                 "missing required env for the reload child: "
@@ -131,10 +147,11 @@ class WebSettings(BaseModel):
                 f"the reload child is localhost-only; refusing host={host!r}"
             )
 
-        return cls(
-            host=host,
-            port=int(env[ENV_PORT]),
-            token=(env.get(ENV_TOKEN) or "").strip() or None,
-            db_path=Path(env[ENV_DB_PATH]),
-            regen_report_on_shutdown=env[ENV_REGEN] == "1",
-        )
+        # Pydantic does the coercion (str -> int / bool / Path), so this
+        # side needs no per-field decoder to drift out of step either. An
+        # empty value means "unset": correct for the optional token, and a
+        # validation error — i.e. fail-closed — for anything required.
+        raw = {
+            field: _decode(env[key]) for field, key in _FIELD_TO_ENV.items()
+        }
+        return cls(**raw)
