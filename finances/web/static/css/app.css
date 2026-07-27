@@ -425,6 +425,22 @@
   padding-top: 0.5rem;
 }
 
+/* Queue navigation arrows (ADR-012 Amendment 2026-07-21): the action row
+   reads [← →] [Park] [Cancel] [Save & next], so the arrows sit at the
+   opposite end from the decisions. Hand-written rather than Tailwind
+   `disabled:` variants — tailwind.css is a purged build artifact and
+   these two rules do not justify a rebuild. */
+.tx-modal-nav {
+  display: flex;
+  gap: 0.25rem;
+  margin-right: auto;
+}
+
+.tx-modal-nav button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 @media (max-width: 640px) {
   .tx-modal-overlay {
     padding: 0;

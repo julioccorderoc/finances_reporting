@@ -119,17 +119,43 @@ def compute_realized_rates(conn: sqlite3.Connection) -> list[Rate]:
 
 
 def rebuild(conn: sqlite3.Connection) -> int:
-    """Recompute realized rates from P2P history and upsert them.
+    """Recompute realized rates from P2P history and materialize them.
 
     Idempotent: ``rates`` carries ``UNIQUE(as_of_date, base, quote, source)``,
     so re-running updates in place. Safe to call after every ingest, and the
     recovery path when a P2P transaction is edited or deleted.
+
+    The stored set **mirrors** the derivation rather than accumulating: a day
+    that no longer qualifies — its last fill lost its ``user_rate``, or the
+    fill was deleted — has its row removed. Upserting alone left that row
+    behind, and a stale realized rate does not merely linger: the realized
+    tier outranks ``binance_p2p_median`` in the rule-005 chain, so it keeps
+    winning over the market rate that is now the honest answer.
+
+    Pruning is scoped to ``(USDT, VES, binance_p2p_realized)``, so the
+    ingester-owned tiers are untouched. Everything here is derived from
+    ``transactions``, so a wrong prune is always recoverable by re-running.
 
     Returns the number of daily rates written.
     """
     computed = compute_realized_rates(conn)
     for rate in computed:
         rates_repo.upsert(conn, rate)
+
+    pruned = rates_repo.delete_source_except(
+        conn,
+        base=BASE_ASSET,
+        quote=QUOTE_FIAT,
+        source=REALIZED_SOURCE,
+        keep_dates=[rate.as_of_date for rate in computed],
+    )
+    if pruned:
+        logger.info(
+            "pruned %d stale %s rate(s) whose fills no longer qualify",
+            pruned,
+            REALIZED_SOURCE,
+        )
+
     return len(computed)
 
 

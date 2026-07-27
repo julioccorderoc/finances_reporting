@@ -50,6 +50,15 @@
     } else if (key === 's' || key === 'S') {
       const park = $el.querySelector('[data-park-btn]');
       if (park) { park.click(); $event.preventDefault(); }
+    } else if (key === 'ArrowLeft') {
+      {# Click the button rather than re-inlining the URL: one place
+         decides what each arrow points at, and the disabled state at the
+         ends is honoured for free. Same shape as Enter and s above. #}
+      const prev = $el.querySelector('[data-nav-prev]:not([disabled])');
+      if (prev) { prev.click(); $event.preventDefault(); }
+    } else if (key === 'ArrowRight') {
+      const next = $el.querySelector('[data-nav-next]:not([disabled])');
+      if (next) { next.click(); $event.preventDefault(); }
     }
   "
 >
@@ -205,6 +214,7 @@
       </label>
 
       <div class="tx-modal-actions">
+        {% include "partials/triage_modal_nav.html" %}
         <button
           type="button"
           class="px-3 py-1.5 text-sm border border-slate-300 rounded bg-white hover:bg-slate-50"

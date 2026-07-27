@@ -24,6 +24,8 @@ from pydantic import BaseModel, ConfigDict
 from finances.db.repos import categories as categories_repo
 from finances.db.repos import transactions as transactions_repo
 from finances.domain import rates as rates_engine
+from finances.domain import realized_rates
+from finances.domain.models import Transaction
 from finances.web.services.transactions_query import (
     TransactionCard,
     _project_card,
@@ -51,6 +53,20 @@ class TransactionEditRequest(BaseModel):
     notes: str | None = None
 
 
+def _is_p2p_sell(txn: Transaction) -> bool:
+    """Does this row feed the realized cost basis?
+
+    Mirrors the selection in ``realized_rates.SQL_P2P_SELLS`` — minus its
+    ``user_rate IS NOT NULL`` clause, because clearing a rate must also
+    trigger a rebuild (it removes a fill from the day's average).
+
+    Keyed off ``source_ref`` and sign rather than ``kind`` for the reason
+    ADR-013 gives: bank-anchored pairing promotes these rows to
+    ``kind='transfer'`` after the fact, so ``kind`` is not stable.
+    """
+    return txn.source_ref.startswith("p2p:") and txn.amount < 0
+
+
 def apply_edit(
     conn: sqlite3.Connection,
     *,
@@ -59,15 +75,26 @@ def apply_edit(
 ) -> TransactionCard:
     """Apply ``req`` to txn ``txn_id`` and return the updated card.
 
-    Steps (ADR-005, ADR-012, rule-005, rule-012):
+    Steps (ADR-005, ADR-012, ADR-013, rule-005, rule-012):
 
     1. Apply ``category_id``, ``user_rate`` and/or ``notes`` updates via
        ``transactions_repo.update``.
     2. Re-fetch the updated ``Transaction``.
-    3. Call ``rates.resolve(conn, txn)`` to derive ``(rate, source)``.
-    4. Compute ``needs_review = (source == NEEDS_REVIEW_SOURCE)``.
-    5. If it changed, call the repo a second time with only that field.
-    6. Project a card via the existing ``_project_card`` helper.
+    3. If the edit changed ``user_rate`` on a P2P sell, rebuild the
+       realized cost basis.
+    4. Call ``rates.resolve(conn, txn)`` to derive ``(rate, source)``.
+    5. Compute ``needs_review = (source == NEEDS_REVIEW_SOURCE)``.
+    6. If it changed, call the repo a second time with only that field.
+    7. Project a card via the existing ``_project_card`` helper.
+
+    Step 3 exists because this function is the single choke point for
+    every web ``user_rate`` write — the triage modal, the
+    ``/transactions`` modal and ``PATCH /api/transactions/{id}``. A P2P
+    sell's ``user_rate`` is an *input* to the materialised
+    ``binance_p2p_realized`` tier, so editing one without recomputing
+    leaves every bolívar row priced off a stale basis until the next
+    Binance ingest silently re-prices all of them (ADR-013 Amendment
+    2026-07-26).
     """
     existing = transactions_repo.get_by_id(conn, txn_id)
     if existing is None:
@@ -94,12 +121,30 @@ def apply_edit(
     if txn is None:  # pragma: no cover - defensive
         raise LookupError(f"transaction id={txn_id} not found after update")
 
-    # Step 3 — re-derive rate/source. ``resolve`` may flip needs_review on
+    # Step 3 — the edited row may be an input to the realized tier.
+    # Narrow on purpose: a category- or notes-only save changes nothing
+    # the basis reads, and re-saving the same rate is a keystroke, not a
+    # change of basis. Measured at ~5 ms on the live ledger (123 fills →
+    # 101 daily rates), against the ~16 ms the triage caller already
+    # spends rebuilding the queue twice around this call.
+    #
+    # Ordered BEFORE the resolve below so nothing in the response is
+    # derived from a basis this request already invalidated. Defensive
+    # today — every fill in the ledger is USDT-denominated, so the edited
+    # row itself takes the native_usd path.
+    if (
+        req.set_user_rate
+        and _is_p2p_sell(txn)
+        and txn.user_rate != existing.user_rate
+    ):
+        realized_rates.rebuild(conn)
+
+    # Step 4 — re-derive rate/source. ``resolve`` may flip needs_review on
     # the in-memory object as a side effect; we don't depend on that.
     _rate, source = rates_engine.resolve(conn, txn)
     derived_needs_review = source == rates_engine.NEEDS_REVIEW_SOURCE
 
-    # Step 4-5 — reconcile DB state.
+    # Step 5-6 — reconcile DB state.
     if derived_needs_review != txn.needs_review:
         transactions_repo.update(
             conn, id=txn_id, needs_review=derived_needs_review
@@ -107,7 +152,7 @@ def apply_edit(
         txn = transactions_repo.get_by_id(conn, txn_id)
         assert txn is not None  # narrows for the type checker
 
-    # Step 6 — project the card.
+    # Step 7 — project the card.
     account_row = conn.execute(
         "SELECT name FROM accounts WHERE id = ?", (txn.account_id,)
     ).fetchone()
