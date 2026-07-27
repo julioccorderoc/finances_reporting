@@ -221,6 +221,47 @@ CHECKS: tuple[IntegrityCheck, ...] = (
         """,
     ),
     IntegrityCheck(
+        name="convert_leg_without_counterpart",
+        severity=Severity.WARNING,
+        description=(
+            "Binance convert legs missing their other half. A conversion "
+            "writes two rows sharing one order id — asset out, asset in. A "
+            "lone outgoing leg reads as money spent, because reports count "
+            "every non-transfer row. Legacy backfill hashed each leg "
+            "separately, so its halves never shared an id."
+        ),
+        # Strip the trailing ':from' / ':to' to recover the order id, then
+        # require both halves to exist for it. Live API rows share a real
+        # order id; backfilled ones hashed per-leg and so can never match —
+        # which is exactly the finding.
+        sql="""
+            WITH legs AS (
+                SELECT id,
+                       CASE
+                         WHEN source_ref LIKE '%:from'
+                           THEN SUBSTR(source_ref, 1, LENGTH(source_ref) - 5)
+                         WHEN source_ref LIKE '%:to'
+                           THEN SUBSTR(source_ref, 1, LENGTH(source_ref) - 3)
+                         ELSE source_ref
+                       END AS order_key,
+                       CASE
+                         WHEN source_ref LIKE '%:from' THEN 'from'
+                         WHEN source_ref LIKE '%:to'   THEN 'to'
+                         ELSE 'unknown'
+                       END AS side
+                  FROM transactions
+                 WHERE source_ref LIKE 'convert:%'
+            )
+            SELECT id FROM legs
+             WHERE order_key IN (
+                   SELECT order_key FROM legs
+                    GROUP BY order_key
+                   HAVING COUNT(DISTINCT side) < 2
+             )
+             ORDER BY id
+        """,
+    ),
+    IntegrityCheck(
         name="unpaired_p2p_sells",
         severity=Severity.WARNING,
         description=(
