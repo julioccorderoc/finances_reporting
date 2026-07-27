@@ -323,7 +323,7 @@ def ingest_csv(
     *,
     account_id: int | None = None,
     categorizer: Categorizer | None = None,
-    pairing_window_days: int = 2,
+    pairing_window_days: int = 1,
     run_pairing: bool = True,
     dry_run: bool = False,
 ) -> IngestReport:

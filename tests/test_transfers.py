@@ -1276,9 +1276,17 @@ class TestTransfers:
         assert bank_r.transfer_id == binance_r.transfer_id
         assert bank_r.transfer_id is not None
 
-    def test_bank_anchored_pairing_skips_ambiguous_matches(
+    def test_bank_anchored_pairing_consumes_one_sell_when_several_fit(
         self, seeded_db: sqlite3.Connection
     ):
+        """Two equally-good sells, one deposit → pair one, leave one.
+
+        The bank statement carries no transaction id, so *which* sell a
+        given deposit belongs to is unknowable in principle. Refusing to
+        pair (the old exactly-one rule) left both halves stranded and
+        overstated expenses. Consuming one and leaving the other visible
+        keeps the aggregate honest, which is what the ledger is for.
+        """
         provincial = _account_id(seeded_db, "Provincial Bolivares")
         spot = _account_id(seeded_db, "Binance Spot")
 
@@ -1311,8 +1319,262 @@ class TestTransfers:
         )
 
         strat = BankAnchoredP2pPairing(seeded_db)
-        # Ambiguous → exactly-one rule means NO proposal is emitted.
-        assert strat.match() == []
+        assert len(strat.match()) == 1
+
+    def test_bank_anchored_pairing_never_reuses_a_deposit_or_a_sell(
+        self, seeded_db: sqlite3.Connection
+    ):
+        """Two deposits, three sells → two proposals, all ids disjoint."""
+        provincial = _account_id(seeded_db, "Provincial Bolivares")
+        spot = _account_id(seeded_db, "Binance Spot")
+
+        banks = [
+            _insert_income_row(
+                seeded_db,
+                account_id=provincial,
+                amount=Decimal("12000"),
+                currency="VES",
+                source="provincial",
+                occurred_at=FIXED_AT,
+            )
+            for _ in range(2)
+        ]
+        sells = [
+            _insert_expense_row(
+                seeded_db,
+                account_id=spot,
+                amount=Decimal("-10"),
+                currency="USDT",
+                source="binance",
+                occurred_at=FIXED_AT,
+                user_rate=Decimal("1200"),
+            )
+            for _ in range(3)
+        ]
+
+        proposals = BankAnchoredP2pPairing(seeded_db).match()
+
+        assert len(proposals) == 2
+        bank_ids = [p.details["bank_transaction_id"] for p in proposals]
+        sell_ids = [p.details["binance_transaction_id"] for p in proposals]
+        assert len(set(bank_ids)) == 2
+        assert len(set(sell_ids)) == 2
+        assert set(bank_ids) <= {b.id for b in banks}
+        assert set(sell_ids) <= {s.id for s in sells}
+
+    def test_bank_anchored_pairing_prefers_the_closest_date(
+        self, seeded_db: sqlite3.Connection
+    ):
+        """Equal drift → the same-day sell wins over the next-day sell."""
+        provincial = _account_id(seeded_db, "Provincial Bolivares")
+        spot = _account_id(seeded_db, "Binance Spot")
+
+        _insert_income_row(
+            seeded_db,
+            account_id=provincial,
+            amount=Decimal("12000"),
+            currency="VES",
+            source="provincial",
+            occurred_at=FIXED_AT,
+        )
+        # Inserted FIRST so id order cannot be what makes the test pass.
+        _insert_expense_row(
+            seeded_db,
+            account_id=spot,
+            amount=Decimal("-10"),
+            currency="USDT",
+            source="binance",
+            occurred_at=FIXED_AT + timedelta(days=1),
+            user_rate=Decimal("1200"),
+        )
+        same_day = _insert_expense_row(
+            seeded_db,
+            account_id=spot,
+            amount=Decimal("-10"),
+            currency="USDT",
+            source="binance",
+            occurred_at=FIXED_AT,
+            user_rate=Decimal("1200"),
+        )
+
+        proposals = BankAnchoredP2pPairing(seeded_db).match()
+
+        assert len(proposals) == 1
+        assert proposals[0].details["binance_transaction_id"] == same_day.id
+
+    def test_bank_anchored_pairing_prefers_the_tightest_drift_on_equal_dates(
+        self, seeded_db: sqlite3.Connection
+    ):
+        provincial = _account_id(seeded_db, "Provincial Bolivares")
+        spot = _account_id(seeded_db, "Binance Spot")
+
+        _insert_income_row(
+            seeded_db,
+            account_id=provincial,
+            amount=Decimal("12000"),
+            currency="VES",
+            source="provincial",
+            occurred_at=FIXED_AT,
+        )
+        # 12 120 VES — inside the 2% band but 1% off. Inserted first.
+        _insert_expense_row(
+            seeded_db,
+            account_id=spot,
+            amount=Decimal("-10.1"),
+            currency="USDT",
+            source="binance",
+            occurred_at=FIXED_AT,
+            user_rate=Decimal("1200"),
+        )
+        exact = _insert_expense_row(
+            seeded_db,
+            account_id=spot,
+            amount=Decimal("-10"),
+            currency="USDT",
+            source="binance",
+            occurred_at=FIXED_AT,
+            user_rate=Decimal("1200"),
+        )
+
+        proposals = BankAnchoredP2pPairing(seeded_db).match()
+
+        assert len(proposals) == 1
+        assert proposals[0].details["binance_transaction_id"] == exact.id
+
+    def test_bank_anchored_pairing_is_deterministic_across_runs(
+        self, seeded_db: sqlite3.Connection
+    ):
+        """Identical inputs must always yield an identical assignment."""
+        provincial = _account_id(seeded_db, "Provincial Bolivares")
+        spot = _account_id(seeded_db, "Binance Spot")
+
+        for _ in range(3):
+            _insert_income_row(
+                seeded_db,
+                account_id=provincial,
+                amount=Decimal("12000"),
+                currency="VES",
+                source="provincial",
+                occurred_at=FIXED_AT,
+            )
+            _insert_expense_row(
+                seeded_db,
+                account_id=spot,
+                amount=Decimal("-10"),
+                currency="USDT",
+                source="binance",
+                occurred_at=FIXED_AT,
+                user_rate=Decimal("1200"),
+            )
+
+        strat = BankAnchoredP2pPairing(seeded_db)
+        first = [p.details for p in strat.match()]
+        second = [p.details for p in strat.match()]
+
+        assert len(first) == 3
+        assert first == second
+
+    @pytest.mark.parametrize(
+        "delta_days, should_match",
+        [(0, True), (1, True), (2, False)],
+    )
+    def test_bank_anchored_pairing_default_window_is_one_day(
+        self,
+        seeded_db: sqlite3.Connection,
+        delta_days: int,
+        should_match: bool,
+    ):
+        """Provincial rows carry a date but no time, so ±1 day is the honest
+        band. Every real pairing in the production ledger lands same-day."""
+        provincial = _account_id(seeded_db, "Provincial Bolivares")
+        spot = _account_id(seeded_db, "Binance Spot")
+
+        _insert_income_row(
+            seeded_db,
+            account_id=provincial,
+            amount=Decimal("12000"),
+            currency="VES",
+            source="provincial",
+            occurred_at=FIXED_AT,
+        )
+        _insert_expense_row(
+            seeded_db,
+            account_id=spot,
+            amount=Decimal("-10"),
+            currency="USDT",
+            source="binance",
+            occurred_at=FIXED_AT + timedelta(days=delta_days),
+            user_rate=Decimal("1200"),
+        )
+
+        proposals = BankAnchoredP2pPairing(seeded_db).match()
+
+        assert (len(proposals) == 1) if should_match else (proposals == [])
+
+    def test_bank_anchored_pairing_rejects_sell_denominated_in_another_fiat(
+        self, seeded_db: sqlite3.Connection
+    ):
+        """A USD-priced sell must never anchor against a bolivar deposit.
+
+        ``user_rate`` is a bare number; the fiat lives only in the
+        ingest-generated description. 1006.97 USDT @ 1.003 USD is ~1010
+        *dollars*, and without this guard it matches a 1010 *bolivar*
+        deposit inside tolerance.
+        """
+        provincial = _account_id(seeded_db, "Provincial Bolivares")
+        spot = _account_id(seeded_db, "Binance Spot")
+
+        _insert_income_row(
+            seeded_db,
+            account_id=provincial,
+            amount=Decimal("1010"),
+            currency="VES",
+            source="provincial",
+            occurred_at=FIXED_AT,
+        )
+        _insert_expense_row(
+            seeded_db,
+            account_id=spot,
+            amount=Decimal("-1006.97"),
+            currency="USDT",
+            source="binance",
+            occurred_at=FIXED_AT,
+            user_rate=Decimal("1.003"),
+            description="P2P SELL USDT @ 1.003 USD (order 22898405830379188224)",
+        )
+
+        assert BankAnchoredP2pPairing(seeded_db).match() == []
+
+    def test_bank_anchored_pairing_accepts_sell_denominated_in_bank_currency(
+        self, seeded_db: sqlite3.Connection
+    ):
+        """Positive control for the fiat guard: an explicit VES sell pairs."""
+        provincial = _account_id(seeded_db, "Provincial Bolivares")
+        spot = _account_id(seeded_db, "Binance Spot")
+
+        _insert_income_row(
+            seeded_db,
+            account_id=provincial,
+            amount=Decimal("12000"),
+            currency="VES",
+            source="provincial",
+            occurred_at=FIXED_AT,
+        )
+        sell = _insert_expense_row(
+            seeded_db,
+            account_id=spot,
+            amount=Decimal("-10"),
+            currency="USDT",
+            source="binance",
+            occurred_at=FIXED_AT,
+            user_rate=Decimal("1200"),
+            description="P2P SELL USDT @ 1200 VES (order 22898405830379188225)",
+        )
+
+        proposals = BankAnchoredP2pPairing(seeded_db).match()
+
+        assert len(proposals) == 1
+        assert proposals[0].details["binance_transaction_id"] == sell.id
 
 
 # ---------------------------------------------------------------------------

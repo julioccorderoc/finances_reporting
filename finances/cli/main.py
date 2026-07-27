@@ -94,6 +94,8 @@ def update_cmd(
 ) -> None:
     """Run the weekly ritual — bcv, p2p, binance, provincial — then regen report.html."""
     from finances import config as _config
+    from finances.domain.integrity import render_report as render_integrity
+    from finances.domain.integrity import run_checks
     from finances.reports.update import render_summary, run_update
 
     conn = get_connection(DB_PATH)
@@ -106,10 +108,48 @@ def update_cmd(
             report_path=_config.REPORT_HTML_PATH,
             dry_run=dry_run,
         )
+        integrity = run_checks(conn)
     finally:
         conn.close()
 
     typer.echo(render_summary(report))
+
+    # The ritual is the only moment this ledger is reliably looked at, so
+    # it is where drift should announce itself. Advisory on purpose: a
+    # finding must never fail an ingest that already succeeded. Run
+    # `finances doctor` for the same output on demand.
+    if integrity.findings:
+        typer.echo("")
+        typer.echo(render_integrity(integrity))
+
+
+@app.command("doctor")
+def doctor_cmd(
+    strict: bool = typer.Option(
+        False,
+        "--strict",
+        help="Exit non-zero when any invariant is violated (warnings never do).",
+    ),
+) -> None:
+    """Check the ledger against the invariants in CLAUDE.md.
+
+    The test suite verifies code against seeded fixtures; this verifies
+    the actual data. Read-only — it reports, it never repairs.
+    """
+    from finances.domain.integrity import render_report as render_integrity
+    from finances.domain.integrity import run_checks
+
+    conn = get_connection(DB_PATH)
+    apply_migrations(conn)
+    try:
+        report = run_checks(conn)
+    finally:
+        conn.close()
+
+    typer.echo(render_integrity(report))
+
+    if strict and report.has_errors:
+        raise typer.Exit(code=1)
 
 
 @ingest_app.command("binance")
@@ -177,9 +217,9 @@ def ingest_provincial(
         help="Path to a Provincial statement CSV (semicolon-delimited).",
     ),
     pairing_window_days: int = typer.Option(
-        2,
+        1,
         "--pairing-window-days",
-        help="±Day window used for bank-anchored P2P pairing (default 2).",
+        help="±Day window used for bank-anchored P2P pairing (default 1).",
     ),
     no_pairing: bool = typer.Option(
         False,
@@ -419,9 +459,9 @@ def backfill(
         help="Directory holding the legacy CSVs (Finanzas - *.csv).",
     ),
     pairing_window_days: int = typer.Option(
-        2,
+        1,
         "--pairing-window-days",
-        help="±Day window used for bank-anchored P2P pairing (default 2).",
+        help="±Day window used for bank-anchored P2P pairing (default 1).",
     ),
     force: bool = typer.Option(
         False,

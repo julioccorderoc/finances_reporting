@@ -782,7 +782,7 @@ def run_backfill(
     conn: sqlite3.Connection,
     data_dir: Path,
     *,
-    pairing_window_days: int = 2,
+    pairing_window_days: int = 1,
     force: bool = False,
     dry_run: bool = False,
 ) -> BackfillReport:

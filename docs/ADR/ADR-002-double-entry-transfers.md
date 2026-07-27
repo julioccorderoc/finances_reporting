@@ -66,3 +66,67 @@ Use **double-entry**. A transfer is two rows in `transactions`, each on its own 
 - Future strategies (e.g. `ReceiptToTransactionMatch`) implement the same protocol and are registered without modifying the existing strategy.
 
 `domain.transfers.create_transfer` and the `transfer_id` invariant (rule-002) remain the only path for `kind='transfer'` inserts. Receipt-style reconciliation (which links rows but does not create transfers) will use a different linking column (e.g. `receipt_id`) introduced via a future forward migration; it does not affect the transfer rules.
+
+---
+
+## Amendment 2026-07-26 — Pairing Optimises Totals, Not Identity
+
+**Context:** The 2026-04-19 amendment left the pairing strategy with an
+exactly-one uniqueness gate: a Provincial deposit was paired only when
+precisely one Binance sell survived the amount tolerance, and ambiguity was
+skipped rather than guessed. In production that gate almost never fires.
+Sales settle in round amounts — 20 000 Bs is the habitual size — so a deposit
+routinely sees two or three equally-good candidates and pairs with none of
+them. Thirteen P2P sells were stranded this way, each still carrying
+`kind='expense'`, inflating reported spending by money that was never spent.
+
+The gate was protecting a property the data cannot supply. **Provincial
+statements carry a date and a free-text reference, but no transaction id.**
+There is no field, on either side, that could confirm a particular deposit
+came from a particular sell. Given three 20 000 Bs deposits and three
+~20 000 Bs sells on one day, "which pairs with which" has no discoverable
+answer — only the totals are knowable, and every assignment yields identical
+balances, identical account sums, and an identical `kind='transfer'`
+population.
+
+Refusing to decide therefore bought no accuracy. It only cost coverage.
+
+**Amendment:** `BankAnchoredP2pPairing` performs a **global greedy
+assignment** instead of a per-deposit uniqueness test.
+
+1. Score every eligible (deposit, sell) pair: same calendar day ±`window_days`,
+   bolívar-equivalents within `amount_tolerance_ratio`.
+2. Sort by closest date, then tightest drift, then `(sell id, bank id)`.
+3. Claim down that list, consuming each deposit and each sell at most once.
+
+Whatever is left over stays unpaired and surfaces in triage — that leftover
+is the honest signal ("a deposit arrived that no sell explains", or the
+reverse), and it is what the human should be looking at.
+
+The tie-break tail on ids makes the assignment total-ordered, so identical
+inputs always produce an identical result. The pass stays idempotent.
+
+**Window narrowed to ±1 day (was ±2).** Bank rows have date granularity only,
+so hour-level comparison was false precision; dates are now compared by
+calendar day. The ±1 band exists to absorb the timezone seam between
+Caracas-stamped bank rows and UTC-stamped Binance rows, not to permit genuinely
+distant matches. Every pairing in the production ledger resolves same-day, and
+±0/±1/±2 produce byte-identical results against it.
+
+**Denomination guard.** `user_rate` stores a bare number with no unit, so a
+sell priced at 1.003 **USD** converts to ~1010 and matches a 1010 **Bs**
+deposit inside tolerance. The fiat survives only in the description written by
+`finances/ingest/binance.py` (`P2P SELL USDT @ <rate> <FIAT> (order <id>)`).
+The strategy now parses it back and refuses a pairing whose fiat is known to
+differ from the bank leg's currency. A description that does not carry the
+shape at all is allowed through, so legacy and backfilled rows keep their
+current behaviour.
+
+**What is deliberately not claimed:** that any individual pair is the true
+counterparty. The strategy asserts only that N sells consumed N deposits.
+Anyone auditing a specific transfer must treat the linkage as an accounting
+convenience, not evidence.
+
+**Unchanged:** `create_transfer` remains the sole writer of `kind='transfer'`
+(rule-002), the Provincial leg remains the anchor, and each pair is still two
+rows sharing one `transfer_id`.
