@@ -73,6 +73,21 @@ def _await(predicate, seconds: float = 25.0, step: float = 0.2):
     return None
 
 
+def _touch_and_wait(
+    port: int, boot_before: str, seconds: float = 4.0
+) -> tuple[int, str] | None:
+    """Touch the watched template, then watch for a new boot id."""
+    WATCHED_TEMPLATE.touch()
+    return _await(
+        lambda: (
+            result
+            if (result := _health(port)) and result[1] != boot_before
+            else None
+        ),
+        seconds=seconds,
+    )
+
+
 @pytest.fixture
 def serve_db(tmp_path: Path) -> Path:
     db_path = tmp_path / "smoke.db"
@@ -124,14 +139,14 @@ def test_watch_restart_socket_survives_then_stop(serve_db: Path) -> None:
         assert status == 200
         assert boot_before
 
-        WATCHED_TEMPLATE.touch()
-
+        # The touch is retried, not issued once. macOS delivers file events
+        # through an FSEvents stream that is not live the instant the socket
+        # starts answering, so a change made in that window is dropped
+        # outright — reproduced: the first touch is silently lost and the
+        # second lands. The claim under test is "a watched edit restarts the
+        # server", not "the very first event after boot is delivered".
         after = _await(
-            lambda: (
-                result
-                if (result := _health(port)) and result[1] != boot_before
-                else None
-            )
+            lambda: _touch_and_wait(port, boot_before), seconds=30, step=0.0
         )
         assert after is not None, (
             "touching a watched template did not restart the server"
