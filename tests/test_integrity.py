@@ -324,6 +324,57 @@ class TestBacklogChecks:
         assert report.has_errors is False
 
 
+class TestConvertChecks:
+    def test_detects_a_convert_leg_with_no_counterpart(
+        self, seeded_db: sqlite3.Connection
+    ):
+        """A half-recorded conversion is phantom expense.
+
+        A Binance convert writes two legs sharing one order id -- USDC out,
+        USDT in. When only the outgoing leg exists the money looks spent,
+        because reports count every non-transfer row. Legacy backfill
+        produced exactly this: each leg hashed to its own source_ref, so
+        the halves never referenced a common id.
+        """
+        spot = _account_id(seeded_db, "Binance Spot")
+        lonely = _row(
+            seeded_db,
+            account_id=spot,
+            amount=Decimal("-1350"),
+            currency="USDC",
+            kind=TransactionKind.EXPENSE,
+            source_ref="convert:hash:deadbeefcafe0001:from",
+        )
+
+        found = _finding(run_checks(seeded_db), "convert_leg_without_counterpart")
+        assert found is not None
+        assert found.severity is Severity.WARNING
+        assert lonely in found.sample_ids
+
+    def test_a_complete_convert_pair_is_not_reported(
+        self, seeded_db: sqlite3.Connection
+    ):
+        spot = _account_id(seeded_db, "Binance Spot")
+        _row(
+            seeded_db,
+            account_id=spot,
+            amount=Decimal("-540.520524"),
+            currency="USDC",
+            kind=TransactionKind.EXPENSE,
+            source_ref="convert:2257663689585206258:from",
+        )
+        _row(
+            seeded_db,
+            account_id=spot,
+            amount=Decimal("540.41715053"),
+            currency="USDT",
+            kind=TransactionKind.INCOME,
+            source_ref="convert:2257663689585206258:to",
+        )
+
+        assert _finding(run_checks(seeded_db), "convert_leg_without_counterpart") is None
+
+
 class TestReportShape:
     def test_errors_make_the_report_not_ok(self, seeded_db: sqlite3.Connection):
         spot = _account_id(seeded_db, "Binance Spot")
