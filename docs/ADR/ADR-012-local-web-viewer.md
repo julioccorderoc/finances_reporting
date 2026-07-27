@@ -265,3 +265,136 @@ passed — the response was a valid 200 whose markup still contained the
 handler name. Only driving a real browser against a copy of the ledger
 surfaced it. Template changes that emit JS into an attribute need a
 browser pass, and their tests should assert the exact rendered call.
+
+## Amendment — 2026-07-26: the viewer runs under a localhost reload supervisor
+
+**Status:** Accepted. Extends clause 2 ("Server") of the original decision —
+`finances serve` still runs uvicorn programmatically, but by import string
+under a watchfiles supervisor rather than by handing it an app object. The
+rest of ADR-012 stands.
+
+**Context.** During a triage run on 2026-07-26 every modal began returning
+`TypeError: Object of type Undefined is not JSON serializable`. Nothing was
+wrong with the code on disk: a concurrent session had added prev/next
+navigation, touching both `routers/partials.py` (which supplies `prev_url`)
+and `partials/modal_transaction_triage.html` (which reads it). The running
+server picked up **only the template**, because `Jinja2Templates` defaults to
+`auto_reload=True` while the Python around it is frozen at process start. New
+markup, old context builder, 500 on every open.
+
+Freezing the template environment (commit `243d6ac`) removes the crash, but
+leaves the deeper problem in place and arguably worse: a viewer kept open for
+hours now silently serves code that has nothing to do with the repository.
+The owner's working pattern makes this the normal case, not the exception —
+they triage in this app for hours while background sessions edit the package
+underneath them.
+
+Three properties are wanted, and they are not the same property:
+
+1. the running process matches the package on disk;
+2. the page in the browser matches the running process;
+3. when neither holds and something breaks, the failure says so.
+
+**Decision.**
+
+1. **`finances serve` runs uvicorn by import string with `factory=True`.**
+   `finances.web.app:create_app_from_env` is that factory. The reloader
+   re-imports the app in a `spawn()`-ed interpreter, so an app object cannot
+   be handed across; the factory rebuilds it there.
+2. **The environment is the only settings channel into a child, and it fails
+   closed.** `WebSettings.to_env()` / `.from_env()` carry every field, a
+   reflective test pins the mapping against `model_fields`, and `from_env`
+   raises rather than defaulting. The failure being guarded is not
+   inconvenience: the dangerous default is `host="127.0.0.1"`, which is
+   exactly the value `BearerTokenMiddleware` short-circuits on, so a child
+   that quietly defaulted would serve an unauthenticated viewer behind a
+   socket its parent bound to the LAN.
+3. **Reload is localhost-only and refused outright on a LAN bind.** With
+   `--reload` and `--host 0.0.0.0` unable to coexist, the class of failure in
+   (2) cannot arise by construction rather than by a guard staying correct
+   forever. ADR-012 already frames LAN binds as short "show someone the
+   viewer" windows, so losing reload there costs nothing real.
+4. **The watch set is `finances/**` for `*.py`, `*.html` and `*.j2`, minus
+   `static/`.** Both halves of the incident must restart the process, which
+   is why `*.html` is watched at all. It is scoped to the package and *not*
+   the repo root because `report.html` is written at the root and matches
+   that include — watching the root would make the shutdown regen restart the
+   server, which would regenerate, forever. That guarantee is positional, so
+   `test_generated_files_lie_outside_every_watch_dir` pins it. `static/` is
+   excluded because `StaticFiles` reads per request (assets are never stale)
+   and because `tailwind.css` is rebuilt after template edits — bouncing a
+   live triage session for a CSS rebuild would be a restart with no reader.
+5. **Report regeneration moves to the supervisor.** Under reload the child is
+   SIGTERM'd on every source edit; a full non-atomic export per edit would
+   leave `report.html` truncated far more often than correct, with the
+   supervisor blocked on `join()`. `WebSettings.regen_report_on_shutdown`
+   gates the lifespan hook, and `serve_cmd` runs the single regen in a
+   `finally`. The `--no-reload` path is unchanged.
+6. **Reload defaults ON for the localhost bind.** An opt-in flag reproduces
+   the failure being eliminated: the owner did not know the server had
+   diverged, so they would not have thought to pass it, and `finances.command`
+   passes only `--port`. `--no-reload` restores the previous behaviour
+   exactly.
+7. **Every response carries `X-Finances-Boot`; the page notices when it
+   changes.** Reload cannot make (2) true — a modal rendered at 14:02 is
+   still on screen at 14:20 after six restarts. `base.html` seeds the id from
+   `request.app.state.boot_id` (not a context key, so no `TemplateResponse`
+   call site changes) and shows a polite, dismissible banner on divergence.
+   It never auto-reloads, and its Reload control reuses the existing
+   unsaved-changes guard. Boot-id is deliberately NOT enforced on writes: a
+   409 on mismatch would reject every in-flight save after every restart.
+8. **An unhandled exception returns something actionable.** `finances/web/
+   errors.py` answers htmx requests with a JSON `detail` (5xx makes htmx skip
+   the swap, so a half-typed modal survives, and the existing toast listener
+   already unwraps `detail`) and browser navigations with a self-contained
+   page. The exception text appears on the localhost bind only. htmx also
+   gets a 15 s timeout and listeners for `send-error` / `timeout` /
+   `swap-error`, none of which existed — an unreachable or wedged server
+   previously produced an infinite spinner and no message at all.
+9. **A static contract test makes the crash-causing pair unable to land.**
+   `tests/web/test_template_contract.py` walks every `TemplateResponse` call
+   site and every template's real requirements *through its includes*, and
+   fails when a template reads what no call site supplies. The include walk
+   is the point: `find_undeclared_variables` on
+   `modal_transaction_triage.html` alone never mentions `prev_url`, because
+   `prev_url` is read by the nav partial it includes. The template commit
+   would have failed CI on its own.
+
+**Consequences.**
+
+*Positive.* The 2026-07-26 shape is now blocked twice — in CI before it can
+land, and at runtime by a process that no longer outlives its source. The
+supervisor holds the listening socket across restarts, so a request issued
+mid-restart is answered late rather than refused, and a restart costs the
+owner a sub-second pause with no lost work (triage state is durable in
+SQLite; `app.state` holds only settings and templates). Freezing the template
+environment matters *more* under the supervisor, not less: watchfiles
+debounces and a child takes a moment to spawn, so there is always a brief
+window where the outgoing child is answering with the new template on disk.
+
+*Negative, and stated plainly.*
+
+- **A dead child is silent.** If an edit lands broken syntax, the child dies
+  on import while the supervisor keeps the socket bound; requests then sit in
+  the accept queue until the file is fixed. The htmx timeout turns that from
+  an infinite spinner into a message naming the launcher terminal, and the
+  launcher's `/health` probe stops a wedged supervisor from masquerading as a
+  running viewer — but neither brings the server back. The owner is sitting
+  at a terminal printing the traceback.
+- **Stale DOM survives, and restarts make it more frequent.** Mitigated by
+  the banner (visible, not impossible) and by clause 9 (the pair cannot
+  diverge in the first place).
+- **Banner fatigue.** During an active editing session the boot id changes
+  repeatedly. The banner is polite and dismissible, and dismissing re-seeds
+  from the next response — so it nags once per restart, not once per request.
+- **The scope is `finances/**` only.** Edits to `pyproject.toml`, to `tests/`,
+  or a dependency upgrade restart nothing. The claim is "the running server
+  matches the package on disk", not "the process is correct".
+- **`lsof` and `pkill -f 'finances serve'` now hit the supervisor**, not the
+  server. Muscle memory changes.
+
+**References.** Incident traceback 2026-07-26; commits `243d6ac` (freeze the
+template environment) and the `serve-reload-supervisor` series;
+`tests/web/test_serve_reload_smoke.py` is the end-to-end proof (touch a
+watched template → boot id changes → the socket keeps answering → `POST
+/shutdown` takes the supervisor down).
