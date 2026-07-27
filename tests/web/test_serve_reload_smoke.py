@@ -27,16 +27,6 @@ from pathlib import Path
 
 import pytest
 
-from finances.db.migrate import apply_migrations
-from finances.db.connection import get_connection
-from finances.web.settings import (
-    ENV_DB_PATH,
-    ENV_HOST,
-    ENV_PORT,
-    ENV_REGEN,
-    ENV_RELOAD_CHILD,
-)
-
 pytestmark = pytest.mark.integration
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -88,33 +78,13 @@ def _touch_and_wait(
     )
 
 
-@pytest.fixture
-def serve_db(tmp_path: Path) -> Path:
-    db_path = tmp_path / "smoke.db"
-    conn = get_connection(db_path)
-    try:
-        apply_migrations(conn)
-    finally:
-        conn.close()
-    return db_path
-
-
-def test_watch_restart_socket_survives_then_stop(serve_db: Path) -> None:
+def test_watch_restart_socket_survives_then_stop() -> None:
     port = _free_port()
-    env = dict(os.environ)
-    # serve_cmd has no --db-path; the env channel is how a test points the
-    # server somewhere other than the real ledger.
-    env.update(
-        {
-            ENV_RELOAD_CHILD: "1",
-            ENV_HOST: "127.0.0.1",
-            ENV_PORT: str(port),
-            ENV_DB_PATH: str(serve_db),
-            ENV_REGEN: "0",
-            "FINANCES_DB_PATH": str(serve_db),
-        }
-    )
-
+    # No DB fixture: serve_cmd builds its own WebSettings from the CLI flags
+    # and exports THOSE, so a FINANCES_WEB_DB_PATH set here would just be
+    # overwritten. db_path is not a CLI option, so `finances serve` always
+    # opens config.DB_PATH. This test only touches /health and /shutdown,
+    # neither of which reads the ledger.
     proc = subprocess.Popen(
         [
             "uv",
@@ -126,7 +96,6 @@ def test_watch_restart_socket_survives_then_stop(serve_db: Path) -> None:
             "--no-open",
         ],
         cwd=REPO_ROOT,
-        env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
