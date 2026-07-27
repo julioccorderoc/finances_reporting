@@ -13,6 +13,11 @@
     <!-- Vendored client libraries (offline-capable, version pinned in
          finances/web/static/vendor/VERSIONS.txt). -->
     <script src="/static/vendor/htmx.min.js"></script>
+    {# Without a timeout htmx waits forever. Under the reload supervisor a
+       request can land while the server is respawning, or while a child is
+       dead on a broken edit — an unbounded wait shows an infinite spinner
+       and no explanation. 15 s is far above any real request here. #}
+    <script>htmx.config.timeout = 15000;</script>
     <script defer src="/static/vendor/alpine.min.js"></script>
     <script src="/static/vendor/chart.umd.min.js"></script>
 
@@ -80,6 +85,30 @@
         if (!url) return;
         if (this.modalDirty() && !window.confirm('Discard unsaved changes?')) return;
         htmx.ajax('GET', url, { target: '#tx-modal-host', swap: 'innerHTML' });
+      },
+      {# Boot identity (ADR-012 Amendment 2026-07-26). The server restarts
+         itself on every source edit, so this page can outlive the process
+         that rendered it — the markup here is old, the handler it posts to
+         is new. Every response carries X-Finances-Boot; a change means the
+         page is stale. Never auto-reload: the owner may be mid-modal with
+         unsaved input. #}
+      bootId: (document.querySelector('meta[name=finances-boot]') || {}).content || null,
+      serverRestarted: false,
+      noteBoot(xhr) {
+        const id = xhr && xhr.getResponseHeader('X-Finances-Boot');
+        if (!id) return;
+        if (this.bootId === null) { this.bootId = id; return; }
+        if (id !== this.bootId) this.serverRestarted = true;
+      },
+      {# Nulling bootId re-seeds it from the next response, so dismissing
+         silences THIS restart rather than every future one. #}
+      dismissRestart() { this.serverRestarted = false; this.bootId = null; },
+      reloadForNewCode() {
+        if (this.modalDirty() && !window.confirm('You have unsaved changes in the open transaction. Reload anyway and lose them?')) return;
+        location.reload();
+      },
+      failureToast(message) {
+        window.dispatchEvent(new CustomEvent('show-toast', { detail: { level: 'error', message: message } }));
       }
     }"
     @close-modal.window="
@@ -110,6 +139,7 @@
       }
     "
     @htmx:after-on-load.window="
+      noteBoot($event.detail && $event.detail.xhr);
       const t = triggersFrom($event.detail && $event.detail.xhr);
       if (t) {
         {# Arm BEFORE closing: an exhausted queue sends both, and the
@@ -137,6 +167,18 @@
       }
       window.dispatchEvent(new CustomEvent('show-toast', { detail: { level: 'error', message: message } }));
     "
+    {# The three failures that produce NO response at all. Nothing listened
+       for these before, so an unreachable, restarting or wedged server was
+       an infinite spinner with zero feedback. #}
+    @htmx:send-error.window="
+      failureToast('Can\'t reach the server — it may be restarting. Nothing was lost; retry in a moment.');
+    "
+    @htmx:timeout.window="
+      failureToast('No response in 15s — the server may be restarting or stuck on a broken edit. Check the launcher terminal.');
+    "
+    @htmx:swap-error.window="
+      failureToast('Received a response this page could not render. Reload (Cmd-R).');
+    "
   >
     <nav class="bg-white border-b border-slate-200">
       <div class="max-w-6xl mx-auto px-4 py-3 flex flex-wrap gap-4 items-center">
@@ -158,6 +200,31 @@
       </div>
     </nav>
 
+    {# Stale-page notice. Deliberately polite, never assertive: it appears
+       while the owner is typing into a modal, and stealing focus there
+       would be worse than the staleness it reports. Styled from app.css,
+       not Tailwind utilities — tailwind.css is compiled offline by
+       scanning templates, and a notice about broken state must not depend
+       on someone having run that build. #}
+    <div
+      id="server-restarted"
+      class="server-restart-banner"
+      role="status"
+      aria-live="polite"
+      x-show="serverRestarted"
+      x-cloak
+    >
+      <span>
+        The server picked up new code while this page was open. Reload so what
+        you see matches what saves — everything already saved is in the
+        database.
+      </span>
+      <span class="server-restart-actions">
+        <button type="button" @click="reloadForNewCode()">Reload</button>
+        <button type="button" @click="dismissRestart()">Dismiss</button>
+      </span>
+    </div>
+
     <main class="max-w-6xl mx-auto px-4 py-6">
       {% block content %}{% endblock %}
     </main>
@@ -172,8 +239,10 @@
     {# Toast host (WP2 / ux-overhaul §2). Server saves put a "toast" key
        in the JSON HX-Trigger header; the <body> listener above re-emits
        it as the window-level "show-toast" CustomEvent, and the global
-       htmx:response-error listener raises error toasts. Toasts
-       auto-dismiss after 4 s. #}
+       htmx:response-error listener raises error toasts. SUCCESS toasts
+       auto-dismiss after 4 s; error toasts do not. A four-second error is
+       invisible to someone typing into a form, which is how a screen full
+       of 500s went unnoticed on 2026-07-26. #}
     <div
       id="toast-host"
       class="toast-host"
@@ -186,7 +255,9 @@
           message: ($event.detail && $event.detail.message) || 'Done'
         };
         toasts.push(t);
-        setTimeout(() => { toasts = toasts.filter(x => x.id !== t.id) }, 4000);
+        if (t.level === 'success') {
+          setTimeout(() => { toasts = toasts.filter(x => x.id !== t.id) }, 4000);
+        }
       "
     >
       <template x-for="t in toasts" :key="t.id">
@@ -194,8 +265,16 @@
           class="toast"
           :class="t.level === 'error' ? 'toast-error' : 'toast-success'"
           role="status"
-          x-text="t.message"
-        ></div>
+        >
+          <span x-text="t.message"></span>
+          <button
+            type="button"
+            class="toast-dismiss"
+            aria-label="Dismiss"
+            x-show="t.level === 'error'"
+            @click="toasts = toasts.filter(x => x.id !== t.id)"
+          >&times;</button>
+        </div>
       </template>
     </div>
   </body>
