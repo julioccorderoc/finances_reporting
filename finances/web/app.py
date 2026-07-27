@@ -81,6 +81,14 @@ def create_app(settings: WebSettings) -> FastAPI:
     app.state.settings = settings
 
     app.state.templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+    # Templates are frozen at boot, like the Python around them. Jinja's
+    # default is to re-read a changed template on the next request, which
+    # leaves a long-running viewer serving NEW markup from an OLD context
+    # builder whenever an edit lands mid-session — the new half reads a
+    # variable the old half never puts in the context, and the render
+    # 500s. Freezing makes the process one coherent snapshot: a restart
+    # picks up both halves, or neither.
+    app.state.templates.env.auto_reload = False
     # Shared display filters (UX overhaul WP1) — the SAME four names are
     # the cross-plan contract; templates use them directly and via macros.
     app.state.templates.env.filters.update(
