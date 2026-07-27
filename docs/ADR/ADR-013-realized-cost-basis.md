@@ -162,10 +162,24 @@ recoverable by re-running, since `rebuild()` is idempotent, or by
 `finances rates rebuild-realized`. Any future non-ingest CLI path that
 writes `user_rate` must make the same call; there is none today.
 
-One pre-existing limit is inherited rather than introduced: `rebuild()`
-upserts, it never deletes. Clearing the *last* remaining fill of a day
-makes `compute_realized_rates` stop emitting that day, but the rate row
-already materialised for it survives. Clearing a rate on a day that still
-has other fills re-derives correctly. This affects the ingest and CLI
-callers identically and is out of scope here; it is noted so the
-narrower claim in clause 4 is not read as a stronger one.
+**Follow-up, same day: `rebuild()` now prunes.** The clause above
+originally recorded an inherited limit and deferred it — `rebuild()`
+upserted and never deleted, so a day whose last qualifying fill went away
+kept the row it was last given. Deferring it was wrong: §2 places the
+realized tier *above* `binance_p2p_median`, so a stale row does not
+linger harmlessly, it keeps winning the chain over the market rate that
+has become the honest answer. Making a web edit rebuild on the spot would
+otherwise have produced exactly that outcome the first time an owner
+cleared a rate.
+
+`rebuild()` therefore materialises a set that mirrors the derivation:
+after upserting the computed days it deletes every other
+`(USDT, VES, binance_p2p_realized)` row, via
+`rates_repo.delete_source_except`. Pruning is scoped to that one triple,
+so the ingester-owned tiers are untouched, and an empty derivation
+correctly clears the source. Everything involved is derived from
+`transactions`, so a wrong prune is always recoverable by re-running.
+Both callers named in §2 — the end of a Binance ingest and
+`finances rates rebuild-realized` — inherit the behaviour. Verified as a
+no-op against the live ledger: 101 realized rows in, 101 out, other
+sources unchanged.
