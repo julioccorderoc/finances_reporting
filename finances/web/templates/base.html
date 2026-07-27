@@ -17,6 +17,13 @@
     <script src="/static/vendor/chart.umd.min.js"></script>
 
     <link rel="stylesheet" href="/static/css/app.css">
+
+    {# Identity of the server process that rendered this page. Read from
+       request.app.state rather than a context key on purpose: Starlette
+       injects `request` into every template context, so no TemplateResponse
+       call site has to carry it. Compared against the X-Finances-Boot
+       header on every htmx response — see the restart banner below. #}
+    <meta name="finances-boot" content="{{ request.app.state.boot_id }}">
   </head>
   <body
     class="min-h-screen bg-slate-50 text-slate-900"

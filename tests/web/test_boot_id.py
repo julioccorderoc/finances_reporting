@@ -15,6 +15,7 @@ template-context contract test stays clean.
 from __future__ import annotations
 
 import re
+import sqlite3
 from typing import Callable
 
 import pytest
@@ -25,6 +26,7 @@ from finances.web.settings import WebSettings
 
 
 def test_every_response_carries_the_boot_header(
+    web_db: sqlite3.Connection,
     web_client_factory: Callable[[], TestClient],
 ) -> None:
     with web_client_factory() as client:
@@ -46,6 +48,7 @@ def test_two_apps_get_different_boot_ids(
 
 
 def test_base_html_embeds_the_boot_id(
+    web_db: sqlite3.Connection,
     web_client_factory: Callable[[], TestClient],
 ) -> None:
     with web_client_factory() as client:
@@ -76,6 +79,7 @@ def test_bearer_middleware_still_outermost(tmp_path) -> None:
 
 @pytest.mark.parametrize("path", ["/health", "/triage"])
 def test_boot_header_survives_the_auth_middleware(
+    web_db: sqlite3.Connection,
     web_client_factory: Callable[[], TestClient],
     path: str,
 ) -> None:
