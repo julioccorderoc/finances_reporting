@@ -83,6 +83,10 @@ class SourceOutcome:
     updated: int = 0
     summary: str = ""
     errors: list[str] = field(default_factory=list)
+    # Things that loaded but should not be trusted as complete — a bank
+    # export truncated at the page limit, a Saldo that does not reconcile.
+    # Distinct from ``errors``: the step succeeded, the data may be short.
+    warnings: list[str] = field(default_factory=list)
     hint: str | None = None
 
 
@@ -224,12 +228,14 @@ def _step_provincial(
 
     inserted = updated = 0
     errors: list[str] = []
+    warnings: list[str] = []
     archived = 0
     for path in files:
         try:
             report = provincial_ingest.ingest_csv(conn, path, dry_run=dry_run)
             inserted += report.rows_inserted
             updated += report.rows_updated
+            warnings.extend(f"{path.name}: {w}" for w in report.warnings)
         except Exception as exc:  # noqa: BLE001 - isolate a bad file
             errors.append(f"{path.name}: {exc}")
             continue
@@ -243,6 +249,8 @@ def _step_provincial(
     summary = f"{len(files)} file(s): {inserted} new, {updated} updated"
     if errors:
         summary += f", {len(errors)} error(s)"
+    if warnings:
+        summary += f", {len(warnings)} warning(s)"
     if archived:
         summary += f"; archived {archived} file(s) → inputs/processed/"
     return SourceOutcome(
@@ -251,6 +259,7 @@ def _step_provincial(
         inserted=inserted,
         updated=updated,
         errors=errors,
+        warnings=warnings,
         summary=summary,
     )
 
@@ -336,6 +345,11 @@ def render_summary(report: UpdateReport) -> str:
         lines.append(f"  {outcome.source:<11} {outcome.status:<8} {outcome.summary}")
         for err in outcome.errors:
             lines.append(f"      err: {err}")
+        # A statement that loaded but may be short. Printed in full, not
+        # counted and hidden: a truncated export is invisible everywhere
+        # else, which is how 24 days of history went missing unnoticed.
+        for warning in outcome.warnings:
+            lines.append(f"      WARNING: {warning}")
         if outcome.hint:
             lines.append(f"      → {outcome.hint}")
 

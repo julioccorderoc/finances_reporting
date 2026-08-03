@@ -253,6 +253,11 @@ def ingest_provincial(
         f"{label}: seen={report.rows_seen} "
         f"inserted={report.rows_inserted} updated={report.rows_updated}"
     )
+    # The bank's export truncates at a page limit without saying so. These
+    # go to stderr and read as prose because acting on them means re-exporting
+    # a date range, which only the owner can do.
+    for warning in report.warnings:
+        typer.echo(f"  WARNING: {warning}", err=True)
     if report.reconciliation is not None:
         rec = report.reconciliation
         typer.echo(
