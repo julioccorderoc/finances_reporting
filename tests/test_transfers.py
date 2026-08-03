@@ -891,7 +891,7 @@ class TestTransfers:
     ):
         """The bank-anchored shape, and the whole reason validate exists.
 
-        Per ADR-014 ``user_rate`` is bolívares per dollar wherever it
+        Per ADR-015 ``user_rate`` is bolívares per dollar wherever it
         sits. The USDT leg is already USD-equivalent so it passes
         through; the bolívar leg divides. 1200 / 120 = 10 = |−10|.
 
@@ -1026,7 +1026,7 @@ class TestTransfers:
     def test_validate_rejects_an_inverted_rate(
         self, seeded_db: sqlite3.Connection
     ):
-        """The failure mode ADR-014 exists to make detectable.
+        """The failure mode ADR-015 exists to make detectable.
 
         A rate stored the wrong way round makes the pair miss by orders
         of magnitude rather than by a rounding error.
