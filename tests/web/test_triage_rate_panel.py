@@ -217,7 +217,7 @@ def test_panel_does_not_disturb_existing_modal_contract(
 
 
 # ---------------------------------------------------------------------------
-# ADR-015: an expired tier must read as rejected, not as the market rate.
+# ADR-016: an expired tier must read as rejected, not as the market rate.
 #
 # The service marks it; these tests pin that the marking survives into the
 # rendered HTML. A service-level assertion alone would have passed happily

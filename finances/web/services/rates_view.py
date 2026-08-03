@@ -90,7 +90,7 @@ class DayRate(BaseModel):
     amount would be worth priced at THIS tier, whether or not this tier
     won. ``None`` when the tier has no rate for the day, when the
     transaction's currency is not the tier's quote currency, or when the
-    tier has expired (ADR-015) — no dollar figure may be rendered from a
+    tier has expired (ADR-016) — no dollar figure may be rendered from a
     rate the chain refused.
 
     ``is_expired`` marks a rate older than its tier's carry-forward bound.

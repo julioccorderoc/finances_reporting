@@ -15,7 +15,7 @@ ingest logic — sequence the production functions, never reimplement them).
 
 ## Why this exists
 
-ADR-015 (branch `recover/p2p-median-cap`) capped the `binance_p2p_median`
+ADR-016 capped the `binance_p2p_median`
 tier at 14 days. Before that cap, a stale median carried forward forever and
 silently converged on BCV. Now it expires instead — which makes refresh
 frequency a **correctness requirement**, not a nicety. Today `rates` holds 8

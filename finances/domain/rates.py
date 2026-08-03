@@ -4,7 +4,7 @@ The single auditable entry point for converting a transaction's native
 amount to USD. Every USD-equivalence calculation in the codebase must
 route through ``resolve`` — see ``docs/architecture/rules/rule-005``.
 
-Priority chain (locked by ADR-005, extended by ADR-013 and ADR-015):
+Priority chain (locked by ADR-005, extended by ADR-013 and ADR-016):
 
     1. ``Transaction.user_rate``                           (user_rate)
     2. ``rates(USDT, VES, day, 'binance_p2p_realized')``  (exact or _carry,
@@ -21,7 +21,7 @@ age-capped because a realized rate that has gone stale would misprice
 spending badly in a fast-moving currency; past the cap the chain falls
 through to the market tiers, and the returned source label says so.
 
-Tier 3 is age-capped for the same reason (ADR-015). ``binance_p2p_median``
+Tier 3 is age-capped for the same reason (ADR-016). ``binance_p2p_median``
 is only written when an ingest runs and cannot be backfilled — Binance's
 public P2P endpoint serves the live order book only — so gaps are common.
 Carried far enough, a stale median converges on BCV, silently turning a
@@ -51,7 +51,7 @@ CARRY_SUFFIX = "_carry"
 # many days old still applies.
 REALIZED_MAX_AGE_DAYS = 14
 
-# The same bound for the market median (ADR-015). Held equal to the realized
+# The same bound for the market median (ADR-016). Held equal to the realized
 # cap on purpose: one number governs both market tiers.
 MEDIAN_MAX_AGE_DAYS = 14
 
@@ -67,7 +67,7 @@ _FALLBACK_TIERS: tuple[tuple[str, str, str], ...] = (
 # Per-tier carry-forward bound, keyed by source. A source absent from this
 # map carries without limit — BCV does, deliberately: it is the last tier
 # before ``needs_review``, so expiring it would turn a stale-but-useful
-# reference into triage work (ADR-015 §2).
+# reference into triage work (ADR-016 §2).
 _TIER_MAX_AGE_DAYS: dict[str, int] = {
     BINANCE_P2P_SOURCE: MEDIAN_MAX_AGE_DAYS,
 }
@@ -79,7 +79,7 @@ def max_age_days(source: str) -> int | None:
     Public so the triage modal's rate panel can apply the resolver's own
     bound instead of hard-coding a second copy of it. The panel does its own
     ``latest_on_or_before`` lookup per tier, and a panel that disagreed with
-    the resolver about staleness is precisely the bug ADR-015 fixes.
+    the resolver about staleness is precisely the bug ADR-016 fixes.
     """
     return _TIER_MAX_AGE_DAYS.get(source)
 

@@ -228,7 +228,7 @@ def test_every_resolver_tier_has_exactly_one_modal_winner(
 
 
 # ---------------------------------------------------------------------------
-# ADR-015: the panel applies the same max age the resolver does.
+# ADR-016: the panel applies the same max age the resolver does.
 #
 # The panel performs its own latest_on_or_before lookup per tier, so without
 # this it would keep displaying a rate the resolver has stopped using. An
@@ -292,7 +292,7 @@ def test_median_on_final_day_of_window_is_priced_normally(
 
 
 def test_bcv_never_expires(web_db: sqlite3.Connection) -> None:
-    """ADR-015 caps the median only; BCV is the floor of the chain."""
+    """ADR-016 caps the median only; BCV is the floor of the chain."""
     ancient = DAY - timedelta(days=400)
     _seed(web_db, "bcv", ancient, "36.00", base="USD", quote="VES")
 
