@@ -18,6 +18,7 @@ Contract these tests pin:
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -65,6 +66,24 @@ def staging(tmp_path: Path) -> Path:
 def inputs_dir(tmp_path: Path) -> Path:
     d = tmp_path / "inputs"
     d.mkdir()
+    return d
+
+
+@pytest.fixture(autouse=True)
+def _isolated_inputs_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Path:
+    """Point the routes' ``inputs/`` at tmp_path.
+
+    Autouse and unconditional: without it the route tests would stage and
+    archive real files inside the repo's own ``inputs/``, and an archived
+    fixture statement would then be waiting for the next ``finances update``.
+    """
+    from finances import config as _config
+
+    d = tmp_path / "route-inputs"
+    d.mkdir()
+    monkeypatch.setattr(_config, "INPUTS_DIR", d)
     return d
 
 
@@ -338,7 +357,10 @@ def test_import_route_ingests_and_toasts(
     )
 
     assert response.status_code == 200
-    assert "show-toast" in response.headers.get("HX-Trigger", "")
+    # base.html re-dispatches the "toast" key as the show-toast window event.
+    trigger = json.loads(response.headers["HX-Trigger"])
+    assert trigger["toast"]["level"] == "success"
+    assert "3 new" in trigger["toast"]["message"]
     n = provincial_db.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
     assert n == 3
 
