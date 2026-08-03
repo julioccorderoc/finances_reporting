@@ -31,7 +31,11 @@ from finances.db.repos import transactions as txn_repo
 from finances.domain import integrity
 from finances.domain.models import Account, AccountKind, Transaction, TransactionKind
 from finances.domain.reconciliation import run_reconciliation_pass
-from finances.domain.transfers import SameAccountConvertPairing, create_transfer
+from finances.domain.transfers import (
+    SameAccountConvertPairing,
+    create_transfer,
+    validate,
+)
 from finances.reports import consolidated_usd
 
 WHEN = datetime(2026, 5, 12, tzinfo=UTC)
@@ -111,6 +115,45 @@ def test_a_cross_currency_pair_on_one_account_is_allowed(spot):
         row = txn_repo.get_by_id(conn, txn_id)
         assert row.kind is TransactionKind.TRANSFER
         assert row.transfer_id == pair.transfer_id
+
+
+def test_validate_accepts_a_paired_conversion(spot):
+    """The ledger's own definition of well-formed must admit what it writes.
+
+    ``create_transfer`` accepts the pair, the doctor accepts it, the ingest
+    writes it — and ``validate`` used to call it malformed, because it still
+    demanded two accounts. A predicate that contradicts the rule it exists to
+    check is worse than no predicate.
+    """
+    conn, account = spot
+    out, inn = _convert(conn, account)
+
+    pair = create_transfer(
+        conn, anchor_transaction_id=out.id, counterpart_transaction_id=inn.id
+    )
+
+    assert validate(conn, pair.transfer_id) is True
+
+
+def test_validate_still_refuses_a_same_currency_self_transfer(spot):
+    """The relaxation is only as wide as the conversion it exists for."""
+    conn, account = spot
+    legs = [
+        txn_repo.insert(
+            conn,
+            _leg(
+                account,
+                amount=amount,
+                currency="USDT",
+                kind=TransactionKind.TRANSFER,
+                ref=ref,
+            ).model_copy(update={"transfer_id": "self-transfer"}),
+        )
+        for amount, ref in (("-500", "self:from"), ("500", "self:to"))
+    ]
+    assert len(legs) == 2
+
+    assert validate(conn, "self-transfer") is False
 
 
 def test_a_same_currency_pair_on_one_account_is_still_refused(spot):
