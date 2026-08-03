@@ -348,9 +348,15 @@ def test_modal_partial_renders(
     assert f"data-tx-id='{txn_id}'" in body or f'data-tx-id="{txn_id}"' in body
 
 
-def test_modal_partial_includes_all_categories_in_dropdown(
+def test_modal_partial_includes_the_categories_the_row_can_take(
     seeded_web_db: sqlite3.Connection, web_client_factory
 ) -> None:
+    """Expense + transfer categories, and nothing from a contradicting kind.
+
+    Was "all categories": the picker offered income and adjustment ones on
+    an expense row, which is how the live ledger acquired 65 rows whose
+    category belongs to another kind.
+    """
     client = web_client_factory()
     txn_id = _first_provincial_txn_id(seeded_web_db)
 
@@ -358,11 +364,16 @@ def test_modal_partial_includes_all_categories_in_dropdown(
     assert resp.status_code == 200
     body = resp.text
 
-    cats = categories_repo.list_all(seeded_web_db)
+    cats = categories_repo.list_for_kind(seeded_web_db, TransactionKind.EXPENSE)
     assert len(cats) >= 5  # sanity
     for cat in cats:
         # name should appear at least once in an <option> tag.
         assert cat.name in body
+
+    offered = {c.name for c in cats}
+    for cat in categories_repo.list_all(seeded_web_db):
+        if cat.name not in offered:
+            assert cat.name not in body
 
 
 def test_modal_partial_404_unknown_id(
