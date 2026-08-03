@@ -171,6 +171,12 @@ def build_kpis(conn: sqlite3.Connection, *, today: date) -> KpiTiles:
 
 
 _CANONICAL_SOURCES: tuple[str, ...] = ("binance", "provincial", "bcv", "p2p_rates")
+
+# Chip label -> the value ``import_runs.source`` actually holds. Only p2p
+# differs: ``ingest.p2p_rates.SOURCE`` is "binance_p2p_median" (the headline
+# rate name), while the chip is labelled for the command that writes it. The
+# chip queried the label for months and so was permanently "never".
+_RUN_SOURCE: dict[str, str] = {"p2p_rates": "binance_p2p_median"}
 _FRESHNESS_HOURS: dict[str, int | None] = {
     "binance": 24,
     "provincial": None,  # never auto-stales
@@ -237,7 +243,7 @@ def _parse_dt(value) -> datetime | None:
 def _chip_for_source(
     conn: sqlite3.Connection, source: str, *, now: datetime
 ) -> SyncChip:
-    runs = _list_recent_runs(conn, source, limit=3)
+    runs = _list_recent_runs(conn, _RUN_SOURCE.get(source, source), limit=3)
     if not runs:
         return SyncChip(
             source=source,

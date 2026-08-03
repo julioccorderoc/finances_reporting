@@ -36,6 +36,7 @@ ENV_PORT = "FINANCES_WEB_PORT"
 ENV_TOKEN = "FINANCES_WEB_TOKEN"
 ENV_DB_PATH = "FINANCES_WEB_DB_PATH"
 ENV_REGEN = "FINANCES_WEB_REGEN_ON_SHUTDOWN"
+ENV_REFRESH_ON_START = "FINANCES_WEB_REFRESH_ON_START"
 
 # Every WebSettings field maps to exactly one env key. A test asserts this
 # covers ``model_fields`` — a field added without an entry here would not
@@ -46,6 +47,7 @@ _FIELD_TO_ENV = {
     "token": ENV_TOKEN,
     "db_path": ENV_DB_PATH,
     "regen_report_on_shutdown": ENV_REGEN,
+    "refresh_on_start": ENV_REFRESH_ON_START,
 }
 
 
@@ -80,6 +82,10 @@ class WebSettings(BaseModel):
             every source edit, and a 665-query non-atomic export per edit
             would truncate ``report.html`` dozens of times an hour while
             the supervisor blocks on ``join()``.
+        refresh_on_start: Fetch stale rate sources in the background at
+            startup. Defaults ``False`` and is opted into by ``finances
+            serve`` alone, so building an app in a test or a script never
+            reaches the network. See ``web.services.refresh``.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -89,6 +95,7 @@ class WebSettings(BaseModel):
     token: Optional[str] = None
     db_path: Path = Field(default_factory=lambda: _config.DB_PATH)
     regen_report_on_shutdown: bool = True
+    refresh_on_start: bool = False
 
     def model_post_init(self, __context: object) -> None:
         if self.host != "127.0.0.1" and not (self.token or "").strip():

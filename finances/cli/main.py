@@ -775,8 +775,15 @@ def serve_cmd(
     # Under reload this process outlives every child, so it owns the one
     # report.html regen; the child would otherwise run a full export on
     # every source edit.
+    # Only the real server reaches the network on boot. Under the reload
+    # supervisor the parent never serves — the child does — so the flag rides
+    # across the spawn in the env like every other setting, and the staleness
+    # gate absorbs the restarts watchfiles triggers on each source edit.
     settings = settings.model_copy(
-        update={"regen_report_on_shutdown": not reload}
+        update={
+            "regen_report_on_shutdown": not reload,
+            "refresh_on_start": True,
+        }
     )
 
     base_url = f"http://localhost:{settings.port}/"

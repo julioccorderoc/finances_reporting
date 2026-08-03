@@ -271,3 +271,94 @@ def test_rate_refresh_skips_provincial_and_report_regen(
     )
 
     assert [o.source for o in outcomes] == ["bcv", "p2p_rates", "binance"]
+
+
+# ---------------------------------------------------------------------------
+# Wiring: opt-in setting, lifespan hook, and the chip that reports the result.
+# ---------------------------------------------------------------------------
+
+
+def test_refresh_on_start_defaults_off(tmp_path) -> None:
+    """Off by default so tests and ad-hoc app builds never hit the network."""
+    from finances.web.settings import WebSettings
+
+    assert WebSettings(host="127.0.0.1", db_path=tmp_path / "x.db").refresh_on_start is False
+
+
+def test_refresh_on_start_survives_the_reload_child_hop(tmp_path) -> None:
+    """WebSettings crosses a process boundary through os.environ only."""
+    from finances.web.settings import WebSettings
+
+    original = WebSettings(
+        host="127.0.0.1", db_path=tmp_path / "x.db", refresh_on_start=True
+    )
+
+    restored = WebSettings.from_env(original.to_env())
+
+    assert restored.refresh_on_start is True
+
+
+def test_lifespan_does_not_refresh_when_the_setting_is_off(
+    web_db: sqlite3.Connection, web_client_factory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(
+        refresh_svc, "maybe_refresh", lambda *a, **k: calls.append("x")
+    )
+
+    with web_client_factory():
+        pass
+
+    assert calls == []
+
+
+def test_lifespan_refreshes_when_the_setting_is_on(
+    web_db_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fastapi.testclient import TestClient
+
+    from finances.web.app import create_app
+    from finances.web.settings import WebSettings
+
+    calls: list[str] = []
+    monkeypatch.setattr(
+        refresh_svc, "maybe_refresh", lambda *a, **k: calls.append("x")
+    )
+
+    app = create_app(
+        WebSettings(
+            host="127.0.0.1", db_path=web_db_path, refresh_on_start=True
+        )
+    )
+    with TestClient(app):
+        pass
+
+    assert calls == ["x"]
+
+
+def test_p2p_sync_chip_reads_the_source_ingest_writes(
+    web_db: sqlite3.Connection,
+) -> None:
+    """The chip queried 'p2p_rates', which ingest has never written."""
+    from finances.web.services.dashboard import build_sync_status
+
+    _run(web_db, "binance_p2p_median", finished_at=NOW)
+
+    chip = next(
+        c for c in build_sync_status(web_db) if c.source == "p2p_rates"
+    )
+
+    assert chip.last_status == "success"
+
+
+def test_sync_strip_polls_once_shortly_after_load(
+    web_db: sqlite3.Connection, web_client_factory
+) -> None:
+    """The startup refresh lands in ~10s; a 60s-only poll shows stale chips."""
+    client = web_client_factory()
+
+    html = client.get("/").text
+
+    strip = html.split('id="sync-status-strip"', 1)[1].split(">", 1)[0]
+    assert "load delay:" in strip
+    assert "every 60s" in strip

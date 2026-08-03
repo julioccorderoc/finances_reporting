@@ -41,6 +41,7 @@ def _settings(tmp_path: Path, **overrides: object) -> WebSettings:
         "token": "s3cret",
         "db_path": tmp_path / "x.db",
         "regen_report_on_shutdown": False,
+        "refresh_on_start": True,
     }
     base.update(overrides)
     return WebSettings(**base)  # type: ignore[arg-type]
