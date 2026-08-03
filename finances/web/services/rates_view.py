@@ -223,9 +223,9 @@ def rates_for_day(
     ``amount_native``/``currency`` are the transaction's own, and are
     required rather than defaulted: a caller that forgets them would
     silently strip every dollar figure off the panel. Each series is
-    priced the same way ``_project_card`` prices the winner —
-    ``amount / rate``, no quantize, formatting left to ``fmt_money`` — so
-    the winner's row and the modal header cannot disagree. A series whose
+    priced through ``money.to_usd_at``, the same helper behind every other
+    USD figure — no quantize, formatting left to ``fmt_money`` — so the
+    winner's row and the modal header cannot disagree. A series whose
     quote currency is not the transaction's is left unpriced: dividing,
     say, COP by a VES rate would invent a number.
     """
