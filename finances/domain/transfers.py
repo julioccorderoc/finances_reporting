@@ -133,6 +133,42 @@ def _iso(value: datetime) -> str:
     return value.isoformat()
 
 
+# Treated as 1:1 with the dollar (ADR-015). Stablecoins depeg by
+# fractions of a percent; the ledger's tolerances are wider than that,
+# and a price feed here would not change any decision.
+USD_EQUIVALENT_CURRENCIES: frozenset[str] = frozenset({"USD", "USDT", "USDC"})
+
+# How far a cross-currency pair may miss, as a fraction of the larger
+# leg. Shared by the pairing strategy (which admits a pair at this
+# threshold) and by validate (which afterwards checks it holds).
+#
+# They must be one constant. When they were two, the strategy paired at
+# 2% relative while validate demanded 0.01 absolute, so 21 of the
+# ledger's 97 cross-currency transfers were admitted by one rule and
+# rejected by the other. Absolute cents are meaningless here anyway: the
+# legs are in different units and the rate is itself an approximation of
+# a counterparty's quote.
+DEFAULT_AMOUNT_TOLERANCE_RATIO: Decimal = Decimal("0.02")
+
+
+def _to_usd(
+    amount: Decimal,
+    currency: str,
+    rate: Decimal | None,
+) -> Decimal | None:
+    """Express ``amount`` in USD, or ``None`` if it cannot be priced.
+
+    Per ADR-015 ``user_rate`` is bolívares per dollar, so a non-USD
+    amount *divides* by it. Multiplying — which is what this function
+    replaced — produces VES²/USD, a quantity with no meaning.
+    """
+    if currency.upper() in USD_EQUIVALENT_CURRENCIES:
+        return amount
+    if rate is None or rate <= 0:
+        return None
+    return amount / rate
+
+
 # ---------------------------------------------------------------------------
 # create_transfer — three modes
 # ---------------------------------------------------------------------------
@@ -439,13 +475,22 @@ def validate(
     transfer_id: str,
     *,
     tolerance: Decimal = Decimal("0.01"),
+    cross_currency_tolerance_ratio: Decimal = DEFAULT_AMOUNT_TOLERANCE_RATIO,
 ) -> bool:
     """Return True iff the transfer is well-formed.
 
     A well-formed transfer has exactly two legs, both of kind
-    ``transfer``, on different accounts, whose amounts net to zero
-    within ``tolerance`` — either directly (same currency) or after
-    per-leg ``user_rate`` conversion to USD (different currencies).
+    ``transfer``, on different accounts, whose amounts cancel.
+
+    Same-currency legs must cancel to within ``tolerance``, an absolute
+    figure in that currency — nothing is approximated, so cents are a
+    fair demand.
+
+    Cross-currency legs are converted to USD per ADR-015 and must cancel
+    to within ``cross_currency_tolerance_ratio`` of the larger leg. The
+    threshold is relative because the conversion is: the rate is one
+    counterparty's quote, and the pair was admitted at this same ratio
+    by :class:`BankAnchoredP2pPairing`.
     """
     rows = conn.execute(SQL_TRANSFER_LEGS, (transfer_id,)).fetchall()
     if len(rows) != 2:
@@ -493,12 +538,26 @@ def validate(
     if a.currency == b.currency:
         return abs(a.amount + b.amount) <= tolerance
 
-    # Cross-currency: require user_rate on both legs, convert to USD.
-    if a.user_rate is None or b.user_rate is None:
+    # Cross-currency: express both legs in USD, then check they cancel.
+    #
+    # Per ADR-015 user_rate is bolívares per dollar wherever it sits, so
+    # the conversion depends on the *leg's* currency, not on which leg
+    # happens to store the rate. A leg without one borrows its
+    # counterpart's: a pairing is one economic event at one rate, and
+    # Provincial rows never carry a rate at all.
+    rate = a.user_rate if a.user_rate is not None else b.user_rate
+    a_usd = _to_usd(a.amount, a.currency, rate)
+    b_usd = _to_usd(b.amount, b.currency, rate)
+    if a_usd is None or b_usd is None:
         return False
-    a_usd = a.amount * a.user_rate
-    b_usd = b.amount * b.user_rate
-    return abs(a_usd + b_usd) <= tolerance
+
+    # Relative, not absolute: this pair was admitted at a relative
+    # threshold, so checking it against a fixed number of cents would
+    # contradict the rule that created it.
+    largest = max(abs(a_usd), abs(b_usd))
+    if largest == 0:
+        return abs(a_usd + b_usd) <= tolerance
+    return abs(a_usd + b_usd) / largest <= cross_currency_tolerance_ratio
 
 
 # ---------------------------------------------------------------------------
@@ -563,7 +622,7 @@ class BankAnchoredP2pPairing:
         window_days: int = 1,
         bank_source: str = "provincial",
         binance_source: str = "binance",
-        amount_tolerance_ratio: Decimal = Decimal("0.02"),
+        amount_tolerance_ratio: Decimal = DEFAULT_AMOUNT_TOLERANCE_RATIO,
     ) -> None:
         # Pure configuration; no I/O here so construction is cheap and
         # failure modes stay in match()/apply().
