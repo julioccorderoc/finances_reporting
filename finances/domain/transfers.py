@@ -502,7 +502,8 @@ def validate(
     """Return True iff the transfer is well-formed.
 
     A well-formed transfer has exactly two legs, both of kind
-    ``transfer``, on different accounts, whose amounts cancel.
+    ``transfer``, on different positions — ``(account_id, currency)`` per
+    ADR-017 — whose amounts cancel.
 
     Same-currency legs must cancel to within ``tolerance``, an absolute
     figure in that currency — nothing is approximated, so cents are a
@@ -554,7 +555,11 @@ def validate(
     a, b = legs
     if a.kind is not TransactionKind.TRANSFER or b.kind is not TransactionKind.TRANSFER:
         return False
-    if a.account_id == b.account_id:
+    # Two positions, not two accounts (ADR-017). The same guard
+    # ``create_transfer`` applies: one account is fine when the currencies
+    # differ, because that is a conversion and value genuinely moved. One
+    # account *and* one currency is the degenerate case — nothing moved.
+    if a.account_id == b.account_id and a.currency == b.currency:
         return False
 
     if a.currency == b.currency:
