@@ -363,6 +363,15 @@ def _months_back_iter(today: date, months_back: int) -> list[str]:
 
 _OTHER_BUCKET = "Other"
 
+# Rows with no category need a label of their own. Sharing "Other" with the
+# overflow bucket was harmless only while the inverted ranking kept
+# uncategorized spending out of the top five; once it ranks on magnitude it
+# lands there, gets a series from `top5` *and* a second one from the overflow
+# append, and the chart draws it twice — $8,701 double-counted on the live
+# ledger. `monthly_view` has always kept the two apart; this matches its
+# label so the two surfaces name the same bucket the same way.
+_UNCATEGORIZED_LABEL = "Uncategorized"
+
 
 def build_spend_trend(
     conn: sqlite3.Connection,
@@ -391,12 +400,17 @@ def build_spend_trend(
     # Total per category over window.
     cat_total: dict[str, Decimal] = {}
     for r in expense_rows:
-        key = r.category_name or _OTHER_BUCKET
+        key = r.category_name or _UNCATEGORIZED_LABEL
         cat_total[key] = cat_total.get(key, Decimal("0")) + r.total_usd
 
+    # Rank by magnitude, not by signed value. Expense totals are negative, so
+    # reverse-sorting them put the *least* negative first and the chart was
+    # built out of the cheapest categories — Fees at $3.26 displacing
+    # Purchases at $1,103. monthly_view has always ranked with abs(); this is
+    # the copy that drifted.
     sorted_cats = sorted(
         cat_total.items(),
-        key=lambda kv: (kv[1], kv[0]),
+        key=lambda kv: (abs(kv[1]), kv[0]),
         reverse=True,
     )
     top5 = [name for (name, _) in sorted_cats[:5]]
@@ -408,7 +422,7 @@ def build_spend_trend(
     for r in expense_rows:
         if r.month not in per_month:
             continue
-        cat = r.category_name or _OTHER_BUCKET
+        cat = r.category_name or _UNCATEGORIZED_LABEL
         bucket = cat if cat in bucketed else _OTHER_BUCKET
         per_month[r.month][bucket] = (
             per_month[r.month].get(bucket, Decimal("0")) + r.total_usd
@@ -416,10 +430,10 @@ def build_spend_trend(
         fallback_per_month[r.month] += r.fallback_usd
 
     series_names = list(top5)
-    has_other = any(
-        per_month[m].get(_OTHER_BUCKET, Decimal("0")) != 0 for m in months
-    ) or len(sorted_cats) > 5
-    if has_other:
+    # The overflow series exists only if something actually overflowed. It
+    # can no longer collide with a named series, because every name in
+    # `top5` comes from a real category or the distinct uncategorized label.
+    if any(per_month[m].get(_OTHER_BUCKET, Decimal("0")) != 0 for m in months):
         series_names.append(_OTHER_BUCKET)
 
     series = [

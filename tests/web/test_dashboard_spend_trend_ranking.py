@@ -79,7 +79,7 @@ def test_top_series_are_the_biggest_spends(spend_db):
 
 
 def test_the_cheapest_categories_are_not_promoted(spend_db):
-    """Fees at \$3 must never displace Groceries at \$700."""
+    """Fees at $3 must never displace Groceries at $700."""
     trend = build_spend_trend(spend_db, today=datetime(2026, 5, 31, tzinfo=UTC).date())
     shown = {s.category for s in trend.series}
 
@@ -111,4 +111,44 @@ def test_totals_are_preserved_across_the_split(spend_db):
     )
     expected = -sum((Decimal(v) for v in SPEND.values()), Decimal("0"))
 
+    assert charted == expected
+
+
+def test_uncategorized_spend_is_charted_once(spend_db):
+    """Uncategorized rows get their own label, never the overflow bucket's.
+
+    Both were called "Other". Once magnitude ranking let the uncategorized
+    bucket into the top five, it received a series from ``top5`` *and* the
+    overflow append — two identical series, and the chart drew the money
+    twice. On the live ledger that inflated the six-month spend chart from
+    -$11,524 to -$20,225.
+    """
+    account = spend_db.execute("SELECT id FROM accounts LIMIT 1").fetchone()["id"]
+    # Bigger than every named category, so it must rank first.
+    txn_repo.insert(
+        spend_db,
+        Transaction(
+            account_id=account,
+            occurred_at=datetime(2026, 5, 12, tzinfo=UTC),
+            kind=TransactionKind.EXPENSE,
+            amount=Decimal("-5000"),
+            currency="USD",
+            description="no category",
+            category_id=None,
+            source="cash_cli",
+            source_ref="uncat",
+        ),
+    )
+    trend = build_spend_trend(spend_db, today=datetime(2026, 5, 31, tzinfo=UTC).date())
+
+    names = [s.category for s in trend.series]
+    assert len(names) == len(set(names)), f"duplicate series: {names}"
+    assert names.count("Uncategorized") == 1
+
+    charted = sum(
+        (sum(s.values, Decimal("0")) for s in trend.series), Decimal("0")
+    )
+    expected = -sum((Decimal(v) for v in SPEND.values()), Decimal("0")) - Decimal(
+        "5000"
+    )
     assert charted == expected
