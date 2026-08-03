@@ -308,12 +308,20 @@ CHECKS: tuple[IntegrityCheck, ...] = (
             "writes two rows sharing one order id — asset out, asset in. A "
             "lone outgoing leg reads as money spent, because reports count "
             "every non-transfer row. Legacy backfill hashed each leg "
-            "separately, so its halves never shared an id."
+            "separately, so its halves never shared an id. Run "
+            "`finances reconcile converts` to pair what can be paired."
         ),
         # Strip the trailing ':from' / ':to' to recover the order id, then
         # require both halves to exist for it. Live API rows share a real
         # order id; backfilled ones hashed per-leg and so can never match —
         # which is exactly the finding.
+        #
+        # Legs that already carry a transfer_id are excluded. Pairing does
+        # not rewrite source_ref and must not — it is the dedup key
+        # (rule-010) — so a repaired legacy pair keeps its mismatched keys
+        # for good. The question this check asks is whether a lone leg reads
+        # as money spent, and a paired leg does not: reports drop it by kind.
+        # Without this clause the check would report finished work forever.
         sql="""
             WITH legs AS (
                 SELECT id,
@@ -331,6 +339,7 @@ CHECKS: tuple[IntegrityCheck, ...] = (
                        END AS side
                   FROM transactions
                  WHERE source_ref LIKE 'convert:%'
+                   AND transfer_id IS NULL
             )
             SELECT id FROM legs
              WHERE order_key IN (

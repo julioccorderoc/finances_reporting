@@ -28,6 +28,12 @@ app.add_typer(sync_app, name="sync")
 rates_app = typer.Typer(help="Exchange-rate maintenance (ADR-005, ADR-013).")
 app.add_typer(rates_app, name="rates")
 
+reconcile_app = typer.Typer(
+    help="Re-run reconciliation passes over rows already in the ledger "
+    "(ADR-002, ADR-017)."
+)
+app.add_typer(reconcile_app, name="reconcile")
+
 
 @app.callback()
 def _root() -> None:
@@ -149,6 +155,54 @@ def doctor_cmd(
     typer.echo(render_integrity(report))
 
     if strict and report.has_errors:
+        raise typer.Exit(code=1)
+
+
+@reconcile_app.command("converts")
+def reconcile_converts(
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Report what would be paired, then roll back without writing.",
+    ),
+) -> None:
+    """Pair Binance conversion legs into transfers (ADR-017).
+
+    A conversion moves value between two positions inside one account, so
+    both legs are movement, not spending. The Binance sync pairs new ones;
+    this repairs those already recorded, including the legacy rows whose
+    halves were hashed separately and so never shared an order id.
+
+    Idempotent — eligibility is ``transfer_id IS NULL``, so re-running it
+    once everything is paired does nothing.
+    """
+    from finances.domain.reconciliation import run_reconciliation_pass
+    from finances.domain.transfers import SameAccountConvertPairing
+
+    conn = get_connection(DB_PATH)
+    apply_migrations(conn)
+    try:
+        conn.execute("BEGIN")
+        try:
+            report = run_reconciliation_pass(SameAccountConvertPairing(conn))
+            if dry_run:
+                conn.execute("ROLLBACK")
+            else:
+                conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+    finally:
+        conn.close()
+
+    suffix = " (dry run — rolled back)" if dry_run else ""
+    typer.echo(
+        f"conversion pairing: {report.proposals_applied}/{report.proposals_found} "
+        f"pair(s) applied{suffix}"
+    )
+    for err in report.errors:
+        typer.echo(f"  error: {err}", err=True)
+    if report.errors:
         raise typer.Exit(code=1)
 
 
