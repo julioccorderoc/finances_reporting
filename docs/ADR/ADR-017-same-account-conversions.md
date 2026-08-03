@@ -96,9 +96,9 @@ degenerate case §1.1 identifies, and it stays rejected at write time and
 flagged by `finances doctor`.
 
 Nothing else in rule-002 changes. A transfer is still exactly two rows, still
-shares one `transfer_id`, is still signed, still sums to zero (after USD
-conversion for cross-currency pairs), and `domain.transfers.create_transfer`
-remains the only path that writes `kind='transfer'`.
+shares one `transfer_id`, is still signed, and still sums to zero (after USD
+conversion for cross-currency pairs). What does change is rule-002's
+sole-writer clause, which this ADR narrows — see §2.4.
 
 ### 2.1 Why this model and not a new kind
 
@@ -172,7 +172,38 @@ auditing a specific legacy transfer must treat the linkage as an accounting
 convenience, exactly as ADR-002 says for P2P. Anything that fails any of the
 five conditions stays unpaired and keeps surfacing in `finances doctor`.
 
-### 2.4 The conversion spread leaves the P&L
+### 2.4 The ingest writes fresh conversions already paired
+
+rule-002 said `create_transfer` was the only code path permitted to insert a
+`kind='transfer'` row. That is no longer true, and the exception is deliberate
+rather than an oversight, so it is recorded here.
+
+`RawBinanceConvertRow.to_transactions` in `finances/ingest/binance.py` emits
+both legs as `kind='transfer'` sharing `transfer_id = "convert:<orderId>"`, and
+they are written through `transactions_repo.upsert_by_source_ref` like every
+other Binance row. A synced conversion is therefore correct the moment it
+lands; §2.2's pass finds nothing to do for it, because eligibility is
+`transfer_id IS NULL`.
+
+The alternative — insert both legs, then call `create_transfer` in
+both-anchors mode to promote them — was rejected. The ingest's idempotency
+comes from upserting on `(source, source_ref)` (rule-010), which is what makes
+re-ingesting a day a no-op. `create_transfer`'s both-anchors mode requires two
+rows to already exist and has no upsert semantics, so routing through it would
+mean writing each leg twice by two different rules and reconciling them. That
+buys nothing: the pair the ingest writes is already well-formed and already
+shares one `transfer_id`.
+
+The invariant rule-002 actually protects does not depend on a single writer.
+Well-formedness is enforced after the fact by `finances doctor` —
+`transfer_leg_count`, `transfer_legs_same_account`,
+`transfer_same_currency_imbalance` — which judges the rows regardless of who
+wrote them. `create_transfer` remains the sole path that *pairs two existing
+rows*, which is the case where a guard is genuinely load-bearing, and it is
+still the only writer used by every reconciliation strategy, the web triage
+pairing, and the backfill.
+
+### 2.5 The conversion spread leaves the P&L
 
 A conversion's two legs do not cancel exactly — Binance's quote embeds a
 spread. Previously that residue was counted as income or expense; under this
@@ -194,10 +225,11 @@ touched.**
 | File | Change |
 |---|---|
 | `domain/transfers.py` — both-anchors guard | reject same-account only when the two legs' currencies match |
+| `domain/transfers.py` — `validate()` | same relaxation as the guard: same account is a defect only when the currencies match too |
 | `domain/transfers.py` — new strategy | `SameAccountConvertPairing`, two tiers (§2.2) |
 | `domain/integrity.py` — `transfer_legs_same_account` | add `COUNT(DISTINCT currency) = 1` so it condemns only the degenerate case |
 | `domain/integrity.py` — `convert_leg_without_counterpart` | exclude legs that already carry a `transfer_id` (§3.1) |
-| `ingest/binance.py` | run the strategy as a post-pass |
+| `ingest/binance.py` | write a synced conversion's legs already paired (§2.4), and run the strategy as a post-pass |
 | `cli/main.py` | `finances reconcile converts`, so existing rows can be repaired without an API call |
 
 `create_transfer`'s *fresh* and *anchor-only* modes keep rejecting
@@ -205,7 +237,11 @@ same-account outright. A conversion always presents two real rows to pair, so
 it never needs those modes, and leaving them strict keeps the relaxation as
 narrow as the problem.
 
-**`validate()` needs no new arithmetic.** Its cross-currency arm converts each
+**`validate()` needed the guard relaxed, but no new arithmetic.** It shipped
+still rejecting any pair whose legs shared an account, which made every
+conversion fail the ledger's own well-formedness check; that check now matches
+`create_transfer`. The arithmetic below it was always correct and never got to
+run. Its cross-currency arm converts each
 leg to USD via `_to_usd`, which returns USD-equivalent currencies unchanged
 without consulting a rate (ADR-015). A −1 240 USDC / +1 239.18 USDT pair
 resolves to 0.066% relative drift, well inside the existing tolerance, and
@@ -303,6 +339,7 @@ reversal.
 **Injected constraint:** The two legs sharing a `transfer_id` must differ in
 **position** — `(account_id, currency)` — not necessarily in `account_id`.
 Legs on the same account are valid when their currencies differ and invalid
-when they do not. `domain.transfers.create_transfer` remains the sole writer
-of `kind='transfer'` rows, and `finances doctor` enforces the narrowed rule via
-`transfer_legs_same_account`.
+when they do not. `domain.transfers.create_transfer` remains the sole path
+that *pairs* two existing rows into a transfer; the Binance convert ingest
+additionally writes its two legs already paired (§2.4). `finances doctor`
+enforces the narrowed rule via `transfer_legs_same_account`.
