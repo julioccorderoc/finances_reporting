@@ -1,4 +1,4 @@
-# ADR-014 — `user_rate` Is Bolívares Per Dollar, On Every Row
+# ADR-015 — `user_rate` Is Bolívares Per Dollar, On Every Row
 
 - **Status:** Accepted
 - **Date:** 2026-08-03

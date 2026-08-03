@@ -133,7 +133,7 @@ def _iso(value: datetime) -> str:
     return value.isoformat()
 
 
-# Treated as 1:1 with the dollar (ADR-014). Stablecoins depeg by
+# Treated as 1:1 with the dollar (ADR-015). Stablecoins depeg by
 # fractions of a percent; the ledger's tolerances are wider than that,
 # and a price feed here would not change any decision.
 USD_EQUIVALENT_CURRENCIES: frozenset[str] = frozenset({"USD", "USDT", "USDC"})
@@ -158,7 +158,7 @@ def _to_usd(
 ) -> Decimal | None:
     """Express ``amount`` in USD, or ``None`` if it cannot be priced.
 
-    Per ADR-014 ``user_rate`` is bolívares per dollar, so a non-USD
+    Per ADR-015 ``user_rate`` is bolívares per dollar, so a non-USD
     amount *divides* by it. Multiplying — which is what this function
     replaced — produces VES²/USD, a quantity with no meaning.
     """
@@ -486,7 +486,7 @@ def validate(
     figure in that currency — nothing is approximated, so cents are a
     fair demand.
 
-    Cross-currency legs are converted to USD per ADR-014 and must cancel
+    Cross-currency legs are converted to USD per ADR-015 and must cancel
     to within ``cross_currency_tolerance_ratio`` of the larger leg. The
     threshold is relative because the conversion is: the rate is one
     counterparty's quote, and the pair was admitted at this same ratio
@@ -540,7 +540,7 @@ def validate(
 
     # Cross-currency: express both legs in USD, then check they cancel.
     #
-    # Per ADR-014 user_rate is bolívares per dollar wherever it sits, so
+    # Per ADR-015 user_rate is bolívares per dollar wherever it sits, so
     # the conversion depends on the *leg's* currency, not on which leg
     # happens to store the rate. A leg without one borrows its
     # counterpart's: a pairing is one economic event at one rate, and
