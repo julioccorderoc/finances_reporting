@@ -666,3 +666,139 @@ def test_property_realized_wins_exactly_within_age_window(
         assert rate == median
         assert source == "binance_p2p_median"
     assert txn.needs_review is False
+
+
+# ---------------------------------------------------------------------------
+# ADR-014: the binance_p2p_median tier expires at MEDIAN_MAX_AGE_DAYS.
+#
+# Before ADR-014 the median carried forward without limit, so a single
+# snapshot could be presented as the market rate months later. Because a
+# stale median and a current BCV rate both lag the real market, the two
+# converge — which is exactly how the bug surfaced (a April 27 median of
+# 633.52 shown for June transactions, 1.7% from BCV and 13% from realized).
+# ---------------------------------------------------------------------------
+
+
+def _insert_median(
+    conn: sqlite3.Connection, *, as_of_date: date, rate: Decimal
+) -> Rate:
+    return _insert_rate(
+        conn,
+        as_of_date=as_of_date,
+        base="USDT",
+        quote="VES",
+        source=rates_engine.BINANCE_P2P_SOURCE,
+        rate=rate,
+    )
+
+
+def test_median_applies_on_final_day_of_window(
+    in_memory_db: sqlite3.Connection,
+) -> None:
+    """The age boundary is inclusive, matching ADR-013's realized cap."""
+    captured = date(2025, 7, 1)
+    _insert_median(in_memory_db, as_of_date=captured, rate=Decimal("50"))
+    spend_day = captured + timedelta(days=rates_engine.MEDIAN_MAX_AGE_DAYS)
+
+    rate, source = rates_engine.resolve(in_memory_db, _txn_on(spend_day))
+
+    assert rate == Decimal("50")
+    assert source == rates_engine.BINANCE_P2P_SOURCE + "_carry"
+
+
+def test_median_expires_one_day_past_window_falls_through_to_bcv(
+    in_memory_db: sqlite3.Connection,
+) -> None:
+    captured = date(2025, 7, 1)
+    _insert_median(in_memory_db, as_of_date=captured, rate=Decimal("50"))
+    spend_day = captured + timedelta(days=rates_engine.MEDIAN_MAX_AGE_DAYS + 1)
+    _insert_rate(
+        in_memory_db,
+        as_of_date=spend_day,
+        base="USD",
+        quote="VES",
+        source="bcv",
+        rate=Decimal("36"),
+    )
+
+    rate, source = rates_engine.resolve(in_memory_db, _txn_on(spend_day))
+
+    assert rate == Decimal("36")
+    assert source == "bcv"
+
+
+def test_expired_median_with_no_bcv_flags_needs_review(
+    in_memory_db: sqlite3.Connection,
+) -> None:
+    """An expired median must not be the answer of last resort."""
+    captured = date(2025, 7, 1)
+    _insert_median(in_memory_db, as_of_date=captured, rate=Decimal("50"))
+    spend_day = captured + timedelta(days=rates_engine.MEDIAN_MAX_AGE_DAYS + 1)
+    txn = _txn_on(spend_day)
+
+    rate, source = rates_engine.resolve(in_memory_db, txn)
+
+    assert rate is None
+    assert source == "needs_review"
+    assert txn.needs_review is True
+
+
+def test_bcv_still_carries_without_limit(
+    in_memory_db: sqlite3.Connection,
+) -> None:
+    """ADR-014 caps the median only; BCV is the floor and stays uncapped."""
+    captured = date(2025, 7, 1)
+    _insert_rate(
+        in_memory_db,
+        as_of_date=captured,
+        base="USD",
+        quote="VES",
+        source="bcv",
+        rate=Decimal("36"),
+    )
+    spend_day = captured + timedelta(days=365)
+
+    rate, source = rates_engine.resolve(in_memory_db, _txn_on(spend_day))
+
+    assert rate == Decimal("36")
+    assert source == "bcv_carry"
+
+
+@given(
+    offset=st.integers(min_value=0, max_value=60),
+    txn_day=st.dates(min_value=date(2022, 1, 1), max_value=date(2030, 12, 31)),
+)
+@settings(
+    max_examples=40,
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
+def test_property_median_wins_exactly_within_age_window(
+    in_memory_db: sqlite3.Connection, offset: int, txn_day: date
+) -> None:
+    """Median wins iff its age <= the cap; past it, BCV takes over."""
+    in_memory_db.execute("DELETE FROM rates")
+    _insert_median(
+        in_memory_db,
+        as_of_date=txn_day - timedelta(days=offset),
+        rate=Decimal("100"),
+    )
+    _insert_rate(
+        in_memory_db,
+        as_of_date=txn_day,
+        base="USD",
+        quote="VES",
+        source="bcv",
+        rate=Decimal("50"),
+    )
+
+    rate, source = rates_engine.resolve(in_memory_db, _txn_on(txn_day))
+
+    if offset <= rates_engine.MEDIAN_MAX_AGE_DAYS:
+        assert rate == Decimal("100")
+        assert source == rates_engine.BINANCE_P2P_SOURCE + (
+            "_carry" if offset else ""
+        )
+    else:
+        assert rate == Decimal("50")
+        assert source == "bcv"
