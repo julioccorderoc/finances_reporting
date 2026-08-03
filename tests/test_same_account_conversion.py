@@ -60,6 +60,19 @@ def _leg(account, *, amount, currency, kind, ref):
 
 
 def _convert(conn, account):
+    # Fund the USDC position first: converting 500 USDC you never received
+    # leaves a negative asset balance, which doctor now (correctly) calls an
+    # error, and these tests are about the conversion rule.
+    txn_repo.insert(
+        conn,
+        _leg(
+            account,
+            amount="500",
+            currency="USDC",
+            kind=TransactionKind.INCOME,
+            ref="deposit:1",
+        ).model_copy(update={"description": "salary"}),
+    )
     out = txn_repo.insert(
         conn,
         _leg(
@@ -134,15 +147,15 @@ def test_a_paired_conversion_leaves_income_and_expense(spot):
     conn, account = spot
     out, inn = _convert(conn, account)
     before = consolidated_usd.build_report(conn)
-    assert len(before.rows) == 2
+    assert len(before.rows) == 3  # the funding deposit + both convert legs
 
     create_transfer(
         conn, anchor_transaction_id=out.id, counterpart_transaction_id=inn.id
     )
 
     after = consolidated_usd.build_report(conn)
-    assert after.rows == []
-    assert after.total_usd == Decimal("0")
+    assert [r.transaction_id for r in after.rows] == [out.id - 1]
+    assert after.total_usd == Decimal("500")
 
 
 def test_doctor_no_longer_calls_a_conversion_an_error(spot):

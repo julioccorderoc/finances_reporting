@@ -213,8 +213,11 @@ CHECKS: tuple[IntegrityCheck, ...] = (
         name="transfer_legs_same_account",
         severity=Severity.ERROR,
         description=(
-            "Both legs of a transfer on one account. A transfer moves money "
-            "between accounts; this nets to nothing and hides a real movement."
+            "Both legs of a transfer in the same position — one account and "
+            "one currency. Nothing moved, and a real movement is hidden. A "
+            "conversion (one account, two currencies) is not this: it moves "
+            "value between two positions the owner holds, and is the case "
+            "the ledger previously could not express at all."
         ),
         sql="""
             SELECT id FROM transactions
@@ -223,6 +226,7 @@ CHECKS: tuple[IntegrityCheck, ...] = (
                     WHERE transfer_id IS NOT NULL
                     GROUP BY transfer_id
                    HAVING COUNT(DISTINCT account_id) = 1
+                      AND COUNT(DISTINCT currency) = 1
              )
              ORDER BY id
         """,

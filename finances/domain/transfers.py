@@ -241,8 +241,21 @@ def create_transfer(
         row_b = txn_repo.get_by_id(conn, counterpart_transaction_id)
         if row_a is None or row_b is None:
             raise ValueError("both anchor transactions must exist")
-        if row_a.account_id == row_b.account_id:
-            raise ValueError("both-anchors legs must be on different accounts")
+        # A transfer moves value between two distinct (account, currency)
+        # positions — not necessarily between two accounts. Converting USDC
+        # to USDT inside Binance Spot is one account and two positions, and
+        # is precisely what this ledger could not express: the ingest had to
+        # write an expense and an income row instead, and every report
+        # counted both. Same account *and* same currency remains an error,
+        # because then genuinely nothing moved.
+        if (
+            row_a.account_id == row_b.account_id
+            and row_a.currency == row_b.currency
+        ):
+            raise ValueError(
+                "both legs are the same currency on the same account; "
+                "nothing moved"
+            )
 
         # Reject conflicting pre-existing transfer_ids.
         for existing in (row_a.transfer_id, row_b.transfer_id):
@@ -702,8 +715,89 @@ class BankAnchoredP2pPairing:
         return datetime.fromisoformat(text)
 
 
+# ---------------------------------------------------------------------------
+# SameAccountConvertPairing strategy
+# ---------------------------------------------------------------------------
+
+# Both halves of one conversion, still unpaired, recovered by stripping the
+# ``:from`` / ``:to`` suffix to get back the order id they share.
+SQL_UNPAIRED_CONVERT_PAIRS = """
+    WITH legs AS (
+        SELECT id, account_id, currency, CAST(amount AS REAL) AS amt,
+               CASE WHEN source_ref LIKE '%:from'
+                      THEN SUBSTR(source_ref, 1, LENGTH(source_ref) - 5)
+                    ELSE SUBSTR(source_ref, 1, LENGTH(source_ref) - 3)
+               END AS order_key,
+               CASE WHEN source_ref LIKE '%:from' THEN 'from' ELSE 'to' END AS side
+          FROM transactions
+         WHERE source_ref LIKE 'convert:%'
+           AND transfer_id IS NULL
+           AND (source_ref LIKE '%:from' OR source_ref LIKE '%:to')
+    )
+    SELECT f.id AS from_id, t.id AS to_id
+      FROM legs f
+      JOIN legs t
+        ON t.order_key = f.order_key
+       AND t.side = 'to'
+       AND f.side = 'from'
+       AND t.account_id = f.account_id
+       AND t.currency <> f.currency
+     WHERE f.amt < 0 AND t.amt > 0
+     ORDER BY f.id
+"""
+
+
+class SameAccountConvertPairing:
+    """Strategy: pair the two halves of a Binance convert.
+
+    A conversion moves value between two positions on one account. Until the
+    (account, currency) formulation of rule-002 landed, ``create_transfer``
+    refused that shape, so the ingest wrote an expense row and an income row
+    and every report counted both — roughly $11,846 of phantom spending
+    against $11,845 of phantom earning on the live ledger.
+
+    New conversions arrive already paired from
+    :mod:`finances.ingest.binance`. This repairs the ones written before
+    that, and is idempotent: a pair that already shares a ``transfer_id`` is
+    not selected.
+
+    Matching is by the order id both legs carry in their ``source_ref``, not
+    by amount or date — an exact identity, so there is nothing to get wrong.
+    Legs whose halves were hashed separately by the legacy backfill have no
+    shared id and are deliberately left alone; ``finances doctor`` names them
+    under ``convert_leg_without_counterpart``, and only the owner can say
+    which orphan belongs to which.
+    """
+
+    name: str = "same_account_convert_pairing"
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self._conn = conn
+
+    def match(self) -> list[MatchProposal]:
+        rows = self._conn.execute(SQL_UNPAIRED_CONVERT_PAIRS).fetchall()
+        return [
+            MatchProposal(
+                strategy=self.name,
+                details={
+                    "from_transaction_id": int(row["from_id"]),
+                    "to_transaction_id": int(row["to_id"]),
+                },
+            )
+            for row in rows
+        ]
+
+    def apply(self, proposal: MatchProposal) -> None:
+        create_transfer(
+            self._conn,
+            anchor_transaction_id=proposal.details["from_transaction_id"],
+            counterpart_transaction_id=proposal.details["to_transaction_id"],
+        )
+
+
 __all__ = [
     "BankAnchoredP2pPairing",
+    "SameAccountConvertPairing",
     "TransferPair",
     "create_transfer",
     "find_unreconciled",
