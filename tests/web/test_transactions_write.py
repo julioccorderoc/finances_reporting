@@ -292,7 +292,7 @@ def test_patch_endpoint_200_returns_updated_card_json(
     body = resp.json()
     assert body["id"] == txn_id
     assert body["rate_source"] == "user_rate"
-    assert Decimal(body["amount_usd"]) == (Decimal("365.00") / Decimal("36.5"))
+    assert Decimal(body["amount_usd"]) == (Decimal("-365.00") / Decimal("36.5"))
 
 
 def test_patch_endpoint_404_unknown_id(

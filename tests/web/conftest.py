@@ -123,6 +123,16 @@ def seeded_web_db(web_db: sqlite3.Connection) -> sqlite3.Connection:
     * One Provincial expense with ``user_rate`` set explicitly.
     * One Provincial expense with NO matching rate (forces needs_review).
     * One BCV rate row + one binance_p2p_median rate row, dated ~today.
+
+    **Expense amounts are negative, as production stores them.** They were
+    positive here for a long time, and the fixture consequently held no
+    negative amount at all. That hid a live defect: the dashboard's top-5
+    spend chart ranked signed totals with ``reverse=True``, which is correct
+    for positive inputs and returns the five *smallest* categories for real
+    ones — the front-page chart was built out of Fees at $3.26 while
+    Purchases at $1,103 sat in "Other". It also meant no web test ever
+    exercised ``amount < 0``, the predicate behind the realized-basis
+    rebuild hook and the pairing sign check.
     """
     today = datetime.now(tz=UTC)
     one_week = today - timedelta(days=7)
@@ -186,7 +196,7 @@ def seeded_web_db(web_db: sqlite3.Connection) -> sqlite3.Connection:
             account_id=provincial.id,
             occurred_at=_aware(today),
             kind=TransactionKind.EXPENSE,
-            amount=Decimal("365.00"),
+            amount=Decimal("-365.00"),
             currency="VES",
             description="COM.PAGO bodega",
             category_id=food.id,
@@ -198,7 +208,7 @@ def seeded_web_db(web_db: sqlite3.Connection) -> sqlite3.Connection:
             account_id=provincial.id,
             occurred_at=_aware(one_week),
             kind=TransactionKind.EXPENSE,
-            amount=Decimal("100.00"),
+            amount=Decimal("-100.00"),
             currency="VES",
             description="COM.PAGO farmacia",
             category_id=food.id,
@@ -210,7 +220,7 @@ def seeded_web_db(web_db: sqlite3.Connection) -> sqlite3.Connection:
             account_id=provincial.id,
             occurred_at=_aware(two_weeks),
             kind=TransactionKind.EXPENSE,
-            amount=Decimal("3650.00"),
+            amount=Decimal("-3650.00"),
             currency="VES",
             description="COM.PAGO grocery",
             category_id=food.id,
@@ -236,7 +246,7 @@ def seeded_web_db(web_db: sqlite3.Connection) -> sqlite3.Connection:
             account_id=provincial.id,
             occurred_at=_aware(datetime(2010, 1, 1, tzinfo=UTC)),
             kind=TransactionKind.EXPENSE,
-            amount=Decimal("999.00"),
+            amount=Decimal("-999.00"),
             currency="VES",
             description="LEGACY needs review",
             source="provincial",
@@ -248,7 +258,7 @@ def seeded_web_db(web_db: sqlite3.Connection) -> sqlite3.Connection:
             account_id=cash.id,
             occurred_at=_aware(today),
             kind=TransactionKind.EXPENSE,
-            amount=Decimal("12.50"),
+            amount=Decimal("-12.50"),
             currency="USD",
             description="lunch",
             source="cash_cli",

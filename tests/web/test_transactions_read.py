@@ -315,9 +315,10 @@ def test_rate_source_user_rate_when_set(
     assert len(rows) == 1
     row = rows[0]
     assert row["rate_source"] == "user_rate"
-    # 3650 / 36.0 = 101.388...
+    # -3650 / 36.0 = -101.388... An expense is negative, and the sign must
+    # survive the conversion rather than being taken as a magnitude.
     assert Decimal(row["amount_usd"]) == (
-        Decimal("3650.00") / Decimal("36.0")
+        Decimal("-3650.00") / Decimal("36.0")
     )
 
 
