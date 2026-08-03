@@ -670,6 +670,31 @@ def _handle_binance_internal_transfer(
     report.binance_rows_inserted += 2
 
 
+# Legacy Convert rows that record only the outgoing leg name the incoming
+# one in free text: "Converted to 1349.10883625 USDT". Thousands separators
+# appear occasionally, hence the comma class.
+_CONVERT_DESTINATION_RE = re.compile(
+    r"converted\s+to\s+([\d,]*\d(?:\.\d+)?)\s+([A-Za-z]{2,10})\b",
+    re.IGNORECASE,
+)
+
+
+def parse_convert_destination(remark: str | None) -> tuple[Decimal, str] | None:
+    """Extract ``(amount, ASSET)`` from a Convert remark, or ``None``.
+
+    ``None`` means the remark does not name a destination — either it is
+    a leg-per-row entry whose counterpart is its own row, or it is free
+    text we should not guess at. Callers keep the single-leg behaviour in
+    that case; inventing a counterpart would double-count the swap.
+    """
+    if not remark:
+        return None
+    found = _CONVERT_DESTINATION_RE.search(remark)
+    if found is None:
+        return None
+    return Decimal(found.group(1).replace(",", "")), found.group(2).upper()
+
+
 def _handle_binance_convert(
     conn: sqlite3.Connection,
     *,
@@ -680,28 +705,51 @@ def _handle_binance_convert(
     account_id: int,
     report: BackfillReport,
 ) -> None:
-    """Legacy Convert rows are single-sided; ingest each as a solo row.
+    """Ingest a legacy Convert row, both sides where the sheet has both.
 
-    The live ingest uses ``RawBinanceConvertRow.to_transactions()`` for a
-    pair; the legacy sheet records only one leg per row, so we wrap the
-    single leg in a ``RawBinanceConvertRow`` that self-converts (from →
-    to same asset, zero opposite leg) and pick the relevant side.
+    The sheet records a conversion two ways. Some entries carry each leg
+    as its own row ("Cambio de sueldo a USDT" on the USDC row, "Cambio a
+    USDT de sueldo" on the USDT row) — those stay single-legged here,
+    because writing a counterpart would double-count a swap whose other
+    half is already its own row.
+
+    Others carry only the outgoing leg and name the destination in the
+    remark: ``Converted to 1349.10883625 USDT``. Those get both legs, so
+    the incoming asset actually enters the ledger. Skipping it left the
+    outgoing leg standing alone, and a lone outflow reads as spending —
+    reports count every row whose kind is not 'transfer'.
     """
     tran_id = _hash_ref("legacy-convert", occurred.isoformat(), coin, amount, remark)
     is_out = amount < 0
-    raw = RawBinanceConvertRow(
-        tranId=tran_id,
-        fromAsset=coin if is_out else "UNKNOWN",
-        fromAmount=abs(amount) if is_out else Decimal("0"),
-        toAsset="UNKNOWN" if is_out else coin,
-        toAmount=Decimal("0") if is_out else abs(amount),
-        createTime=_ms(occurred),
-    )
-    legs = raw.to_transactions(spot_account_id=account_id)
-    side = legs[0] if is_out else legs[1]
-    txn = side.model_copy(update={"needs_review": True})
-    result = transactions_repo.upsert_by_source_ref(conn, txn)
-    report.binance_rows_inserted += result["rows_inserted"]
+    destination = parse_convert_destination(remark) if is_out else None
+
+    if destination is not None:
+        to_amount, to_asset = destination
+        raw = RawBinanceConvertRow(
+            orderId=tran_id,
+            fromAsset=coin,
+            fromAmount=abs(amount),
+            toAsset=to_asset,
+            toAmount=to_amount,
+            createTime=_ms(occurred),
+        )
+        sides = raw.to_transactions(spot_account_id=account_id)
+    else:
+        raw = RawBinanceConvertRow(
+            orderId=tran_id,
+            fromAsset=coin if is_out else "UNKNOWN",
+            fromAmount=abs(amount) if is_out else Decimal("0"),
+            toAsset="UNKNOWN" if is_out else coin,
+            toAmount=Decimal("0") if is_out else abs(amount),
+            createTime=_ms(occurred),
+        )
+        legs = raw.to_transactions(spot_account_id=account_id)
+        sides = [legs[0] if is_out else legs[1]]
+
+    for side in sides:
+        txn = side.model_copy(update={"needs_review": True})
+        result = transactions_repo.upsert_by_source_ref(conn, txn)
+        report.binance_rows_inserted += result["rows_inserted"]
 
 
 def backfill_binance(
@@ -1047,8 +1095,19 @@ def _iter_binance_annotations(
             tran_id = _hash_ref(
                 "legacy-convert", occ_iso, coin, amount, remark
             )
-            suffix = "from" if amount < 0 else "to"
-            yield (BINANCE_SOURCE, f"convert:{tran_id}:{suffix}", sub_cat, category)
+            if amount < 0 and parse_convert_destination(remark) is not None:
+                # Both legs came from this one sheet row, so both take its
+                # Sub-Category / Category.
+                yield (BINANCE_SOURCE, f"convert:{tran_id}:from", sub_cat, category)
+                yield (BINANCE_SOURCE, f"convert:{tran_id}:to", sub_cat, category)
+            else:
+                suffix = "from" if amount < 0 else "to"
+                yield (
+                    BINANCE_SOURCE,
+                    f"convert:{tran_id}:{suffix}",
+                    sub_cat,
+                    category,
+                )
 
 
 def _iter_provincial_annotations(

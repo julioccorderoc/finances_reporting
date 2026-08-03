@@ -35,16 +35,47 @@ _BINANCE_HEADERS = [
     "Fecha", "Cuenta", "Operación", "Coin", "Amount", "Remark",
     "Month", "Week", "Sub-Category", "Category", "Type",
 ]
+_PROVINCIAL_HEADERS = [
+    "Fecha", "Month", "Month-week", "Week", "Referencia", "Descripción",
+    "Sub-Category", "Monto", "Tipo", "Tasa del día", "Monto (BCV)",
+    "Tasa USDT", "Monto (USDT)", "Comentarios", "Category",
+]
 
 
-def _write_binance_csv(path: Path, rows: list[dict[str, str]]) -> None:
+def _write_csv(path: Path, headers: list[str], rows: list[dict[str, str]]) -> None:
+    """Legacy shape: three blank prelude rows, then the header, then data."""
     with path.open("w", encoding="utf-8", newline="") as fh:
         writer = _csv.writer(fh)
         for _ in range(3):
-            writer.writerow([""] * len(_BINANCE_HEADERS))
-        writer.writerow(_BINANCE_HEADERS)
+            writer.writerow([""] * len(headers))
+        writer.writerow(headers)
         for row in rows:
-            writer.writerow([row.get(h, "") for h in _BINANCE_HEADERS])
+            writer.writerow([row.get(h, "") for h in headers])
+
+
+def _write_binance_csv(path: Path, rows: list[dict[str, str]]) -> None:
+    _write_csv(path, _BINANCE_HEADERS, rows)
+
+
+def _write_data_dir(tmp_path: Path, binance_rows: list[dict[str, str]]) -> Path:
+    """A data dir holding the Binance sheet under test plus the two
+    companion sheets ``run_backfill`` expects: an empty Provincial one and
+    the BCV rates the Binance pass looks days up in."""
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    _write_binance_csv(data_dir / "Finanzas - Binance.csv", binance_rows)
+    _write_csv(data_dir / "Finanzas - Provincial.csv", _PROVINCIAL_HEADERS, [])
+
+    with (data_dir / "Finanzas - BCV.csv").open(
+        "w", encoding="utf-8", newline=""
+    ) as fh:
+        writer = _csv.writer(fh)
+        writer.writerow([""] * 7)
+        writer.writerow(["", "Dia", "Month", "Month-week", "Week", "USD", "EURO"])
+        writer.writerow(
+            ["", "21-Dec-2025", "December", "3W", "W51", "Bs 250.00", "Bs 280.00"]
+        )
+    return data_dir
 
 
 def _convert_row(*, coin: str, amount: str, remark: str) -> dict[str, str]:
@@ -65,11 +96,9 @@ def _convert_row(*, coin: str, amount: str, remark: str) -> dict[str, str]:
 
 @pytest.fixture
 def convert_only_dir(tmp_path: Path) -> Path:
-    """A data dir holding one Binance sheet and nothing else."""
-    data_dir = tmp_path / "data"
-    data_dir.mkdir()
-    _write_binance_csv(
-        data_dir / "Finanzas - Binance.csv",
+    """One Convert row whose remark names the destination."""
+    return _write_data_dir(
+        tmp_path,
         [
             _convert_row(
                 coin="USDC",
@@ -78,7 +107,6 @@ def convert_only_dir(tmp_path: Path) -> Path:
             )
         ],
     )
-    return data_dir
 
 
 def _rows(conn: sqlite3.Connection) -> list[sqlite3.Row]:
@@ -160,11 +188,14 @@ class TestDestinationInRemark:
     def test_rerunning_the_backfill_adds_nothing(
         self, seeded_db: sqlite3.Connection, convert_only_dir: Path
     ):
+        """``force=True`` because backfill refuses to run over a populated
+        ledger — the point here is that the second pass is a no-op, not
+        that it is allowed by default."""
         from finances.migration.backfill import run_backfill
 
         run_backfill(seeded_db, convert_only_dir)
         first = [dict(r) for r in _rows(seeded_db)]
-        run_backfill(seeded_db, convert_only_dir)
+        run_backfill(seeded_db, convert_only_dir, force=True)
         second = [dict(r) for r in _rows(seeded_db)]
 
         assert first == second
@@ -182,10 +213,8 @@ class TestLegPerRowShapeIsUntouched:
     ):
         from finances.migration.backfill import run_backfill
 
-        data_dir = tmp_path / "data"
-        data_dir.mkdir()
-        _write_binance_csv(
-            data_dir / "Finanzas - Binance.csv",
+        data_dir = _write_data_dir(
+            tmp_path,
             [
                 _convert_row(
                     coin="USDC",
@@ -206,6 +235,37 @@ class TestLegPerRowShapeIsUntouched:
         assert len(rows) == 2
         kinds = sorted(r["kind"] for r in rows)
         assert kinds == ["expense", "income"]
+
+
+class TestConvertRowsActuallyValidate:
+    """Guard the regression that hid all of this.
+
+    ``RawBinanceConvertRow`` was changed to take ``orderId`` (real
+    ``/sapi/v1/convert/tradeFlow`` rows carry it, not ``tranId``) and the
+    backfill was never updated. Every legacy Convert row then failed
+    Pydantic validation — and the failure was appended to
+    ``report.errors`` rather than raised, so the backfill reported success
+    while silently dropping the rows.
+    """
+
+    def test_no_validation_errors_are_reported(
+        self, seeded_db: sqlite3.Connection, convert_only_dir: Path
+    ):
+        from finances.migration.backfill import run_backfill
+
+        report = run_backfill(seeded_db, convert_only_dir)
+
+        assert report.errors == []
+
+    def test_rows_are_actually_inserted(
+        self, seeded_db: sqlite3.Connection, convert_only_dir: Path
+    ):
+        from finances.migration.backfill import run_backfill
+
+        report = run_backfill(seeded_db, convert_only_dir)
+
+        assert report.binance_rows_seen == 1
+        assert report.binance_rows_inserted == 2
 
 
 class TestRemarkParsing:
