@@ -517,6 +517,55 @@ def next_item_after(
 # ---------------------------------------------------------------------------
 
 
+# How far apart a manually-confirmed pair may be before it is refused.
+# Deliberately looser than the automatic matcher's ±1 day / 2%: the whole
+# point of the manual path is the cases the matcher would not take, and the
+# owner can see the amounts. These bounds only catch a mis-click.
+MANUAL_PAIR_MAX_DAYS = 5
+MANUAL_PAIR_MAX_DRIFT = Decimal("0.10")
+
+
+def _reject_implausible_pair(deposit: Any, sell: Any) -> None:
+    """Refuse a pairing that cannot plausibly be the same movement of money.
+
+    ``create_transfer`` drift-checks only same-currency pairs, ``doctor``
+    exempted cross-currency ones, and ``transfers.validate`` is not called
+    from any write path. That left the manual path with no check at all: the
+    review confirmed a 2 261 Bs deposit dated 2025-11-06 could be paired
+    with a 200.44 USDT sell dated 2026-07-30 — eight months and a factor of
+    75 apart — after which both rows leave income and expense permanently,
+    silently and with no way to notice.
+
+    The pair-picker already computes this drift for display
+    (``web/services/pairing.py``); this is the same arithmetic made
+    load-bearing at the point of the write.
+
+    A sell with no ``user_rate`` cannot be scored on amount, so only the
+    date bound applies — refusing it outright would block exactly the
+    legacy rows the manual path exists to clear.
+    """
+    gap = abs((sell.occurred_at.date() - deposit.occurred_at.date()).days)
+    if gap > MANUAL_PAIR_MAX_DAYS:
+        raise ValueError(
+            f"refusing to pair: {gap} days apart "
+            f"({deposit.occurred_at.date()} vs {sell.occurred_at.date()}), "
+            f"limit is {MANUAL_PAIR_MAX_DAYS}"
+        )
+
+    if sell.user_rate is None or sell.user_rate <= 0 or deposit.amount == 0:
+        return
+
+    expected = abs(sell.amount) * sell.user_rate
+    drift = abs(abs(deposit.amount) - expected) / abs(deposit.amount)
+    if drift > MANUAL_PAIR_MAX_DRIFT:
+        raise ValueError(
+            f"refusing to pair: the sell is worth {expected:.2f} "
+            f"{deposit.currency} at its recorded rate but the deposit is "
+            f"{abs(deposit.amount):.2f} — {drift:.0%} apart, limit is "
+            f"{MANUAL_PAIR_MAX_DRIFT:.0%}"
+        )
+
+
 def confirm_pair(
     conn: sqlite3.Connection,
     *,
@@ -553,6 +602,8 @@ def confirm_pair(
             f"transaction id={sell_id} is already part of a transfer "
             f"(transfer_id={sell.transfer_id})"
         )
+
+    _reject_implausible_pair(deposit, sell)
 
     pair = create_transfer(
         conn,
