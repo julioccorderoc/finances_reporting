@@ -121,6 +121,33 @@ def to_usd(
     return txn.amount / rate, source
 
 
+def to_usd_at(
+    amount: Decimal, currency: str, rate: Decimal | None
+) -> Decimal | None:
+    """Express ``amount`` in USD at a rate the caller already holds.
+
+    The companion to :func:`to_usd`, for the two callers that are not
+    pricing "this transaction, however the resolver would price it":
+
+    * ``transfers.validate`` prices each leg of a pair at that leg's own
+      recorded ``user_rate``.
+    * the triage modal's rate panel prices one amount at *every* tier, to
+      show the owner what each would have been worth.
+
+    Per ADR-015 ``user_rate`` is quote units per dollar — bolívares per
+    USDT — so a non-USD amount **divides** by it. Multiplying, which the
+    original ``validate`` did, yields VES²/USD: a quantity with no meaning,
+    and the reason all 107 cross-currency transfers reported invalid.
+
+    Returns ``None`` when the amount cannot be priced, rather than guessing.
+    """
+    if currency.upper() in NATIVE_USD_CURRENCIES:
+        return amount
+    if rate is None or rate <= 0:
+        return None
+    return amount / rate
+
+
 def is_bcv_sourced(source: str) -> bool:
     """Whether a ``rate_source`` label came from the BCV fallback tier."""
     return source.startswith(BCV_SOURCE_PREFIX)
@@ -136,4 +163,5 @@ __all__ = [
     "is_currency_movement",
     "movement_category_ids",
     "to_usd",
+    "to_usd_at",
 ]

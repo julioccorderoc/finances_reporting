@@ -22,6 +22,7 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict
 
 from finances.db.repos import rates as rates_repo
+from finances.domain import money
 from finances.domain import rates as rates_domain
 from finances.domain.rates import CARRY_SUFFIX
 
@@ -240,12 +241,13 @@ def rates_for_day(
         is_expired = (
             age_days is not None and max_age is not None and age_days > max_age
         )
+        # Priced through the shared helper, so the panel and the winning
+        # row cannot disagree about the arithmetic. A series whose quote
+        # currency is not the transaction's stays unpriced: dividing, say,
+        # COP by a VES rate would invent a number.
         amount_usd = (
-            amount_native / found.rate
-            if found is not None
-            and found.rate
-            and currency == quote
-            and not is_expired
+            money.to_usd_at(amount_native, currency, found.rate)
+            if found is not None and currency == quote and not is_expired
             else None
         )
         series.append(

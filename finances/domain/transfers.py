@@ -20,6 +20,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict
 
 from finances.db.repos import transactions as txn_repo
+from finances.domain import money
 from finances.domain.models import Transaction, TransactionKind
 from finances.domain.reconciliation import MatchProposal
 
@@ -136,7 +137,11 @@ def _iso(value: datetime) -> str:
 # Treated as 1:1 with the dollar (ADR-015). Stablecoins depeg by
 # fractions of a percent; the ledger's tolerances are wider than that,
 # and a price feed here would not change any decision.
-USD_EQUIVALENT_CURRENCIES: frozenset[str] = frozenset({"USD", "USDT", "USDC"})
+#
+# Sourced from ``domain.money`` rather than restated: this was the sixth
+# copy of the same frozenset, and it landed while the other five were
+# being consolidated. The alias is kept because ADR-015 names it.
+USD_EQUIVALENT_CURRENCIES: frozenset[str] = money.NATIVE_USD_CURRENCIES
 
 # How far a cross-currency pair may miss, as a fraction of the larger
 # leg. Shared by the pairing strategy (which admits a pair at this
@@ -151,22 +156,10 @@ USD_EQUIVALENT_CURRENCIES: frozenset[str] = frozenset({"USD", "USDT", "USDC"})
 DEFAULT_AMOUNT_TOLERANCE_RATIO: Decimal = Decimal("0.02")
 
 
-def _to_usd(
-    amount: Decimal,
-    currency: str,
-    rate: Decimal | None,
-) -> Decimal | None:
-    """Express ``amount`` in USD, or ``None`` if it cannot be priced.
-
-    Per ADR-015 ``user_rate`` is bolívares per dollar, so a non-USD
-    amount *divides* by it. Multiplying — which is what this function
-    replaced — produces VES²/USD, a quantity with no meaning.
-    """
-    if currency.upper() in USD_EQUIVALENT_CURRENCIES:
-        return amount
-    if rate is None or rate <= 0:
-        return None
-    return amount / rate
+#: Express an amount in USD at a rate the caller holds (ADR-015). Lives in
+#: ``domain.money`` so ``validate`` and the triage rate panel cannot drift
+#: apart on it; re-exported here under the name ADR-015 uses.
+_to_usd = money.to_usd_at
 
 
 # ---------------------------------------------------------------------------

@@ -25,11 +25,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from finances.domain import money
 from finances.domain import rates as rates_engine
 from finances.domain.models import Transaction, TransactionKind
 
-_NATIVE_USD_CURRENCIES = frozenset({"USD", "USDT", "USDC"})
-_NATIVE_USD_SOURCE = "native_usd"
+_NATIVE_USD_CURRENCIES = money.NATIVE_USD_CURRENCIES
+_NATIVE_USD_SOURCE = money.NATIVE_USD_SOURCE
 _BCV_SOURCE_PREFIX = "bcv"
 _DEFAULT_WINDOW_DAYS = 30
 
@@ -262,43 +263,13 @@ def _project_card(
     """
     assert txn.id is not None
 
-    if txn.currency in _NATIVE_USD_CURRENCIES:
-        return TransactionCard(
-            id=txn.id,
-            occurred_at=txn.occurred_at,
-            account_name=account_name,
-            description=txn.description or "",
-            amount_native=txn.amount,
-            currency=txn.currency,
-            amount_usd=txn.amount,
-            rate_source=_NATIVE_USD_SOURCE,
-            is_bcv_fallback=False,
-            kind=txn.kind.value,
-            category_name=category_name,
-            needs_review=txn.needs_review,
-            notes=txn.notes,
-        )
+    # One conversion, shared with both report builders. This branch used to
+    # be a third hand-written copy of "native currencies pass through, else
+    # divide by the resolved rate" — the review found five such copies and
+    # the fifth had drifted.
+    amount_usd, source = money.to_usd(conn, txn)
+    unresolved = amount_usd is None
 
-    rate, source = rates_engine.resolve(conn, txn)
-    if rate is None:
-        return TransactionCard(
-            id=txn.id,
-            occurred_at=txn.occurred_at,
-            account_name=account_name,
-            description=txn.description or "",
-            amount_native=txn.amount,
-            currency=txn.currency,
-            amount_usd=None,
-            rate_source=source,
-            is_bcv_fallback=False,
-            kind=txn.kind.value,
-            category_name=category_name,
-            needs_review=True,
-            notes=txn.notes,
-        )
-
-    amount_usd = txn.amount / rate
-    is_bcv = source.startswith(_BCV_SOURCE_PREFIX)
     return TransactionCard(
         id=txn.id,
         occurred_at=txn.occurred_at,
@@ -308,10 +279,14 @@ def _project_card(
         currency=txn.currency,
         amount_usd=amount_usd,
         rate_source=source,
-        is_bcv_fallback=is_bcv,
+        # An unpriceable row is not a BCV fallback; it needs a rate, which
+        # is a different problem with a different remedy.
+        is_bcv_fallback=not unresolved and money.is_bcv_sourced(source),
         kind=txn.kind.value,
         category_name=category_name,
-        needs_review=txn.needs_review,
+        # A row the resolver could not price always shows as needing review,
+        # whatever the stored column says — the card is what triage reads.
+        needs_review=True if unresolved else txn.needs_review,
         notes=txn.notes,
     )
 
