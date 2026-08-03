@@ -15,8 +15,19 @@ import json
 import sqlite3
 from collections.abc import Sequence
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, Response
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+)
 
 from finances.db.repos import accounts as accounts_repo
 from finances.db.repos import categories as categories_repo
@@ -29,6 +40,7 @@ from finances.web.routers._monthly_filter_dep import monthly_filter_from_query
 from finances.web.routers._tx_filter_dep import filter_from_query
 from finances.web.services.category_stats import top_categories
 from finances.web.services.dashboard import build_sync_status
+from finances.web.services import uploads as uploads_svc
 from finances.web.services.pairing import find_pair_candidates
 from finances.web.services.transactions_query import _project_card
 from finances.web.services.transactions_write import (
@@ -97,6 +109,109 @@ def dashboard_sync_status_partial(
         "partials/sync_status_strip.html",
         {"chips": chips},
     )
+
+
+# ---------------------------------------------------------------------------
+# Provincial statement upload (WP3).
+#
+# Two steps on purpose. Re-dropping a statement is already harmless —
+# UNIQUE(source, source_ref) absorbs it — so the preview exists to catch the
+# WRONG file, which dedup cannot.
+# ---------------------------------------------------------------------------
+
+
+def _staging_dir() -> Path:
+    """Where unconfirmed uploads wait.
+
+    Read through the module rather than imported by value so tests can point
+    it somewhere temporary. It is a directory inside ``inputs/``, which is
+    what keeps ``_discover_provincial_files`` from sweeping an unconfirmed
+    file into the next ``finances update``.
+    """
+    from finances import config as _config
+
+    return _config.INPUTS_DIR / uploads_svc.STAGING_DIR_NAME
+
+
+def _inputs_dir() -> Path:
+    from finances import config as _config
+
+    return _config.INPUTS_DIR
+
+
+@router.post("/uploads/provincial/preview", include_in_schema=False)
+def provincial_upload_preview(
+    request: Request,
+    file: UploadFile = File(...),
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Stage a dropped statement and render what importing it would do.
+
+    Sync, not async, on purpose: ``get_conn`` is a sync dependency, so
+    FastAPI resolves it in the threadpool. An ``async def`` endpoint would
+    then run on the event-loop thread and every query would fail with
+    "SQLite objects created in a thread can only be used in that same
+    thread". Statements are ~14 KB, so the blocking read costs nothing.
+    """
+    templates = request.app.state.templates
+    data = file.file.read()
+    try:
+        staged = uploads_svc.stage_upload(
+            data, filename=file.filename or "", staging_dir=_staging_dir()
+        )
+    except uploads_svc.UploadRejected as exc:
+        # 200, not 4xx: this renders into the dropzone as a message the owner
+        # reads and acts on, and htmx does not swap error responses.
+        return templates.TemplateResponse(
+            request,
+            "partials/upload_preview.html",
+            {"preview": None, "error": str(exc), "result": None},
+        )
+
+    preview = uploads_svc.preview_upload(
+        conn, staged.token, staging_dir=_staging_dir()
+    )
+    return templates.TemplateResponse(
+        request,
+        "partials/upload_preview.html",
+        {"preview": preview, "error": preview.error, "result": None},
+    )
+
+
+@router.post("/uploads/provincial/import", include_in_schema=False)
+def provincial_upload_import(
+    request: Request,
+    token: str = Form(...),
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Ingest a previously previewed statement, then archive it."""
+    templates = request.app.state.templates
+    try:
+        result = uploads_svc.commit_upload(
+            conn,
+            token,
+            staging_dir=_staging_dir(),
+            inputs_dir=_inputs_dir(),
+        )
+    except uploads_svc.UploadRejected as exc:
+        return templates.TemplateResponse(
+            request,
+            "partials/upload_preview.html",
+            {"preview": None, "error": str(exc), "result": None},
+        )
+
+    response = templates.TemplateResponse(
+        request,
+        "partials/upload_preview.html",
+        {"preview": None, "error": None, "result": result},
+    )
+    response.headers["HX-Trigger"] = _hx_trigger_json(
+        toast_message=(
+            f"{result.filename}: {result.rows_inserted} new, "
+            f"{result.rows_updated} updated"
+        )
+    )
+    return response
 
 
 # ---------------------------------------------------------------------------

@@ -837,79 +837,244 @@ class TestTransfers:
     ):
         assert validate(seeded_db, "never-existed") is False
 
-    def test_validate_passes_for_cross_currency_with_user_rates(
+    def _cross_currency_pair(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        transfer_id: str,
+        usdt_amount: Decimal,
+        usdt_rate: Decimal | None,
+        ves_amount: Decimal,
+        ves_rate: Decimal | None,
+        usdt_currency: str = "USDT",
+    ) -> None:
+        """Craft a cross-currency pair directly.
+
+        ``create_transfer`` would derive the rates; these tests need to
+        state them, so the rows are inserted by hand.
+        """
+        provincial = _account_id(conn, "Provincial Bolivares")
+        spot = _account_id(conn, "Binance Spot")
+        # deliberate malformed fixture: hand-built legs so each leg's
+        # user_rate is exactly what the case under test requires.
+        txn_repo.insert(
+            conn,
+            Transaction(
+                account_id=spot,
+                occurred_at=FIXED_AT,
+                kind=TransactionKind.TRANSFER,
+                amount=usdt_amount,
+                currency=usdt_currency,
+                user_rate=usdt_rate,
+                transfer_id=transfer_id,
+                source="test",
+                source_ref=_unique_ref(f"{transfer_id}-usd"),
+            ),
+        )
+        txn_repo.insert(
+            conn,
+            Transaction(
+                account_id=provincial,
+                occurred_at=FIXED_AT,
+                kind=TransactionKind.TRANSFER,
+                amount=ves_amount,
+                currency="VES",
+                user_rate=ves_rate,
+                transfer_id=transfer_id,
+                source="test",
+                source_ref=_unique_ref(f"{transfer_id}-ves"),
+            ),
+        )
+
+    def test_validate_passes_when_only_the_binance_leg_carries_the_rate(
         self, seeded_db: sqlite3.Connection
     ):
-        provincial = _account_id(seeded_db, "Provincial Bolivares")
-        spot = _account_id(seeded_db, "Binance Spot")
+        """The bank-anchored shape, and the whole reason validate exists.
 
-        # deliberate malformed fixture — we need explicit user_rate values on
-        # each leg; create_transfer would default those, so we craft the pair
-        # directly. Amounts are chosen so |−10 USDT × 1 USD/USDT + 1200 VES ×
-        # 0.00833333... USD/VES| ≈ 0 within Decimal("0.01") tolerance.
-        shared = "xcur-transfer"
-        usdt_leg = Transaction(
-            account_id=spot,
-            occurred_at=FIXED_AT,
-            kind=TransactionKind.TRANSFER,
-            amount=Decimal("-10"),
-            currency="USDT",
-            user_rate=Decimal("1"),  # USD per USDT
-            transfer_id=shared,
-            source="test",
-            source_ref=_unique_ref("xcur-usdt"),
+        Per ADR-015 ``user_rate`` is bolívares per dollar wherever it
+        sits. The USDT leg is already USD-equivalent so it passes
+        through; the bolívar leg divides. 1200 / 120 = 10 = |−10|.
+
+        Provincial rows never carry a rate, so a leg without one borrows
+        its counterpart's — one economic event, one rate.
+        """
+        self._cross_currency_pair(
+            seeded_db,
+            transfer_id="xcur-bank-anchored",
+            usdt_amount=Decimal("-10"),
+            usdt_rate=Decimal("120"),
+            ves_amount=Decimal("1200"),
+            ves_rate=None,
         )
-        ves_leg = Transaction(
-            account_id=provincial,
-            occurred_at=FIXED_AT,
-            kind=TransactionKind.TRANSFER,
-            amount=Decimal("1200"),
-            currency="VES",
-            user_rate=Decimal("0.00833333333333"),  # USD per VES → 1200 × rate ≈ 10
-            transfer_id=shared,
-            source="test",
-            source_ref=_unique_ref("xcur-ves"),
+
+        assert validate(seeded_db, "xcur-bank-anchored") is True
+
+    def test_validate_passes_when_the_rate_sits_on_the_bolivar_leg(
+        self, seeded_db: sqlite3.Connection
+    ):
+        """Which leg stores the rate must not change the verdict."""
+        self._cross_currency_pair(
+            seeded_db,
+            transfer_id="xcur-rate-on-ves",
+            usdt_amount=Decimal("-10"),
+            usdt_rate=None,
+            ves_amount=Decimal("1200"),
+            ves_rate=Decimal("120"),
         )
-        txn_repo.insert(seeded_db, usdt_leg)
-        txn_repo.insert(seeded_db, ves_leg)
+
+        assert validate(seeded_db, "xcur-rate-on-ves") is True
+
+    def test_validate_passes_for_a_real_ledger_pairing(
+        self, seeded_db: sqlite3.Connection
+    ):
+        """Numbers lifted from the ledger: 98.32 USDT sold at 762.80."""
+        self._cross_currency_pair(
+            seeded_db,
+            transfer_id="xcur-real",
+            usdt_amount=Decimal("-98.32"),
+            usdt_rate=Decimal("762.80"),
+            ves_amount=Decimal("75000"),
+            ves_rate=None,
+        )
+
+        assert validate(seeded_db, "xcur-real") is True
+
+    def test_validate_fails_when_neither_leg_carries_a_rate(
+        self, seeded_db: sqlite3.Connection
+    ):
+        """Nothing to borrow — the bolívar leg cannot be priced."""
+        self._cross_currency_pair(
+            seeded_db,
+            transfer_id="xcur-no-rate",
+            usdt_amount=Decimal("-10"),
+            usdt_rate=None,
+            ves_amount=Decimal("1200"),
+            ves_rate=None,
+        )
+
+        assert validate(seeded_db, "xcur-no-rate") is False
+
+    def test_validate_fails_when_the_converted_legs_do_not_cancel(
+        self, seeded_db: sqlite3.Connection
+    ):
+        """1200 / 120 = 10, against a 25 USDT leg — a real imbalance."""
+        self._cross_currency_pair(
+            seeded_db,
+            transfer_id="xcur-imbalanced",
+            usdt_amount=Decimal("-25"),
+            usdt_rate=Decimal("120"),
+            ves_amount=Decimal("1200"),
+            ves_rate=None,
+        )
+
+        assert validate(seeded_db, "xcur-imbalanced") is False
+
+    def test_validate_accepts_the_drift_the_pairing_rule_admits(
+        self, seeded_db: sqlite3.Connection
+    ):
+        """A pair admitted at the 2% ratio must not then be called invalid.
+
+        Counterparty rounding means a P2P sell and its deposit rarely
+        cancel to the cent — 21 of the ledger's 97 cross-currency
+        transfers miss by more than that. Judging them against a fixed
+        number of cents would contradict the rule that created them.
+        """
+        self._cross_currency_pair(
+            seeded_db,
+            transfer_id="xcur-within-ratio",
+            usdt_amount=Decimal("-30.22"),
+            usdt_rate=Decimal("664.45"),
+            ves_amount=Decimal("20000"),  # → 30.10 USD, 0.4% off
+            ves_rate=None,
+        )
+
+        assert validate(seeded_db, "xcur-within-ratio") is True
+
+    def test_validate_cross_currency_ratio_is_configurable(
+        self, seeded_db: sqlite3.Connection
+    ):
+        self._cross_currency_pair(
+            seeded_db,
+            transfer_id="xcur-tight",
+            usdt_amount=Decimal("-30.22"),
+            usdt_rate=Decimal("664.45"),
+            ves_amount=Decimal("20000"),
+            ves_rate=None,
+        )
+
+        assert (
+            validate(
+                seeded_db,
+                "xcur-tight",
+                cross_currency_tolerance_ratio=Decimal("0.001"),
+            )
+            is False
+        )
+
+    def test_pairing_and_validate_share_one_tolerance(self):
+        """Two constants drifted once; they are now one."""
+        from finances.domain.transfers import (
+            DEFAULT_AMOUNT_TOLERANCE_RATIO,
+            BankAnchoredP2pPairing,
+        )
+        import inspect
+
+        signature = inspect.signature(BankAnchoredP2pPairing.__init__)
+        default = signature.parameters["amount_tolerance_ratio"].default
+        assert default is DEFAULT_AMOUNT_TOLERANCE_RATIO
+
+    def test_validate_rejects_an_inverted_rate(
+        self, seeded_db: sqlite3.Connection
+    ):
+        """The failure mode ADR-015 exists to make detectable.
+
+        A rate stored the wrong way round makes the pair miss by orders
+        of magnitude rather than by a rounding error.
+        """
+        self._cross_currency_pair(
+            seeded_db,
+            transfer_id="xcur-inverted",
+            usdt_amount=Decimal("-10"),
+            usdt_rate=Decimal("0.00833333333333"),  # USD per VES — inverted
+            ves_amount=Decimal("1200"),
+            ves_rate=None,
+        )
+
+        assert validate(seeded_db, "xcur-inverted") is False
+
+    @pytest.mark.parametrize("stablecoin", ["USDT", "USDC"])
+    def test_validate_treats_stablecoins_as_dollars(
+        self, seeded_db: sqlite3.Connection, stablecoin: str
+    ):
+        """A USDT→USD cash withdrawal needs no rate at all.
+
+        Both sides are USD-equivalent, so they cancel directly. This is
+        the shape of the Binance-send-to-cash pairings in the ledger.
+        """
+        spot = _account_id(seeded_db, "Binance Spot")
+        cash = _account_id(seeded_db, "Cash USD")
+        shared = f"xcur-stable-{stablecoin}"
+        # deliberate malformed fixture: hand-built so neither leg has a rate.
+        txn_repo.insert(
+            seeded_db,
+            Transaction(
+                account_id=spot, occurred_at=FIXED_AT,
+                kind=TransactionKind.TRANSFER, amount=Decimal("-700"),
+                currency=stablecoin, transfer_id=shared,
+                source="test", source_ref=_unique_ref(f"{shared}-a"),
+            ),
+        )
+        txn_repo.insert(
+            seeded_db,
+            Transaction(
+                account_id=cash, occurred_at=FIXED_AT,
+                kind=TransactionKind.TRANSFER, amount=Decimal("700"),
+                currency="USD", transfer_id=shared,
+                source="test", source_ref=_unique_ref(f"{shared}-b"),
+            ),
+        )
 
         assert validate(seeded_db, shared) is True
-
-    def test_validate_fails_for_cross_currency_without_user_rate(
-        self, seeded_db: sqlite3.Connection
-    ):
-        provincial = _account_id(seeded_db, "Provincial Bolivares")
-        spot = _account_id(seeded_db, "Binance Spot")
-
-        # deliberate malformed fixture — different currencies and at least one
-        # leg lacks user_rate; validate() has no way to compute equivalence.
-        shared = "xcur-missing-rate"
-        a = Transaction(
-            account_id=spot,
-            occurred_at=FIXED_AT,
-            kind=TransactionKind.TRANSFER,
-            amount=Decimal("-10"),
-            currency="USDT",
-            user_rate=Decimal("1"),
-            transfer_id=shared,
-            source="test",
-            source_ref=_unique_ref("mr-a"),
-        )
-        b = Transaction(
-            account_id=provincial,
-            occurred_at=FIXED_AT,
-            kind=TransactionKind.TRANSFER,
-            amount=Decimal("1200"),
-            currency="VES",
-            user_rate=None,  # <-- missing
-            transfer_id=shared,
-            source="test",
-            source_ref=_unique_ref("mr-b"),
-        )
-        txn_repo.insert(seeded_db, a)
-        txn_repo.insert(seeded_db, b)
-
-        assert validate(seeded_db, shared) is False
 
     def test_validate_custom_tolerance(self, seeded_db: sqlite3.Connection):
         funding = _account_id(seeded_db, "Binance Funding")

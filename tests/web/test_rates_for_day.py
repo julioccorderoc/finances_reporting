@@ -8,7 +8,7 @@ never re-derive the winner — it is told, via ``winning_source``.
 from __future__ import annotations
 
 import sqlite3
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
@@ -225,3 +225,78 @@ def test_every_resolver_tier_has_exactly_one_modal_winner(
         f"rates.resolve's _FALLBACK_TIERS"
     )
     assert winners[0].source == source
+
+
+# ---------------------------------------------------------------------------
+# ADR-016: the panel applies the same max age the resolver does.
+#
+# The panel performs its own latest_on_or_before lookup per tier, so without
+# this it would keep displaying a rate the resolver has stopped using. An
+# expired tier is shown-but-marked rather than hidden: the owner must be able
+# to tell "no P2P data for this period" from "P2P data exists, rejected as
+# stale", and that ambiguity is what made the original bug invisible.
+# ---------------------------------------------------------------------------
+
+
+def test_expired_median_is_marked_expired(web_db: sqlite3.Connection) -> None:
+    stale_day = DAY - timedelta(days=rates_domain.MEDIAN_MAX_AGE_DAYS + 1)
+    _seed(web_db, "binance_p2p_median", stale_day, "633.52")
+
+    median = next(
+        s for s in _series(web_db, "bcv") if s.source == "binance_p2p_median"
+    )
+
+    assert median.is_expired is True
+    assert median.age_days == rates_domain.MEDIAN_MAX_AGE_DAYS + 1
+
+
+def test_expired_median_is_shown_not_hidden(web_db: sqlite3.Connection) -> None:
+    """The stale number stays visible so the owner can see it was rejected."""
+    stale_day = DAY - timedelta(days=60)
+    _seed(web_db, "binance_p2p_median", stale_day, "633.52")
+
+    median = next(
+        s for s in _series(web_db, "bcv") if s.source == "binance_p2p_median"
+    )
+
+    assert median.rate == Decimal("633.52")
+    assert median.as_of_date == stale_day
+
+
+def test_expired_median_carries_no_dollar_figure(
+    web_db: sqlite3.Connection,
+) -> None:
+    """No USD may be rendered from a rate the chain refused."""
+    stale_day = DAY - timedelta(days=60)
+    _seed(web_db, "binance_p2p_median", stale_day, "633.52")
+
+    median = next(
+        s for s in _series(web_db, "bcv") if s.source == "binance_p2p_median"
+    )
+
+    assert median.amount_usd is None
+
+
+def test_median_on_final_day_of_window_is_priced_normally(
+    web_db: sqlite3.Connection,
+) -> None:
+    fresh_enough = DAY - timedelta(days=rates_domain.MEDIAN_MAX_AGE_DAYS)
+    _seed(web_db, "binance_p2p_median", fresh_enough, "800.00")
+
+    median = next(
+        s for s in _series(web_db, "bcv") if s.source == "binance_p2p_median"
+    )
+
+    assert median.is_expired is False
+    assert median.amount_usd == AMOUNT / Decimal("800.00")
+
+
+def test_bcv_never_expires(web_db: sqlite3.Connection) -> None:
+    """ADR-016 caps the median only; BCV is the floor of the chain."""
+    ancient = DAY - timedelta(days=400)
+    _seed(web_db, "bcv", ancient, "36.00", base="USD", quote="VES")
+
+    bcv = next(s for s in _series(web_db, "bcv") if s.source == "bcv")
+
+    assert bcv.is_expired is False
+    assert bcv.amount_usd == AMOUNT / Decimal("36.00")

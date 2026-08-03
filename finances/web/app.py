@@ -82,6 +82,20 @@ def create_app(settings: WebSettings) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        # Startup: top up stale rate sources in the background. ADR-016
+        # expires the P2P median at 14 days, so a viewer that is only opened
+        # occasionally would otherwise price spending off BCV. Dispatch is
+        # non-blocking and swallows every failure — Binance is 451-blocked
+        # from Venezuela without a VPN, and that must not stop the server
+        # from coming up. Guarded by a setting so only `finances serve`
+        # reaches the network.
+        if settings.refresh_on_start:
+            from finances.db.connection import get_connection
+            from finances.web.services import refresh as refresh_svc
+
+            refresh_svc.maybe_refresh(
+                lambda: get_connection(settings.db_path)
+            )
         yield
         # Shutdown: refresh the static report so it mirrors this session's
         # edits — unless the caller owns that. Under the reload supervisor

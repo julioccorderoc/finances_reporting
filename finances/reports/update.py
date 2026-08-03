@@ -269,6 +269,30 @@ def _step_provincial(
 # ---------------------------------------------------------------------------
 
 
+def run_rate_refresh(
+    conn: sqlite3.Connection,
+    *,
+    make_binance_client: Callable[[], Any],
+    dry_run: bool = False,
+) -> list[SourceOutcome]:
+    """Run only the rate-fetching steps — bcv, p2p, binance — each isolated.
+
+    The subset of :func:`run_update` that makes sense to fire unattended when
+    the viewer boots: no Provincial (that arrives by browser drop, not by
+    polling) and no ``report.html`` regen (the shutdown hook owns that).
+
+    Deliberately the same step functions ``run_update`` calls, so there is
+    exactly one implementation of "fetch BCV" in the codebase (rule-004).
+    """
+    return [
+        _step_bcv(conn, dry_run=dry_run),
+        _step_p2p(conn, dry_run=dry_run),
+        _step_binance(
+            conn, make_binance_client=make_binance_client, dry_run=dry_run
+        ),
+    ]
+
+
 def run_update(
     conn: sqlite3.Connection,
     *,
@@ -284,9 +308,7 @@ def run_update(
     last; a regen failure is captured, never raised.
     """
     outcomes = [
-        _step_bcv(conn, dry_run=dry_run),
-        _step_p2p(conn, dry_run=dry_run),
-        _step_binance(
+        *run_rate_refresh(
             conn, make_binance_client=make_binance_client, dry_run=dry_run
         ),
         _step_provincial(conn, inputs_dir=inputs_dir, dry_run=dry_run),
@@ -388,6 +410,7 @@ def render_summary(report: UpdateReport) -> str:
 __all__ = [
     "SourceOutcome",
     "UpdateReport",
+    "run_rate_refresh",
     "run_update",
     "render_summary",
     "VPN_HINT",

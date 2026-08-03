@@ -4,13 +4,15 @@ The single auditable entry point for converting a transaction's native
 amount to USD. Every USD-equivalence calculation in the codebase must
 route through ``resolve`` — see ``docs/architecture/rules/rule-005``.
 
-Priority chain (locked by ADR-005, extended by ADR-013):
+Priority chain (locked by ADR-005, extended by ADR-013 and ADR-016):
 
     1. ``Transaction.user_rate``                           (user_rate)
     2. ``rates(USDT, VES, day, 'binance_p2p_realized')``  (exact or _carry,
        only while no older than :data:`REALIZED_MAX_AGE_DAYS`)
-    3. ``rates(USDT, VES, day, 'binance_p2p_median')``    (exact or _carry)
-    4. ``rates(USD,  VES, day, 'bcv')``                    (exact or _carry)
+    3. ``rates(USDT, VES, day, 'binance_p2p_median')``    (exact or _carry,
+       only while no older than :data:`MEDIAN_MAX_AGE_DAYS`)
+    4. ``rates(USD,  VES, day, 'bcv')``                    (exact or _carry,
+       uncapped — the floor of the chain)
     5. none -> sets ``transaction.needs_review = True``   (needs_review)
 
 Tier 2 is the *cost basis*: what the bolívars actually cost when they were
@@ -18,6 +20,12 @@ acquired, rather than what they were worth on the day they were spent. It is
 age-capped because a realized rate that has gone stale would misprice
 spending badly in a fast-moving currency; past the cap the chain falls
 through to the market tiers, and the returned source label says so.
+
+Tier 3 is age-capped for the same reason (ADR-016). ``binance_p2p_median``
+is only written when an ingest runs and cannot be backfilled — Binance's
+public P2P endpoint serves the live order book only — so gaps are common.
+Carried far enough, a stale median converges on BCV, silently turning a
+market rate into a reference rate.
 
 ``resolve`` never raises on missing data; gaps are surfaced via the
 ``needs_review`` flag and the returned source label instead.
@@ -43,6 +51,10 @@ CARRY_SUFFIX = "_carry"
 # many days old still applies.
 REALIZED_MAX_AGE_DAYS = 14
 
+# The same bound for the market median (ADR-016). Held equal to the realized
+# cap on purpose: one number governs both market tiers.
+MEDIAN_MAX_AGE_DAYS = 14
+
 # Ordered fallback tiers consulted after ``user_rate``. Each tuple is
 # (base, quote, source). Order is load-bearing: ADR-005 mandates P2P
 # first, BCV second, with carry-forward applied within each tier before
@@ -51,6 +63,25 @@ _FALLBACK_TIERS: tuple[tuple[str, str, str], ...] = (
     ("USDT", "VES", BINANCE_P2P_SOURCE),
     ("USD", "VES", BCV_SOURCE),
 )
+
+# Per-tier carry-forward bound, keyed by source. A source absent from this
+# map carries without limit — BCV does, deliberately: it is the last tier
+# before ``needs_review``, so expiring it would turn a stale-but-useful
+# reference into triage work (ADR-016 §2).
+_TIER_MAX_AGE_DAYS: dict[str, int] = {
+    BINANCE_P2P_SOURCE: MEDIAN_MAX_AGE_DAYS,
+}
+
+
+def max_age_days(source: str) -> int | None:
+    """Return the carry-forward bound for ``source``, or ``None`` if uncapped.
+
+    Public so the triage modal's rate panel can apply the resolver's own
+    bound instead of hard-coding a second copy of it. The panel does its own
+    ``latest_on_or_before`` lookup per tier, and a panel that disagreed with
+    the resolver about staleness is precisely the bug ADR-016 fixes.
+    """
+    return _TIER_MAX_AGE_DAYS.get(source)
 
 
 def resolve(
@@ -82,6 +113,9 @@ def resolve(
         )
         if rate is None:
             continue
+        max_age = max_age_days(source)
+        if max_age is not None and (as_of - rate.as_of_date).days > max_age:
+            continue
         if rate.as_of_date == as_of:
             return rate.rate, source
         return rate.rate, source + CARRY_SUFFIX
@@ -94,6 +128,7 @@ __all__ = [
     "BCV_SOURCE",
     "BINANCE_P2P_SOURCE",
     "CARRY_SUFFIX",
+    "MEDIAN_MAX_AGE_DAYS",
     "NEEDS_REVIEW_SOURCE",
     "REALIZED_MAX_AGE_DAYS",
     "REALIZED_SOURCE",

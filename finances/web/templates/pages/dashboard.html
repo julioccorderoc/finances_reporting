@@ -13,11 +13,14 @@
     {# 1. KPI tiles. #}
     {% include "partials/kpi_tiles.html" %}
 
-    {# 2. Sync status strip. Polled every 60s for live updates. #}
+    {# 2. Sync status strip. Polled every 60s for live updates, plus one
+       early poll: the startup refresh (web.services.refresh) takes roughly
+       ten seconds, so a 60s-only cadence would show the owner stale chips
+       for most of a minute after the data behind them already changed. #}
     <div
       id="sync-status-strip"
       hx-get="/_partial/dashboard/sync-status"
-      hx-trigger="every 60s"
+      hx-trigger="load delay:12s, every 60s"
       hx-swap="innerHTML"
       aria-live="polite"
     >

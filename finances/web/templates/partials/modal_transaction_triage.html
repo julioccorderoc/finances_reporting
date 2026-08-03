@@ -97,8 +97,13 @@
             {% if r.rate is none %}
               <span class="text-slate-400">&mdash;</span>
             {% else %}
+              {# An expired tier (ADR-016) keeps its number on screen but
+                 struck through: hiding it would make "no P2P data for this
+                 period" indistinguishable from "P2P data exists and was
+                 rejected as stale", and that ambiguity is what let a
+                 months-old median masquerade as the market rate. #}
               <div class="flex flex-wrap items-baseline gap-2">
-                <span class="{% if r.is_winner %}font-semibold text-slate-900{% else %}text-slate-600{% endif %}">
+                <span class="{% if r.is_expired %}rate-expired{% elif r.is_winner %}font-semibold text-slate-900{% else %}text-slate-600{% endif %}">
                   {{ r.rate | fmt_number }}
                 </span>
                 {% if r.amount_usd is not none %}
@@ -111,6 +116,10 @@
               <div class="text-[11px] text-slate-500">
                 {% if r.is_carry %}
                   <span>from {{ r.as_of_date | fmt_date }}</span>
+                {% endif %}
+                {% if r.is_expired %}
+                  <span class="text-slate-500" data-rate-expired
+                  >{{ r.age_days }}d old &mdash; too stale, not used</span>
                 {% endif %}
                 {% if r.is_winner %}
                   <span class="text-emerald-700" data-rate-winner>&larr; used</span>

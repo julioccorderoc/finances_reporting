@@ -1,0 +1,63 @@
+{# Drop a Provincial statement straight onto the page (WP3).
+
+   The file input is the real control; the drop area sits on top of it via its
+   <label>, so click and keyboard both work with no JS at all — Alpine only
+   adds the drag highlight and the drop-to-fill shortcut.
+
+   Styling leans on .upload-* in app.css rather than utilities: the vendored
+   tailwind.css is a fixed extract with no build step and carries no
+   rounded-md / sr-only / border-2 / border-t.
+#}
+<section class="mt-4" data-provincial-dropzone>
+  <details class="upload-card">
+    <summary class="upload-panel-summary cursor-pointer text-sm text-slate-700">
+      Import a Provincial statement
+    </summary>
+
+    <div class="upload-panel-body p-3">
+      <form
+        id="provincial-upload-form"
+        hx-post="/_partial/uploads/provincial/preview"
+        hx-encoding="multipart/form-data"
+        hx-target="#upload-result"
+        hx-swap="innerHTML"
+      >
+        <label
+          class="upload-drop px-4 py-6"
+          x-data="{ over: false }"
+          x-bind:class="over && 'upload-drop-over'"
+          x-on:dragover.prevent="over = true"
+          x-on:dragleave.prevent="over = false"
+          x-on:drop.prevent="
+            over = false;
+            $refs.file.files = $event.dataTransfer.files;
+            $refs.file.dispatchEvent(new Event('change', { bubbles: true }));
+          "
+        >
+          <input
+            type="file"
+            name="file"
+            accept=".csv,.xls"
+            class="upload-file-input"
+            x-ref="file"
+            hx-trigger="change"
+            hx-post="/_partial/uploads/provincial/preview"
+            hx-encoding="multipart/form-data"
+            hx-target="#upload-result"
+            hx-swap="innerHTML"
+            hx-include="closest form"
+          >
+          <span class="text-sm text-slate-600">
+            Drop the file here, or click to choose
+          </span>
+          <span class="mt-1 block text-xs text-slate-500">
+            .csv or .xls straight from the bank &mdash; the name doesn't matter.
+            Nothing is written until you confirm.
+          </span>
+        </label>
+      </form>
+
+      <div id="upload-result" aria-live="polite"></div>
+    </div>
+  </details>
+</section>

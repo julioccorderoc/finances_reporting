@@ -959,3 +959,69 @@
   background: #fef2f2;            /* red-50 */
   border-color: #fca5a5;          /* red-300 */
 }
+
+/* === Expired rate tier (ADR-016, 2026-08-03) === */
+/* The vendored tailwind.css is a fixed extract with no build step, and
+   `line-through` is not in it. The triage rate panel strikes through a tier
+   whose rate has aged past its carry-forward bound, so the number stays
+   readable while reading unmistakably as rejected. */
+.rate-expired {
+  text-decoration: line-through;
+  color: #94a3b8;                 /* slate-400 */
+}
+
+/* === Provincial statement dropzone (WP3, 2026-08-03) === */
+/* The vendored tailwind.css is a fixed extract with no build step: it has no
+   rounded-md, sr-only, border-2, border-t, py-2 or hover:bg-slate-700. These
+   are the component rules those utilities would have provided. */
+.upload-panel-summary {
+  padding: 0.5rem 0.75rem;
+}
+
+.upload-panel-body {
+  border-top: 1px solid #e2e8f0;  /* slate-200 */
+}
+
+.upload-drop {
+  display: block;
+  cursor: pointer;
+  border: 2px dashed #cbd5e1;     /* slate-300 */
+  border-radius: 0.375rem;
+  text-align: center;
+}
+
+.upload-drop-over {
+  border-color: #0f172a;          /* slate-900 */
+  background: #f8fafc;            /* slate-50 */
+}
+
+/* Visually hidden but still focusable and clickable via its <label>. */
+.upload-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+.upload-card {
+  border: 1px solid #e2e8f0;      /* slate-200 */
+  border-radius: 0.375rem;
+}
+
+.upload-import-btn {
+  border-radius: 0.375rem;
+  background: #0f172a;            /* slate-900 */
+  color: #fff;
+  padding: 0.375rem 0.75rem;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.upload-import-btn:hover {
+  background: #334155;            /* slate-700 */
+}
