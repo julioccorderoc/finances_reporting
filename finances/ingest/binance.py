@@ -245,6 +245,68 @@ _TRANSFER_DIRECTIONS = {
     "FUNDING_MAIN": ("funding", "spot"),
 }
 
+# Which wallet a Simple Earn order moved money to or from. Binance names it
+# on the record itself (``sourceAccount`` when subscribing, ``destAccount``
+# when redeeming) — real redemptions land in FUNDING more often than SPOT, so
+# assuming a default would file most of them against the wrong account.
+# ``SPOT`` is the fallback only when the field is absent entirely, which is
+# what the endpoint did before it carried the field.
+_EARN_COUNTERPART_WALLETS = {
+    "SPOT": "spot",
+    "FUNDING": "funding",
+}
+
+
+class RawBinanceEarnSubscriptionRow(_RawBase):
+    """One Simple Earn subscription — money moving into Earn."""
+
+    purchaseId: int | str
+    asset: str
+    amount: Decimal
+    time: int
+    status: str
+    sourceAccount: str = "SPOT"
+
+    @field_validator("amount", mode="before")
+    @classmethod
+    def _dec(cls, v: Any) -> Decimal:
+        return _coerce_decimal(v)
+
+    def is_settled(self) -> bool:
+        """Whether the money actually moved.
+
+        A subscription in ``PURCHASING`` has been requested and not yet
+        filled; recording it would credit Earn with principal it does not
+        hold. The next sync picks it up once Binance reports SUCCESS.
+        """
+        return self.status.upper() == "SUCCESS"
+
+    def counterpart_kind(self) -> str:
+        return _EARN_COUNTERPART_WALLETS.get(self.sourceAccount.upper(), "spot")
+
+
+class RawBinanceEarnRedemptionRow(_RawBase):
+    """One Simple Earn redemption — money moving out of Earn."""
+
+    redeemId: int | str
+    asset: str
+    amount: Decimal
+    time: int
+    status: str
+    destAccount: str = "SPOT"
+
+    @field_validator("amount", mode="before")
+    @classmethod
+    def _dec(cls, v: Any) -> Decimal:
+        return _coerce_decimal(v)
+
+    def is_settled(self) -> bool:
+        """``PAID`` is the terminal state for a redemption."""
+        return self.status.upper() == "PAID"
+
+    def counterpart_kind(self) -> str:
+        return _EARN_COUNTERPART_WALLETS.get(self.destAccount.upper(), "spot")
+
 
 class RawBinanceTransferRow(_RawBase):
     tranId: int | str
@@ -580,7 +642,107 @@ def _ingest_internal_transfers(
             stats["rows_inserted"] += 2
 
 
+def _ingest_earn_principal(
+    conn: sqlite3.Connection,
+    client: Any,
+    *,
+    start_ms: int,
+    end_ms: int,
+    account_ids: dict[str, int],
+    stats: dict[str, int],
+    errors: list[str],
+) -> None:
+    """Record Earn subscriptions and redemptions as transfers (ADR-003).
+
+    ADR-003 specified this and it was never built: the ingest fetched the
+    position snapshot and the interest, so Earn accrued rewards while the
+    principal that earned them never appeared to leave Spot. On the live
+    ledger that hid roughly 10.5k USDT and 6.4k USDC of movement and drove
+    Binance Spot to an impossible negative USDT balance.
+
+    Both directions go through ``create_transfer``, which stays the only
+    writer of ``kind='transfer'`` (rule-002), and the counterpart account is
+    read off the record rather than assumed — see
+    ``_EARN_COUNTERPART_WALLETS``.
+    """
+    kind_to_id = {
+        "spot": account_ids[_SPOT_ACCOUNT_NAME],
+        "funding": account_ids[_FUNDING_ACCOUNT_NAME],
+    }
+    earn_id = account_ids[_EARN_ACCOUNT_NAME]
+
+    # (label, SDK method, model, id attribute, "into Earn?")
+    flows = (
+        (
+            "earn-subscribe",
+            "get_flexible_subscription_record",
+            RawBinanceEarnSubscriptionRow,
+            "purchaseId",
+            True,
+        ),
+        (
+            "earn-redeem",
+            "get_flexible_redemption_record",
+            RawBinanceEarnRedemptionRow,
+            "redeemId",
+            False,
+        ),
+    )
+
+    for label, method, model, id_attr, into_earn in flows:
+        try:
+            response = getattr(client, method)(
+                startTime=start_ms, endTime=end_ms, size=_EARN_RECORD_PAGE_SIZE
+            )
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{label}: {exc}")
+            continue
+
+        for item in _unpack_rows(response):
+            try:
+                row = model.model_validate(item)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"{label}: {exc}")
+                continue
+
+            if not row.is_settled():
+                continue
+
+            order_id = getattr(row, id_attr)
+            source_ref_from = f"{label}:{order_id}:from"
+            source_ref_to = f"{label}:{order_id}:to"
+            if (
+                transactions_repo.get_by_source_ref(conn, SOURCE, source_ref_from)
+                is not None
+            ):
+                continue  # idempotent: pair already materialized
+
+            counterpart = kind_to_id[row.counterpart_kind()]
+            from_id = counterpart if into_earn else earn_id
+            to_id = earn_id if into_earn else counterpart
+            direction = "into" if into_earn else "out of"
+
+            create_transfer(
+                conn,
+                from_account_id=from_id,
+                to_account_id=to_id,
+                amount=row.amount,
+                currency=row.asset.upper(),
+                occurred_at=_from_ms(row.time),
+                description=(
+                    f"Binance Earn {'subscription' if into_earn else 'redemption'} "
+                    f"— {format(row.amount, 'f')} {row.asset.upper()} "
+                    f"{direction} Earn (order {order_id})"
+                ),
+                source=SOURCE,
+                source_ref_from=source_ref_from,
+                source_ref_to=source_ref_to,
+            )
+            stats["rows_inserted"] += 2
+
+
 _REWARDS_PAGE_SIZE = 100
+_EARN_RECORD_PAGE_SIZE = 100
 
 
 def _fetch_rewards_pages(
@@ -785,6 +947,10 @@ def sync_binance(
                     conn, client, start_ms=chunk_start, end_ms=chunk_end,
                     earn_id=earn_id, interest_id=interest_id, stats=stats,
                     errors=errors,
+                )
+                _ingest_earn_principal(
+                    conn, client, start_ms=chunk_start, end_ms=chunk_end,
+                    account_ids=account_ids, stats=stats, errors=errors,
                 )
                 _ingest_pay(
                     conn, client, start_ms=chunk_start, end_ms=chunk_end,

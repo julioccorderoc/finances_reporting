@@ -219,6 +219,8 @@ def mocked_binance_sdk() -> MagicMock:
     client.get_flexible_product_position.return_value = {"rows": [], "total": 0}
     client.get_locked_product_position.return_value = {"rows": [], "total": 0}
     client.get_flexible_rewards_history.return_value = {"rows": [], "total": 0}
+    client.get_flexible_subscription_record.return_value = {"rows": [], "total": 0}
+    client.get_flexible_redemption_record.return_value = {"rows": [], "total": 0}
     # Deposits / withdrawals.
     client.deposit_history.return_value = []
     client.withdraw_history.return_value = []
