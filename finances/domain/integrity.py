@@ -29,6 +29,8 @@ Read-only. Nothing here mutates the database.
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Callable
+from decimal import Decimal
 from enum import Enum
 from typing import NamedTuple
 
@@ -38,6 +40,13 @@ from pydantic import BaseModel, ConfigDict
 # investigating, not enough to bury the summary.
 SAMPLE_LIMIT = 10
 
+# How far a cross-currency transfer pair may fail to net to zero in USD
+# before it is worth the owner's attention. Priced through the resolver, the
+# live ledger's 95 cross-currency pairs net to $0.72 in total and the worst
+# single pair is $3.82 off, so this is quiet on real data — while the
+# mis-clicked pair that motivated the check was out by $200.
+TRANSFER_USD_TOLERANCE = Decimal("50")
+
 
 class Severity(str, Enum):
     ERROR = "error"
@@ -45,12 +54,20 @@ class Severity(str, Enum):
 
 
 class IntegrityCheck(NamedTuple):
-    """One invariant, expressed as SQL returning offending ids."""
+    """One invariant, returning the offending transaction ids.
+
+    Most invariants are a single SELECT and stay that way — SQL keeps them
+    short enough to read as a statement of the rule. ``fn`` exists for the
+    one class that cannot be: anything needing the rate resolver, because
+    rule-005 forbids a second USD chain and SQL cannot call the first one.
+    Exactly one of ``sql`` / ``fn`` is set.
+    """
 
     name: str
     severity: Severity
     description: str
-    sql: str
+    sql: str | None = None
+    fn: Callable[[sqlite3.Connection], list[int]] | None = None
 
 
 class IntegrityFinding(BaseModel):
@@ -81,6 +98,65 @@ class IntegrityReport(BaseModel):
     def ok(self) -> bool:
         """True when no invariant is violated. Warnings do not count."""
         return not self.has_errors
+
+
+# ---------------------------------------------------------------------------
+# The one invariant that needs the resolver
+# ---------------------------------------------------------------------------
+
+
+def _transfer_usd_imbalance(conn: sqlite3.Connection) -> list[int]:
+    """Transfer pairs that do not net to zero once both legs are in USD.
+
+    ``transfer_same_currency_imbalance`` exempts cross-currency pairs,
+    because before ADR-013 there was no honest way to price a bolívar leg.
+    There is now, and the exemption is precisely the hole a mis-clicked
+    manual pairing walks through: the review confirmed a 2 261 Bs deposit
+    could be paired with a 200.44 USDT sell eight months apart, and both
+    rows then dropped out of every income and expense aggregate for good.
+
+    Pricing goes through :func:`finances.domain.money.to_usd` — the same
+    single implementation the reports use — so this check can never disagree
+    with them about what a leg is worth. A pair with a leg the resolver
+    cannot price is skipped rather than reported: missing rate data is a
+    different problem with a different remedy, and it already has its own
+    surface.
+    """
+    # Imported here rather than at module scope: money imports the resolver,
+    # which imports the rates repo, and integrity is imported by the CLI at
+    # startup. Keeping it local holds the import graph flat.
+    from finances.db.repos.transactions import _row_to_transaction
+    from finances.domain import money
+
+    rows = conn.execute(
+        """
+        SELECT id, account_id, occurred_at, kind, amount, currency, description,
+               category_id, transfer_id, user_rate, source, source_ref,
+               needs_review, parked, notes
+        FROM transactions
+        WHERE kind = 'transfer' AND transfer_id IS NOT NULL
+        ORDER BY transfer_id, id
+        """
+    ).fetchall()
+
+    pairs: dict[str, list] = {}
+    for row in rows:
+        pairs.setdefault(row["transfer_id"], []).append(_row_to_transaction(row))
+
+    offenders: list[int] = []
+    for legs in pairs.values():
+        # Leg-count problems are their own check; do not report them twice.
+        if len(legs) != 2:
+            continue
+        if legs[0].currency == legs[1].currency:
+            continue  # covered by transfer_same_currency_imbalance
+        values = [money.to_usd(conn, leg)[0] for leg in legs]
+        if any(v is None for v in values):
+            continue
+        if abs(values[0] + values[1]) > TRANSFER_USD_TOLERANCE:
+            offenders.extend(leg.id for leg in legs if leg.id is not None)
+
+    return sorted(offenders)
 
 
 # ---------------------------------------------------------------------------
@@ -137,8 +213,11 @@ CHECKS: tuple[IntegrityCheck, ...] = (
         name="transfer_legs_same_account",
         severity=Severity.ERROR,
         description=(
-            "Both legs of a transfer on one account. A transfer moves money "
-            "between accounts; this nets to nothing and hides a real movement."
+            "Both legs of a transfer in the same position — one account and "
+            "one currency. Nothing moved, and a real movement is hidden. A "
+            "conversion (one account, two currencies) is not this: it moves "
+            "value between two positions the owner holds, and is the case "
+            "the ledger previously could not express at all."
         ),
         sql="""
             SELECT id FROM transactions
@@ -147,6 +226,7 @@ CHECKS: tuple[IntegrityCheck, ...] = (
                     WHERE transfer_id IS NOT NULL
                     GROUP BY transfer_id
                    HAVING COUNT(DISTINCT account_id) = 1
+                      AND COUNT(DISTINCT currency) = 1
              )
              ORDER BY id
         """,
@@ -262,6 +342,78 @@ CHECKS: tuple[IntegrityCheck, ...] = (
         """,
     ),
     IntegrityCheck(
+        name="negative_asset_balance",
+        severity=Severity.ERROR,
+        description=(
+            "An account holding a negative amount of an asset. You cannot "
+            "hold minus seven thousand USDT; a balance below zero means "
+            "inflows are missing, not that money was overspent. Checked per "
+            "(account, currency) so a healthy balance in one asset cannot "
+            "mask a broken one in another."
+        ),
+        sql="""
+            SELECT id FROM transactions
+             WHERE (account_id, currency) IN (
+                   SELECT account_id, currency FROM transactions
+                    GROUP BY account_id, currency
+                   HAVING SUM(CAST(amount AS REAL)) < -0.01
+             )
+               AND id IN (
+                   SELECT MIN(id) FROM transactions
+                    GROUP BY account_id, currency
+             )
+             ORDER BY id
+        """,
+    ),
+    IntegrityCheck(
+        name="transfer_usd_imbalance",
+        severity=Severity.ERROR,
+        description=(
+            "Cross-currency transfer pairs that do not net to zero once both "
+            "legs are priced in USD. The same-currency check exempts these, "
+            "which is the hole a mis-clicked manual pairing walks through — "
+            "and a bad pair removes both rows from income and expense "
+            "permanently."
+        ),
+        fn=_transfer_usd_imbalance,
+    ),
+    IntegrityCheck(
+        name="category_kind_mismatch",
+        severity=Severity.WARNING,
+        description=(
+            "Rows whose category belongs to a contradicting kind — an "
+            "expense filed under an income category, or the reverse. A "
+            "transfer-kind category is deliberately not counted: on an "
+            "income or expense row it is how money movement is declared, and "
+            "the reports act on it."
+        ),
+        sql="""
+            SELECT t.id FROM transactions t
+              JOIN categories c ON c.id = t.category_id
+             WHERE c.kind <> t.kind
+               AND c.kind <> 'transfer'
+             ORDER BY t.id
+        """,
+    ),
+    IntegrityCheck(
+        name="uncategorized_not_flagged",
+        severity=Severity.WARNING,
+        description=(
+            "Rows with no category that are not flagged needs_review. The "
+            "flag is derived from rate resolution alone, so an uncategorised "
+            "row with a resolvable rate looks finished to every surface that "
+            "reads the column. The viewer's triage queue asks about category "
+            "separately; nothing else does."
+        ),
+        sql="""
+            SELECT id FROM transactions
+             WHERE category_id IS NULL
+               AND needs_review = 0
+               AND kind NOT IN ('transfer', 'adjustment')
+             ORDER BY id
+        """,
+    ),
+    IntegrityCheck(
         name="unpaired_p2p_sells",
         severity=Severity.WARNING,
         description=(
@@ -294,7 +446,11 @@ def run_checks(conn: sqlite3.Connection) -> IntegrityReport:
     findings: list[IntegrityFinding] = []
 
     for check in CHECKS:
-        ids = [int(row[0]) for row in conn.execute(check.sql)]
+        if check.fn is not None:
+            ids = check.fn(conn)
+        else:
+            assert check.sql is not None, f"{check.name} has neither sql nor fn"
+            ids = [int(row[0]) for row in conn.execute(check.sql)]
         if not ids:
             continue
         findings.append(

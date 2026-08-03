@@ -31,7 +31,8 @@ from finances.db.repos import transactions as transactions_repo
 from finances.domain import realized_rates
 from finances.domain.earn import EarnSnapshotRow, refresh_earn_positions
 from finances.domain.models import Transaction, TransactionKind
-from finances.domain.transfers import create_transfer
+from finances.domain.reconciliation import run_reconciliation_pass
+from finances.domain.transfers import SameAccountConvertPairing, create_transfer
 
 SOURCE = "binance"
 DEFAULT_LOOKBACK_DAYS: int = BINANCE_DEFAULT_LOOKBACK_DAYS
@@ -207,23 +208,32 @@ class RawBinanceConvertRow(_RawBase):
             f"Convert {format(self.fromAmount, 'f')} {self.fromAsset.upper()} → "
             f"{format(self.toAmount, 'f')} {self.toAsset.upper()} (order {self.orderId})"
         )
+        # Both legs are kind='transfer' sharing one transfer_id: a conversion
+        # moves value between two positions on one account, which is a
+        # transfer under the (account, currency) formulation of rule-002.
+        # They used to be an expense and an income row, and every report
+        # counted both — ~$11,846 of phantom spending against ~$11,845 of
+        # phantom earning, for a conversion that actually cost about $1.81.
+        transfer_id = f"convert:{self.orderId}"
         from_leg = Transaction(
             account_id=spot_account_id,
             occurred_at=occurred_at,
-            kind=TransactionKind.EXPENSE,
+            kind=TransactionKind.TRANSFER,
             amount=-self.fromAmount,
             currency=self.fromAsset.upper(),
             description=description,
+            transfer_id=transfer_id,
             source=SOURCE,
             source_ref=f"convert:{self.orderId}:from",
         )
         to_leg = Transaction(
             account_id=spot_account_id,
             occurred_at=occurred_at,
-            kind=TransactionKind.INCOME,
+            kind=TransactionKind.TRANSFER,
             amount=self.toAmount,
             currency=self.toAsset.upper(),
             description=description,
+            transfer_id=transfer_id,
             source=SOURCE,
             source_ref=f"convert:{self.orderId}:to",
         )
@@ -792,6 +802,16 @@ def sync_binance(
             # ``dry_run`` roll both back together. It runs after the chunk
             # loop so every fill in the window is accounted for at once.
             realized_rates.rebuild(conn)
+
+            # Conversions written before rule-002 was restated in terms of
+            # (account, currency) positions landed as an unpaired expense +
+            # income and are still counted as spending and earning. New ones
+            # arrive already paired, so this only ever repairs history — and
+            # it matches on the order id both legs carry, an exact identity,
+            # so it is idempotent and has nothing to guess.
+            convert_pass = run_reconciliation_pass(SameAccountConvertPairing(conn))
+            if convert_pass.errors:
+                errors.extend(convert_pass.errors)
 
             if dry_run:
                 conn.execute("ROLLBACK")

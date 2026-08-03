@@ -16,6 +16,7 @@ import sqlite3
 
 from finances.db.repos import categories as categories_repo
 from finances.db.repos import transactions as transactions_repo
+from finances.domain.models import TransactionKind
 
 
 def _txn_id(conn: sqlite3.Connection, source_ref: str) -> int:
@@ -73,17 +74,28 @@ def test_triage_modal_renders_picker(
     assert "— no category —" not in body
 
 
-def test_edit_modal_still_lists_every_active_category(
+def test_edit_modal_lists_every_category_the_row_can_take(
     seeded_web_db: sqlite3.Connection, web_client_factory
 ) -> None:
-    """GUARD (passes pre-impl too): the full list survives the swap."""
+    """GUARD: the picker survives the swap, minus the kinds it must not offer.
+
+    ``prov-1`` is an expense, so the modal offers expense and transfer
+    categories. It must not offer income or adjustment ones — that is how
+    65 live rows acquired a category from a contradicting kind.
+    """
     client = web_client_factory()
     txn_id = _txn_id(seeded_web_db, "prov-1")
 
     body = client.get(f"/_partial/transactions/{txn_id}/modal").text
 
-    for cat in categories_repo.list_all(seeded_web_db):
+    for cat in categories_repo.list_for_kind(seeded_web_db, TransactionKind.EXPENSE):
         assert cat.name in body
+
+    salary = categories_repo.get_by_name(
+        seeded_web_db, TransactionKind.INCOME, "Salary"
+    )
+    assert salary is not None
+    assert salary.name not in body
 
 
 def test_untouched_picker_submission_preserves_category(

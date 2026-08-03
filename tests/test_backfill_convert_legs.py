@@ -111,7 +111,7 @@ def convert_only_dir(tmp_path: Path) -> Path:
 
 def _rows(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return conn.execute(
-        "SELECT id, kind, amount, currency, source_ref, description "
+        "SELECT id, kind, amount, currency, source_ref, description, transfer_id "
         "FROM transactions WHERE source_ref LIKE 'convert:%' "
         "ORDER BY source_ref"
     ).fetchall()
@@ -131,11 +131,15 @@ class TestDestinationInRemark:
         outgoing = next(r for r in rows if r["source_ref"].endswith(":from"))
         incoming = next(r for r in rows if r["source_ref"].endswith(":to"))
 
-        assert outgoing["kind"] == "expense"
+        # Both legs are transfer legs: a conversion moves value between two
+        # positions on one account. Booked as expense + income, every report
+        # counted both sides as real spending and real earning.
+        assert outgoing["kind"] == "transfer"
         assert Decimal(str(outgoing["amount"])) == Decimal("-1350.00")
         assert outgoing["currency"] == "USDC"
+        assert outgoing["transfer_id"] == incoming["transfer_id"] is not None
 
-        assert incoming["kind"] == "income"
+        assert incoming["kind"] == "transfer"
         assert Decimal(str(incoming["amount"])) == Decimal("1349.10883625")
         assert incoming["currency"] == "USDT"
 
@@ -234,7 +238,7 @@ class TestLegPerRowShapeIsUntouched:
         rows = _rows(seeded_db)
         assert len(rows) == 2
         kinds = sorted(r["kind"] for r in rows)
-        assert kinds == ["expense", "income"]
+        assert kinds == ["transfer", "transfer"]
 
 
 class TestConvertRowsActuallyValidate:

@@ -450,7 +450,10 @@ def transactions_modal_partial(
         category_name=category_name,
     )
 
-    categories = categories_repo.list_all(conn)
+    # Only the kinds this row can legitimately take: its own, plus the
+    # transfer categories that mark money movement. Offering the full list
+    # is how 65 rows ended up with a category from another kind.
+    categories = categories_repo.list_for_kind(conn, txn.kind)
 
     templates = request.app.state.templates
     return templates.TemplateResponse(
@@ -713,7 +716,7 @@ def _render_triage_txn_modal(
         category_name=category_name,
     )
 
-    categories = categories_repo.list_all(conn)
+    categories = categories_repo.list_for_kind(conn, txn.kind)
 
     # Native-USD rows (USD/USDT/USDC) never consult a rate, so the panel
     # would be pure noise for them — see spec §5.1.

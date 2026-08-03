@@ -25,7 +25,8 @@ from finances.db.repos import categories as categories_repo
 from finances.db.repos import transactions as transactions_repo
 from finances.domain import rates as rates_engine
 from finances.domain import realized_rates
-from finances.domain.models import Transaction
+from finances.domain.money import MOVEMENT_CATEGORY_KIND
+from finances.domain.models import Category, Transaction
 from finances.web.services.transactions_query import (
     TransactionCard,
     _project_card,
@@ -67,6 +68,33 @@ def _is_p2p_sell(txn: Transaction) -> bool:
     return txn.source_ref.startswith("p2p:") and txn.amount < 0
 
 
+def _reject_contradictory_category(txn: Transaction, category: Category) -> None:
+    """Refuse a category whose kind contradicts the row's kind.
+
+    ``categories.kind`` existed from the first migration and nothing ever
+    compared it to ``transactions.kind``; the picker offered every category
+    on every row. The live ledger accumulated 65 contradictions, among them
+    6 income rows filed under ``Fees``.
+
+    The rule is asymmetric on purpose. A **transfer**-kind category on an
+    income or expense row is meaningful — it is the owner asserting that the
+    money moved rather than being spent, which
+    :mod:`finances.domain.money` now acts on. Only an expense category on an
+    income row, or the reverse, is nonsense, and only that is refused.
+
+    Raises ``ValueError`` (the 400 surface) before anything is written, so a
+    rejected save leaves every field of the row alone.
+    """
+    if category.kind is MOVEMENT_CATEGORY_KIND:
+        return
+    if category.kind is txn.kind:
+        return
+    raise ValueError(
+        f"category {category.name!r} is a {category.kind.value} category and "
+        f"cannot be applied to a {txn.kind.value} transaction"
+    )
+
+
 def apply_edit(
     conn: sqlite3.Connection,
     *,
@@ -104,6 +132,7 @@ def apply_edit(
         category = categories_repo.get_by_id(conn, req.category_id)
         if category is None:
             raise ValueError(f"unknown category id={req.category_id}")
+        _reject_contradictory_category(existing, category)
 
     update_kwargs: dict[str, object] = {}
     if req.set_category:

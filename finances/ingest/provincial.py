@@ -25,11 +25,12 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import logging
 import re
 import sqlite3
 from collections.abc import Callable, Iterable, Iterator
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
@@ -50,6 +51,8 @@ from finances.domain.transfers import BankAnchoredP2pPairing
 # ---------------------------------------------------------------------------
 # Public constants
 # ---------------------------------------------------------------------------
+
+logger = logging.getLogger(__name__)
 
 SOURCE: str = "provincial"
 DEFAULT_ACCOUNT_NAME: str = "Provincial Bolivares"
@@ -307,6 +310,16 @@ def iter_raw_rows(csv_path: Path) -> Iterator[RawProvincialRow]:
 Categorizer = Callable[[str], int | None]
 
 
+# The bank's web export pages at 99 rows and gives no indication that it
+# truncated. A statement landing exactly on the limit is the signature.
+EXPORT_PAGE_SIZE = 99
+
+# Bolívar tolerance for the whole-file balance identity. The export writes
+# two decimals, so an exact comparison is right; the tolerance only absorbs
+# a rounding artefact if a future export changes precision.
+BALANCE_TOLERANCE = Decimal("0.01")
+
+
 @dataclass
 class IngestReport:
     """Summary of a single :func:`ingest_csv` run."""
@@ -315,6 +328,86 @@ class IngestReport:
     rows_inserted: int = 0
     rows_updated: int = 0
     reconciliation: ReconciliationReport | None = None
+    warnings: list[str] = field(default_factory=list)
+
+
+def check_statement_integrity(
+    rows: list[RawProvincialRow],
+    *,
+    last_known_day: date | None = None,
+) -> list[str]:
+    """Return human-readable warnings about what a statement may have lost.
+
+    Three independent signals, none of which blocks the load:
+
+    **The balance identity.** Every row carries the running ``Saldo``. Over a
+    whole file, ``closing - opening`` must equal the sum of the movements.
+    Stated across the file rather than row-to-row, it is independent of row
+    order, so the bank's arbitrary same-day ordering cannot produce a false
+    positive — and any row the export dropped from inside its own range shows
+    up as exactly the missing amount. Verified exact on 13 of the 14 archived
+    statements; it is what caught ``provincial-may.xls`` missing Bs 1 400.
+
+    **The page limit.** A row count sitting exactly on
+    :data:`EXPORT_PAGE_SIZE` means the export almost certainly had more to
+    give. This is what silently cost the ledger 24 days of history.
+
+    **Continuity.** If the statement's earliest day leaves a hole after
+    ``last_known_day``, the days in between are named.
+
+    Rows are accepted in the bank's own newest-first order; nothing here
+    depends on that beyond identifying the two ends.
+    """
+    warnings: list[str] = []
+    if not rows:
+        return warnings
+
+    days = sorted(r.to_datetime().date() for r in rows)
+    first_day, last_day = days[0], days[-1]
+
+    newest, oldest = rows[0], rows[-1]
+    if newest.saldo is not None and oldest.saldo is not None:
+        closing = newest.saldo
+        opening = oldest.saldo - oldest.monto
+        movement = sum((r.monto for r in rows), Decimal(0))
+        drift = (closing - opening) - movement
+        if abs(drift) > BALANCE_TOLERANCE:
+            warnings.append(
+                f"saldo does not reconcile: the running balance moves "
+                f"{closing - opening} over {first_day}..{last_day} but the "
+                f"rows account for {movement}. Bs {abs(drift)} of movement is "
+                f"missing from this export."
+            )
+
+    if len(rows) >= EXPORT_PAGE_SIZE and len(rows) % EXPORT_PAGE_SIZE == 0:
+        warnings.append(
+            f"statement has exactly {len(rows)} rows, the bank's export page "
+            f"limit ({EXPORT_PAGE_SIZE}). It was probably truncated and the "
+            f"oldest movements dropped — it starts at {first_day}. Re-export "
+            f"in shorter date ranges to be sure."
+        )
+
+    if last_known_day is not None and first_day > last_known_day + timedelta(days=1):
+        gap_start = last_known_day + timedelta(days=1)
+        gap_end = first_day - timedelta(days=1)
+        warnings.append(
+            f"gap in bank coverage: nothing on file between {gap_start} and "
+            f"{gap_end}. Last row already loaded is {last_known_day}; this "
+            f"statement opens {first_day}."
+        )
+
+    return warnings
+
+
+def _last_loaded_day(conn: sqlite3.Connection, account_id: int) -> date | None:
+    """Latest day already on file for ``account_id``, or ``None`` if empty."""
+    row = conn.execute(
+        "SELECT MAX(DATE(occurred_at)) AS d FROM transactions WHERE account_id = ?",
+        (account_id,),
+    ).fetchone()
+    if row is None or row["d"] is None:
+        return None
+    return date.fromisoformat(row["d"])
 
 
 def ingest_csv(
@@ -361,12 +454,24 @@ def ingest_csv(
 
         report = IngestReport()
 
+        # Read the file once, up front. The integrity checks need the whole
+        # statement in hand (the balance identity spans both ends of it), and
+        # the coverage check needs the account's last loaded day from *before*
+        # this run's own rows land.
+        statement = list(iter_raw_rows(csv_path))
+        report.warnings = check_statement_integrity(
+            statement,
+            last_known_day=_last_loaded_day(conn, resolved_account_id),
+        )
+        for warning in report.warnings:
+            logger.warning("%s: %s", csv_path.name, warning)
+
         conn.execute("BEGIN")
         try:
             # Nth same-statement twin of an identical (date, amount,
             # description) tuple gets occurrence=N so both rows survive.
             seen_tuples: dict[tuple[str, str, str], int] = {}
-            for raw in iter_raw_rows(csv_path):
+            for raw in statement:
                 report.rows_seen += 1
 
                 occurred_at = raw.to_datetime()
@@ -420,12 +525,22 @@ def ingest_csv(
             raise
 
         if not dry_run:
+            # Warnings ride in the ``error`` column with the run still marked
+            # success: it is the only free-text field, and a statement that
+            # loaded is not a failed run. The dashboard's sync chip keys off
+            # ``status``, so it stays green while the detail survives.
+            note = (
+                None
+                if not report.warnings
+                else ("warning: " + " | ".join(report.warnings))[:4000]
+            )
             import_state.finish_run(
                 conn,
                 run_id,
                 status="success",
                 rows_inserted=report.rows_inserted,
                 rows_updated=report.rows_updated,
+                error=note,
             )
         return report
     except Exception as exc:
@@ -457,10 +572,13 @@ def _resolve_account(
 
 
 __all__ = [
+    "BALANCE_TOLERANCE",
     "DEFAULT_ACCOUNT_NAME",
+    "EXPORT_PAGE_SIZE",
     "IngestReport",
     "RawProvincialRow",
     "SOURCE",
+    "check_statement_integrity",
     "compute_source_ref",
     "ingest_csv",
     "iter_raw_rows",

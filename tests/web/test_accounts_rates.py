@@ -137,11 +137,11 @@ def test_accounts_card_for_usd_account_has_balance_usdt_equal_to_native(
     cash = next(c for c in cards if c.name == "Cash USD")
     assert cash.currency == "USD"
     assert cash.balance_usdt == cash.balance_native
-    # The seed records the cash expense as a positive amount (12.50);
-    # the view sums amounts as-is, so the balance equals that figure.
-    # The exact value isn't load-bearing for this test, but the 1:1
-    # USD->USDT identity is.
-    assert cash.balance_native == Decimal("12.5")
+    # The seed records the cash expense negative, as production does; the
+    # view sums amounts as-is, so the balance is that figure. The exact
+    # value isn't load-bearing here, but the 1:1 USD->USDT identity is —
+    # and it must hold for a negative balance too.
+    assert cash.balance_native == Decimal("-12.5")
 
 
 def test_accounts_card_for_ves_account_uses_p2p_rate(

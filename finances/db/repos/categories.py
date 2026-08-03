@@ -41,6 +41,32 @@ def get_by_name(
     return _row_to_category(row) if row else None
 
 
+def list_for_kind(
+    conn: sqlite3.Connection,
+    kind: TransactionKind | str,
+    *,
+    include_inactive: bool = False,
+) -> list[Category]:
+    """Categories a transaction of ``kind`` may legitimately carry.
+
+    Its own kind, plus every transfer-kind category. The second half is not
+    a loophole: a transfer category on an income or expense row is how the
+    owner declares "this money moved, it was not spent", which
+    ``finances.domain.money`` acts on when deciding what counts as spending.
+
+    Applying an *expense* category to an income row (or the reverse) is
+    never meaningful, and this is what keeps the picker from offering it.
+    """
+    kind_value = kind.value if isinstance(kind, TransactionKind) else kind
+    transfer = TransactionKind.TRANSFER.value
+    sql = "SELECT id, kind, name, active FROM categories WHERE kind IN (?, ?)"
+    if not include_inactive:
+        sql += " AND active = 1"
+    sql += " ORDER BY kind, name"
+    rows = conn.execute(sql, (kind_value, transfer)).fetchall()
+    return [_row_to_category(r) for r in rows]
+
+
 def list_all(conn: sqlite3.Connection, *, include_inactive: bool = False) -> list[Category]:
     if include_inactive:
         rows = conn.execute(

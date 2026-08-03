@@ -306,6 +306,18 @@ class TestBacklogChecks:
     ):
         """A backlog is work to do, not corruption — it must not fail a run."""
         spot = _account_id(seeded_db, "Binance Spot")
+        # Fund the account first. A lone -30 sell would leave the position
+        # negative, which negative_asset_balance now (correctly) calls an
+        # error — and this test is about the backlog check's severity, so it
+        # must not lean on an impossible balance to make its point.
+        _row(
+            seeded_db,
+            account_id=spot,
+            amount=Decimal("100"),
+            currency="USDT",
+            kind=TransactionKind.INCOME,
+            source_ref="funding-for-backlog",
+        )
         _row(
             seeded_db,
             account_id=spot,

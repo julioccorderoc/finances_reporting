@@ -37,7 +37,7 @@ from pydantic import BaseModel, ConfigDict
 from finances.db.repos import accounts as accounts_repo
 from finances.db.repos import categories as categories_repo
 from finances.db.repos.transactions import _row_to_transaction
-from finances.domain import rates as rates_engine
+from finances.domain import money
 from finances.domain.models import Transaction
 
 
@@ -46,9 +46,13 @@ from finances.domain.models import Transaction
 # ---------------------------------------------------------------------------
 
 
-_NATIVE_USD_CURRENCIES = frozenset({"USD", "USDT", "USDC"})
-_BCV_SOURCE_PREFIX = "bcv"
 _MONTH_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
+
+# Marker for a bucket that aggregated more than one native currency. The
+# USD column stays correct either way — every currency is converted before
+# it is summed — but the native total is the sum of unlike units, so it is
+# labelled rather than quietly attributed to whichever row arrived first.
+MIXED_CURRENCY = "MIXED"
 
 
 # ---------------------------------------------------------------------------
@@ -191,19 +195,14 @@ def _resolve_contribution(
     ``bucket`` is one of ``"headline"``, ``"fallback"``, or ``"needs_review"``
     and routes the amount to the appropriate accumulator field.
 
-    Native-USD currencies (USD/USDT/USDC) bypass the resolver — same as
-    :mod:`finances.reports.consolidated_usd` — so a transaction in one of
-    those currencies is always headline-eligible.
+    The conversion itself is :func:`finances.domain.money.to_usd`, shared
+    with :mod:`finances.reports.consolidated_usd`; only the bucketing is
+    this report's own.
     """
-    if txn.currency in _NATIVE_USD_CURRENCIES:
-        return txn.amount, "headline"
-
-    rate, source = rates_engine.resolve(conn, txn)
-    if rate is None:
+    amount_usd, source = money.to_usd(conn, txn)
+    if amount_usd is None:
         return Decimal("0"), "needs_review"
-
-    amount_usd = txn.amount / rate
-    if source.startswith(_BCV_SOURCE_PREFIX):
+    if money.is_bcv_sourced(source):
         return amount_usd, "fallback"
     return amount_usd, "headline"
 
@@ -216,21 +215,23 @@ def _resolve_contribution(
 def _fetch_transactions_in_range(
     conn: sqlite3.Connection, *, since: str | None, until: str | None
 ) -> list[Transaction]:
-    """Fetch non-transfer transactions whose month is within ``[since, until]``.
+    """Fetch spending transactions whose month is within ``[since, until]``.
 
-    Month filtering happens in SQL via ``strftime('%Y-%m', occurred_at)`` so
-    we mirror the ``v_monthly_summary`` behaviour exactly. That keeps the
-    epic's sum-invariant ("report rows sum to the same total as the
-    consolidated report for the month") tight.
+    Month filtering happens in SQL via ``strftime('%Y-%m', occurred_at)``.
+    The "is this spending" predicate is shared with
+    :mod:`finances.reports.consolidated_usd`, which keeps the sum-invariant
+    ("report rows sum to the same total as the consolidated report") tight —
+    two independent aggregators over one definition, rather than two
+    definitions that happen to agree.
     """
     sql = [
-        """
+        f"""
         SELECT id, account_id, occurred_at, kind, amount, currency, description,
                category_id, transfer_id, user_rate, source, source_ref,
                needs_review, parked, notes
         FROM transactions
-        WHERE kind <> 'transfer'
-        """
+        WHERE {money.SQL_NOT_CURRENCY_MOVEMENT}
+        """  # noqa: S608 - constant predicate, no interpolated user input
     ]
     params: list[str] = []
     if since is not None:
@@ -337,6 +338,11 @@ def build_report(
 
         bucket.tx_count += 1
         bucket.total_native += txn.amount
+        # Binance Spot and Earn each hold USDT *and* USDC, so a bucket can
+        # aggregate two currencies. Taking the label from whichever row
+        # landed first attributed the sum to one of them; say so instead.
+        if bucket.currency != txn.currency:
+            bucket.currency = MIXED_CURRENCY
 
         amount_usd, where = _resolve_contribution(conn, txn)
         if where == "headline":

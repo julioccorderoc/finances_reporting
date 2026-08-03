@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ConfigDict
 
 from finances.db.repos.transactions import _row_to_transaction
+from finances.domain import money
 from finances.domain import rates as rates_engine
 from finances.domain.models import Transaction
 
@@ -48,9 +49,6 @@ if TYPE_CHECKING:  # pragma: no cover - import-time only
 # ---------------------------------------------------------------------------
 
 
-_NATIVE_USD_CURRENCIES = frozenset({"USD", "USDT", "USDC"})
-_NATIVE_USD_SOURCE = "native_usd"
-_BCV_SOURCE_PREFIX = "bcv"
 _QUANTIZE = Decimal("0.01")
 
 
@@ -99,19 +97,26 @@ class ConsolidatedReport(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _fetch_non_transfer_transactions(
+def _fetch_spending_transactions(
     conn: sqlite3.Connection,
 ) -> list[Transaction]:
-    """Return every non-transfer transaction, ordered deterministically."""
+    """Return every transaction that is genuinely income or expense.
+
+    Excludes currency movement on both of its shapes — a paired transfer,
+    and a row the owner has categorised under a transfer-kind category. The
+    predicate lives in :data:`finances.domain.money.SQL_NOT_CURRENCY_MOVEMENT`
+    so this builder and :mod:`finances.reports.monthly` cannot drift apart on
+    what counts as spending.
+    """
     rows = conn.execute(
-        """
+        f"""
         SELECT id, account_id, occurred_at, kind, amount, currency, description,
                category_id, transfer_id, user_rate, source, source_ref,
                needs_review, parked, notes
         FROM transactions
-        WHERE kind <> 'transfer'
+        WHERE {money.SQL_NOT_CURRENCY_MOVEMENT}
         ORDER BY occurred_at ASC, id ASC
-        """
+        """  # noqa: S608 - constant predicate, no interpolated user input
     ).fetchall()
     return [_row_to_transaction(r) for r in rows]
 
@@ -126,40 +131,7 @@ def _compute_row(conn: sqlite3.Connection, txn: Transaction) -> ConsolidatedRow:
     """
     assert txn.id is not None, "transactions persisted via the repo always have an id"
 
-    # Native-USD-ish currencies bypass the resolver entirely.
-    if txn.currency in _NATIVE_USD_CURRENCIES:
-        return ConsolidatedRow(
-            transaction_id=txn.id,
-            occurred_at=txn.occurred_at,
-            account_id=txn.account_id,
-            kind=txn.kind.value,
-            currency=txn.currency,
-            amount_native=txn.amount,
-            amount_usd=txn.amount,
-            rate_source=_NATIVE_USD_SOURCE,
-            description=txn.description,
-            is_bcv_fallback=False,
-        )
-
-    rate, source = rates_engine.resolve(conn, txn)
-
-    if rate is None:
-        # needs_review: unresolved, not a BCV fallback.
-        return ConsolidatedRow(
-            transaction_id=txn.id,
-            occurred_at=txn.occurred_at,
-            account_id=txn.account_id,
-            kind=txn.kind.value,
-            currency=txn.currency,
-            amount_native=txn.amount,
-            amount_usd=None,
-            rate_source=source,
-            description=txn.description,
-            is_bcv_fallback=False,
-        )
-
-    amount_usd = txn.amount / rate
-    is_bcv_fallback = source.startswith(_BCV_SOURCE_PREFIX)
+    amount_usd, source = money.to_usd(conn, txn)
     return ConsolidatedRow(
         transaction_id=txn.id,
         occurred_at=txn.occurred_at,
@@ -170,7 +142,9 @@ def _compute_row(conn: sqlite3.Connection, txn: Transaction) -> ConsolidatedRow:
         amount_usd=amount_usd,
         rate_source=source,
         description=txn.description,
-        is_bcv_fallback=is_bcv_fallback,
+        # An unresolved row is not a BCV fallback — it simply needs a rate,
+        # which is a different problem and a different remedy.
+        is_bcv_fallback=amount_usd is not None and money.is_bcv_sourced(source),
     )
 
 
@@ -187,7 +161,7 @@ def build_report(
     """
     _ = strict  # accepted for symmetry with the CLI layer; see docstring.
 
-    txns = _fetch_non_transfer_transactions(conn)
+    txns = _fetch_spending_transactions(conn)
     rows: list[ConsolidatedRow] = [_compute_row(conn, txn) for txn in txns]
 
     total_usd = Decimal("0")

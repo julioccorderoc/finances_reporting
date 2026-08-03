@@ -195,13 +195,18 @@ def test_convert_row_emits_both_legs() -> None:
     legs = row.to_transactions(spot_account_id=1)
     assert len(legs) == 2
     from_leg, to_leg = legs
-    assert from_leg.kind == TransactionKind.EXPENSE
+    # Both legs are transfer legs sharing one transfer_id. A conversion moves
+    # value between two positions on one account; booking it as an expense
+    # plus an income made every report count both sides as real spending and
+    # real earning.
+    assert from_leg.kind == TransactionKind.TRANSFER
     assert from_leg.amount == Decimal("-100.00")
     assert from_leg.currency == "USDT"
     assert from_leg.source_ref == "convert:T-1:from"
-    assert to_leg.kind == TransactionKind.INCOME
+    assert to_leg.kind == TransactionKind.TRANSFER
     assert to_leg.amount == Decimal("0.0015")
     assert to_leg.currency == "BTC"
+    assert from_leg.transfer_id == to_leg.transfer_id == "convert:T-1"
     assert to_leg.source_ref == "convert:T-1:to"
 
 

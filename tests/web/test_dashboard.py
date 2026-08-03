@@ -87,14 +87,17 @@ def test_net_worth_aggregates_usd_accounts_one_to_one(
     from finances.web.services.net_worth import compute_net_worth
 
     nw = compute_net_worth(seeded_web_db, as_of_date=_dt.now(tz=UTC).date())
-    # The seeded "Cash USD" has one row with amount=12.50 (sign convention
-    # in the fixture stores positive magnitudes). Balance = SUM(amount) = 12.50.
+    # The seeded "Cash USD" has one expense row of -12.50, the sign
+    # production uses. Balance = SUM(amount) = -12.50, and the 1:1 identity
+    # must survive it.
     contribs = {(c.account_name, c.currency): c for c in nw.contributions}
     cash = contribs[("Cash USD", "USD")]
-    assert cash.balance_native == Decimal("12.5")
-    # USD account: rate is exactly 1, contribution equals balance.
+    assert cash.balance_native == Decimal("-12.5")
+    # USD account: rate is exactly 1, contribution equals balance — sign
+    # included, which is what a 1:1 identity actually means.
     assert cash.rate_to_usdt == Decimal("1")
-    assert cash.contribution_usdt == Decimal("12.5")
+    assert cash.contribution_usdt == Decimal("-12.5")
+    assert cash.contribution_usdt == cash.balance_native
 
 
 def test_net_worth_uses_p2p_for_ves_account(
