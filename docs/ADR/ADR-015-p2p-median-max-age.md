@@ -1,4 +1,4 @@
-# ADR-014: The P2P Median Tier Expires; It No Longer Carries Forward Without Limit
+# ADR-015: The P2P Median Tier Expires; It No Longer Carries Forward Without Limit
 
 **Date:** 2026-08-03
 **Status:** Accepted

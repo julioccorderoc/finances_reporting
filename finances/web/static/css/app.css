@@ -959,3 +959,13 @@
   background: #fef2f2;            /* red-50 */
   border-color: #fca5a5;          /* red-300 */
 }
+
+/* === Expired rate tier (ADR-015, 2026-08-03) === */
+/* The vendored tailwind.css is a fixed extract with no build step, and
+   `line-through` is not in it. The triage rate panel strikes through a tier
+   whose rate has aged past its carry-forward bound, so the number stays
+   readable while reading unmistakably as rejected. */
+.rate-expired {
+  text-decoration: line-through;
+  color: #94a3b8;                 /* slate-400 */
+}

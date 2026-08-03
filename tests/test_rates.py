@@ -360,7 +360,9 @@ def test_property_user_rate_always_wins(
 
 
 @given(
-    p2p_offset=st.integers(min_value=0, max_value=60),
+    p2p_offset=st.integers(
+        min_value=0, max_value=rates_engine.MEDIAN_MAX_AGE_DAYS
+    ),
     rate_value=_RATE_VALUES,
     txn_day=st.dates(min_value=date(2021, 1, 1), max_value=date(2030, 12, 31)),
 )
@@ -375,6 +377,11 @@ def test_property_p2p_source_suffix_matches_date_offset(
     rate_value: Decimal,
     txn_day: date,
 ) -> None:
+    """Within the ADR-015 window the suffix tracks the offset exactly.
+
+    Bounded to the cap: past it the tier expires rather than carrying, which
+    ``test_property_median_wins_exactly_within_age_window`` covers.
+    """
     in_memory_db.execute("DELETE FROM rates")
     rate_day = txn_day - timedelta(days=p2p_offset)
     _insert_rate(
@@ -398,7 +405,9 @@ def test_property_p2p_source_suffix_matches_date_offset(
 
 
 @given(
-    p2p_offset=st.integers(min_value=0, max_value=30),
+    p2p_offset=st.integers(
+        min_value=0, max_value=rates_engine.MEDIAN_MAX_AGE_DAYS
+    ),
     bcv_offset=st.integers(min_value=0, max_value=30),
     txn_day=st.dates(min_value=date(2022, 1, 1), max_value=date(2030, 12, 31)),
 )
@@ -413,6 +422,11 @@ def test_property_p2p_always_beats_bcv_when_both_present(
     bcv_offset: int,
     txn_day: date,
 ) -> None:
+    """An unexpired P2P median outranks BCV at any BCV age.
+
+    ADR-015 bounds this to the cap: an expired median loses to BCV, which
+    ``test_median_expires_one_day_past_window_falls_through_to_bcv`` pins.
+    """
     in_memory_db.execute("DELETE FROM rates")
     _insert_rate(
         in_memory_db,
@@ -669,9 +683,9 @@ def test_property_realized_wins_exactly_within_age_window(
 
 
 # ---------------------------------------------------------------------------
-# ADR-014: the binance_p2p_median tier expires at MEDIAN_MAX_AGE_DAYS.
+# ADR-015: the binance_p2p_median tier expires at MEDIAN_MAX_AGE_DAYS.
 #
-# Before ADR-014 the median carried forward without limit, so a single
+# Before ADR-015 the median carried forward without limit, so a single
 # snapshot could be presented as the market rate months later. Because a
 # stale median and a current BCV rate both lag the real market, the two
 # converge — which is exactly how the bug surfaced (a April 27 median of
@@ -746,7 +760,7 @@ def test_expired_median_with_no_bcv_flags_needs_review(
 def test_bcv_still_carries_without_limit(
     in_memory_db: sqlite3.Connection,
 ) -> None:
-    """ADR-014 caps the median only; BCV is the floor and stays uncapped."""
+    """ADR-015 caps the median only; BCV is the floor and stays uncapped."""
     captured = date(2025, 7, 1)
     _insert_rate(
         in_memory_db,

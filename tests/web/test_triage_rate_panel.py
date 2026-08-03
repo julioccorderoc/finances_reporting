@@ -8,7 +8,7 @@ transaction's day and marks the one that produced the dollar figure.
 from __future__ import annotations
 
 import sqlite3
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -214,3 +214,68 @@ def test_panel_does_not_disturb_existing_modal_contract(
     assert 'name="user_rate"' in html
     assert "data-park-btn" in html
     assert 'hx-post="/_partial/triage/1/edit"' in html
+
+
+# ---------------------------------------------------------------------------
+# ADR-015: an expired tier must read as rejected, not as the market rate.
+#
+# The service marks it; these tests pin that the marking survives into the
+# rendered HTML. A service-level assertion alone would have passed happily
+# while the modal still displayed a months-old median as if it were current.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def stale_median_db(panel_db: sqlite3.Connection) -> sqlite3.Connection:
+    """A median captured 60 days before the transaction — past the cap."""
+    rates_repo.upsert(
+        panel_db,
+        Rate(as_of_date=DAY - timedelta(days=60), base="USDT", quote="VES",
+             rate=Decimal("633.52"), source="binance_p2p_median"),
+    )
+    return panel_db
+
+
+def test_expired_median_row_is_marked_in_the_html(
+    stale_median_db: sqlite3.Connection, web_client_factory
+) -> None:
+    client: TestClient = web_client_factory()
+    html = client.get("/_partial/triage/1/modal").text
+
+    median_row = _row(html, "binance_p2p_median")
+    assert "data-rate-expired" in median_row
+    assert "60d old" in median_row
+
+
+def test_expired_median_row_shows_no_dollar_figure(
+    stale_median_db: sqlite3.Connection, web_client_factory
+) -> None:
+    """The whole point: no USD may be rendered from a refused rate."""
+    client: TestClient = web_client_factory()
+    html = client.get("/_partial/triage/1/modal").text
+
+    median_row = _row(html, "binance_p2p_median")
+    assert "data-rate-usd" not in median_row
+
+
+def test_expired_median_keeps_its_number_visible(
+    stale_median_db: sqlite3.Connection, web_client_factory
+) -> None:
+    """Struck through, not hidden — 'no data' and 'stale data' differ."""
+    client: TestClient = web_client_factory()
+    html = client.get("/_partial/triage/1/modal").text
+
+    median_row = _row(html, "binance_p2p_median")
+    assert "633.52" in median_row
+    assert "rate-expired" in median_row
+
+
+def test_unexpired_median_row_carries_no_expiry_marking(
+    priced_panel_db: sqlite3.Connection, web_client_factory
+) -> None:
+    client: TestClient = web_client_factory()
+    html = client.get("/_partial/triage/1/modal").text
+
+    median_row = _row(html, "binance_p2p_median")
+    assert "data-rate-expired" not in median_row
+    assert "data-rate-usd" in median_row

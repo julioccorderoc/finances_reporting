@@ -22,6 +22,7 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict
 
 from finances.db.repos import rates as rates_repo
+from finances.domain import rates as rates_domain
 from finances.domain.rates import CARRY_SUFFIX
 
 DEFAULT_RANGE_DAYS = 30
@@ -87,8 +88,15 @@ class DayRate(BaseModel):
 
     ``amount_usd`` is the counterfactual: what the transaction's native
     amount would be worth priced at THIS tier, whether or not this tier
-    won. ``None`` when the tier has no rate for the day, or when the
-    transaction's currency is not the tier's quote currency.
+    won. ``None`` when the tier has no rate for the day, when the
+    transaction's currency is not the tier's quote currency, or when the
+    tier has expired (ADR-015) — no dollar figure may be rendered from a
+    rate the chain refused.
+
+    ``is_expired`` marks a rate older than its tier's carry-forward bound.
+    Such a row is still rendered, with ``age_days``, rather than hidden:
+    "no data for this period" and "data exists, rejected as stale" are
+    different facts and the owner needs to tell them apart.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -101,6 +109,8 @@ class DayRate(BaseModel):
     is_carry: bool
     is_winner: bool
     is_reference_only: bool
+    is_expired: bool
+    age_days: int | None
 
 
 def _series_points(
@@ -225,9 +235,17 @@ def rates_for_day(
         found = rates_repo.latest_on_or_before(
             conn, as_of_date=day, base=base, quote=quote, source=source
         )
+        age_days = (day - found.as_of_date).days if found is not None else None
+        max_age = rates_domain.max_age_days(source)
+        is_expired = (
+            age_days is not None and max_age is not None and age_days > max_age
+        )
         amount_usd = (
             amount_native / found.rate
-            if found is not None and found.rate and currency == quote
+            if found is not None
+            and found.rate
+            and currency == quote
+            and not is_expired
             else None
         )
         series.append(
@@ -240,6 +258,8 @@ def rates_for_day(
                 is_carry=found is not None and found.as_of_date < day,
                 is_winner=source == winner,
                 is_reference_only=source in _REFERENCE_ONLY_SOURCES,
+                is_expired=is_expired,
+                age_days=age_days,
             )
         )
     return series
