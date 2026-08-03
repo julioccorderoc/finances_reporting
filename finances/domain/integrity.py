@@ -345,9 +345,9 @@ CHECKS: tuple[IntegrityCheck, ...] = (
         name="negative_asset_balance",
         severity=Severity.ERROR,
         description=(
-            "An account holding a negative amount of an asset. You cannot "
-            "hold minus seven thousand USDT; a balance below zero means "
-            "inflows are missing, not that money was overspent. Checked per "
+            "An account holding a negative amount of an asset. A balance below "
+            "zero means an arrival was never recorded, not that money was "
+            "overspent — you cannot sell what you never received. Checked per "
             "(account, currency) so a healthy balance in one asset cannot "
             "mask a broken one in another."
         ),

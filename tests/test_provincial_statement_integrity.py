@@ -3,7 +3,7 @@
 The bank's web export caps at 99 rows and says nothing. Asking for a month
 with more movements than that returns the *last* 99. Three holes reached the
 live ledger this way — 2026-01-07..01-11, 2026-05-01..05-14 and
-2026-06-02..06-06, together about 24 days and an estimated \$803 of bolívar
+2026-06-02..06-06, together about 24 days and an estimated $803 of bolívar
 spending that is simply absent.
 
 Every statement carries a running ``Saldo``. The ingest already parses it and
