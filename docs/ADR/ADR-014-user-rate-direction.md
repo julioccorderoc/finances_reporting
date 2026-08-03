@@ -8,7 +8,7 @@
 
 `transactions.user_rate` stores a bare number:
 
-```
+```text
 Jul 7 · Binance Spot · −98.32 USDT · user_rate = 762.80
 Jul 7 · Provincial   · +75 000 VES · user_rate = NULL
 ```
@@ -83,8 +83,9 @@ demand a price feed for a distinction that never changes a decision here.
 
 **Good**
 
-- `validate` can do its job. Cross-currency pairs verify against the
-  0.01 USD tolerance; a real imbalance is now detectable.
+- `validate` can do its job. All 169 transfers in the ledger now verify —
+  72 same-currency and 97 cross-currency, none of which had ever passed.
+  A real imbalance is detectable for the first time.
 - The rule is written down, so the next reader — human or agent — cannot
   silently reinterpret the column. That failure mode is not theoretical:
   `RawBinanceConvertRow` was changed from `tranId` to `orderId` without a

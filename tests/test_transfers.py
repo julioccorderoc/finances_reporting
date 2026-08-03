@@ -969,6 +969,60 @@ class TestTransfers:
 
         assert validate(seeded_db, "xcur-imbalanced") is False
 
+    def test_validate_accepts_the_drift_the_pairing_rule_admits(
+        self, seeded_db: sqlite3.Connection
+    ):
+        """A pair admitted at the 2% ratio must not then be called invalid.
+
+        Counterparty rounding means a P2P sell and its deposit rarely
+        cancel to the cent — 21 of the ledger's 97 cross-currency
+        transfers miss by more than that. Judging them against a fixed
+        number of cents would contradict the rule that created them.
+        """
+        self._cross_currency_pair(
+            seeded_db,
+            transfer_id="xcur-within-ratio",
+            usdt_amount=Decimal("-30.22"),
+            usdt_rate=Decimal("664.45"),
+            ves_amount=Decimal("20000"),  # → 30.10 USD, 0.4% off
+            ves_rate=None,
+        )
+
+        assert validate(seeded_db, "xcur-within-ratio") is True
+
+    def test_validate_cross_currency_ratio_is_configurable(
+        self, seeded_db: sqlite3.Connection
+    ):
+        self._cross_currency_pair(
+            seeded_db,
+            transfer_id="xcur-tight",
+            usdt_amount=Decimal("-30.22"),
+            usdt_rate=Decimal("664.45"),
+            ves_amount=Decimal("20000"),
+            ves_rate=None,
+        )
+
+        assert (
+            validate(
+                seeded_db,
+                "xcur-tight",
+                cross_currency_tolerance_ratio=Decimal("0.001"),
+            )
+            is False
+        )
+
+    def test_pairing_and_validate_share_one_tolerance(self):
+        """Two constants drifted once; they are now one."""
+        from finances.domain.transfers import (
+            DEFAULT_AMOUNT_TOLERANCE_RATIO,
+            BankAnchoredP2pPairing,
+        )
+        import inspect
+
+        signature = inspect.signature(BankAnchoredP2pPairing.__init__)
+        default = signature.parameters["amount_tolerance_ratio"].default
+        assert default is DEFAULT_AMOUNT_TOLERANCE_RATIO
+
     def test_validate_rejects_an_inverted_rate(
         self, seeded_db: sqlite3.Connection
     ):
