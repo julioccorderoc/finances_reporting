@@ -15,7 +15,7 @@ import sqlite3
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, NamedTuple
 
 from pydantic import BaseModel, ConfigDict
 
@@ -132,6 +132,22 @@ def _decimal_text(value: Decimal) -> str:
 
 def _iso(value: datetime) -> str:
     return value.isoformat()
+
+
+def _parse_iso_datetime(value: Any) -> datetime:
+    """Parse an ISO-8601 timestamp from sqlite back into a datetime.
+
+    sqlite stores ``occurred_at`` as text; callers always write it via
+    :func:`datetime.isoformat`, so ``fromisoformat`` round-trips cleanly
+    (Python >= 3.11 handles offsets with a colon or ``Z``). Module-level so
+    both pairing strategies share one parser rather than one convention.
+    """
+    if isinstance(value, datetime):
+        return value
+    text = str(value)
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    return datetime.fromisoformat(text)
 
 
 # Treated as 1:1 with the dollar (ADR-015). Stablecoins depeg by
@@ -753,18 +769,9 @@ class BankAnchoredP2pPairing:
 
     @staticmethod
     def _parse_datetime(value: Any) -> datetime:
-        """Parse an ISO-8601 timestamp from sqlite back into datetime.
+        """See :func:`_parse_iso_datetime`."""
+        return _parse_iso_datetime(value)
 
-        sqlite stores ``occurred_at`` as text; callers always write it
-        via :func:`datetime.isoformat`, so ``fromisoformat`` round-trips
-        cleanly (Python ≥ 3.11 handles offsets with colon or ``Z``).
-        """
-        if isinstance(value, datetime):
-            return value
-        text = str(value)
-        if text.endswith("Z"):
-            text = text[:-1] + "+00:00"
-        return datetime.fromisoformat(text)
 
 
 # ---------------------------------------------------------------------------
@@ -798,6 +805,28 @@ SQL_UNPAIRED_CONVERT_PAIRS = """
      ORDER BY f.id
 """
 
+# Convert legs the order-id join could not claim. The legacy backfill hashed
+# each half separately, so these carry four distinct keys for two real events
+# and no join on ``source_ref`` will ever match them — nor should one be
+# invented, since ``source_ref`` is the dedup key (rule-010).
+SQL_UNPAIRED_CONVERT_LEGS = """
+    SELECT id, account_id, occurred_at, amount, currency
+      FROM transactions
+     WHERE source_ref LIKE 'convert:%'
+       AND transfer_id IS NULL
+     ORDER BY occurred_at ASC, id ASC
+"""
+
+
+class _ConvertLeg(NamedTuple):
+    """One unpaired convert leg, normalised for same-day matching."""
+
+    id: int
+    account_id: int
+    day: date
+    amount: Decimal
+    currency: str
+
 
 class SameAccountConvertPairing:
     """Strategy: pair the two halves of a Binance convert.
@@ -813,22 +842,43 @@ class SameAccountConvertPairing:
     that, and is idempotent: a pair that already shares a ``transfer_id`` is
     not selected.
 
-    Matching is by the order id both legs carry in their ``source_ref``, not
-    by amount or date — an exact identity, so there is nothing to get wrong.
-    Legs whose halves were hashed separately by the legacy backfill have no
-    shared id and are deliberately left alone; ``finances doctor`` names them
-    under ``convert_leg_without_counterpart``, and only the owner can say
-    which orphan belongs to which.
+    Matching runs in two tiers.
+
+    **By order id.** Both legs carry it in their ``source_ref`` — an exact
+    identity, so there is nothing to get wrong, and it covers every
+    conversion the live API has produced.
+
+    **By same-day shape.** The legacy backfill hashed each half separately,
+    so those legs carry four distinct keys for two real events and no join on
+    ``source_ref`` can ever match them. Inventing a shared key is not an
+    option: ``source_ref`` is the dedup key (rule-010). They are still
+    recoverable from their shape — same account, same calendar day, opposite
+    sign, two *different* currencies, amounts agreeing within
+    ``legacy_tolerance_ratio``. A pair meeting all five is one conversion;
+    there is no second reading of it.
+
+    Where several candidates compete, the tightest fit is claimed first and
+    each leg is consumed once. That asserts only that N outgoing legs
+    consumed N incoming ones — not that any individual pair is the true
+    counterparty — which is the same claim, and the same limit, that
+    ADR-002's 2026-07-26 amendment settled on for P2P. Anything left over
+    stays unpaired and keeps surfacing in ``finances doctor``.
     """
 
     name: str = "same_account_convert_pairing"
 
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        legacy_tolerance_ratio: Decimal = Decimal("0.02"),
+    ) -> None:
         self._conn = conn
+        self._legacy_tolerance_ratio = legacy_tolerance_ratio
 
     def match(self) -> list[MatchProposal]:
         rows = self._conn.execute(SQL_UNPAIRED_CONVERT_PAIRS).fetchall()
-        return [
+        proposals = [
             MatchProposal(
                 strategy=self.name,
                 details={
@@ -839,12 +889,83 @@ class SameAccountConvertPairing:
             for row in rows
         ]
 
+        claimed = {
+            leg_id
+            for proposal in proposals
+            for leg_id in (
+                proposal.details["from_transaction_id"],
+                proposal.details["to_transaction_id"],
+            )
+        }
+        proposals.extend(self._match_legacy_halves(claimed))
+        return proposals
+
     def apply(self, proposal: MatchProposal) -> None:
         create_transfer(
             self._conn,
             anchor_transaction_id=proposal.details["from_transaction_id"],
             counterpart_transaction_id=proposal.details["to_transaction_id"],
         )
+
+    # -- legacy tier -------------------------------------------------------
+
+    def _match_legacy_halves(self, claimed: set[int]) -> list[MatchProposal]:
+        """Pair leftover legs on shape when no shared order id exists."""
+        legs = [
+            _ConvertLeg(
+                id=int(row["id"]),
+                account_id=int(row["account_id"]),
+                day=_parse_iso_datetime(row["occurred_at"]).date(),
+                amount=_to_decimal(row["amount"]),
+                currency=str(row["currency"]).upper(),
+            )
+            for row in self._conn.execute(SQL_UNPAIRED_CONVERT_LEGS).fetchall()
+            if int(row["id"]) not in claimed
+        ]
+
+        scored: list[tuple[Decimal, int, int]] = []
+        for out_leg in legs:
+            if out_leg.amount >= 0:
+                continue
+            magnitude = abs(out_leg.amount)
+            if magnitude == 0:
+                continue
+            for in_leg in legs:
+                if in_leg.amount <= 0:
+                    continue
+                if in_leg.account_id != out_leg.account_id:
+                    continue
+                if in_leg.day != out_leg.day:
+                    continue
+                # Same account *and* same currency is the shape that moves
+                # nothing; create_transfer rejects it, so never propose it.
+                if in_leg.currency == out_leg.currency:
+                    continue
+                drift = abs(magnitude - abs(in_leg.amount)) / magnitude
+                if drift > self._legacy_tolerance_ratio:
+                    continue
+                scored.append((drift, out_leg.id, in_leg.id))
+
+        # Tightest fit first, then ids — a total order, so identical inputs
+        # always produce an identical assignment and the pass is reproducible.
+        scored.sort()
+
+        proposals: list[MatchProposal] = []
+        for _drift, out_id, in_id in scored:
+            if out_id in claimed or in_id in claimed:
+                continue
+            claimed.add(out_id)
+            claimed.add(in_id)
+            proposals.append(
+                MatchProposal(
+                    strategy=self.name,
+                    details={
+                        "from_transaction_id": out_id,
+                        "to_transaction_id": in_id,
+                    },
+                )
+            )
+        return proposals
 
 
 __all__ = [
