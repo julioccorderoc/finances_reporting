@@ -995,6 +995,13 @@ def apply_legacy_category_annotations(
     return mapped
 
 
+def _amount_or_none(value: object) -> Decimal | None:
+    """Coerce a stored TEXT amount to Decimal, never through float."""
+    if value is None:
+        return None
+    return value if isinstance(value, Decimal) else Decimal(str(value))
+
+
 def apply_category_rules(conn: sqlite3.Connection) -> int:
     """Run the seeded categorization engine across every row with
     ``category_id IS NULL``. Per rule-006 this is the one sanctioned
@@ -1003,7 +1010,7 @@ def apply_category_rules(conn: sqlite3.Connection) -> int:
     get the rule's category_id and ``needs_review=0``; unmatched rows
     stay exactly as they were."""
     rows = conn.execute(
-        "SELECT id, description, source, account_id "
+        "SELECT id, description, source, account_id, amount "
         "FROM transactions WHERE category_id IS NULL"
     ).fetchall()
     categorized = 0
@@ -1014,6 +1021,9 @@ def apply_category_rules(conn: sqlite3.Connection) -> int:
                 description=row["description"],
                 source=row["source"],
                 account_id=row["account_id"],
+                # Amount-scoped rules (migration 017) need this; a rule
+                # without bounds ignores it entirely.
+                amount=_amount_or_none(row["amount"]),
             ),
         )
         if match is None:

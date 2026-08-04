@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from decimal import Decimal
 from functools import lru_cache
 
 from pydantic import BaseModel, ConfigDict
@@ -35,6 +36,13 @@ class CategorizationRequest(BaseModel):
     description: str | None
     source: str
     account_id: int | None = None
+    amount: Decimal | None = None
+    """Signed transaction amount, when the caller has it.
+
+    Only needed by amount-scoped rules (``min_amount`` / ``max_amount``).
+    A caller that cannot supply it simply never matches those rules —
+    silently skipping is the safe direction, since matching a threshold
+    rule without knowing the amount would be guessing."""
 
 
 class CategoryRule(BaseModel):
@@ -49,6 +57,15 @@ class CategoryRule(BaseModel):
     account_id: int | None = None
     priority: int = 100
     active: bool = True
+    min_amount: Decimal | None = None
+    max_amount: Decimal | None = None
+    """Inclusive bounds on ``abs(amount)``, in the row's own currency.
+
+    ADR-006 gave the chain an open priority order but only ever let a rule
+    look at description text. The owner's salary rule is "a Binance deposit
+    over $1,000", and the description is identical either way, so it could
+    not be written down at all. Absolute value is used so a bound reads the
+    same for an inflow as for an outflow."""
 
 
 class RuleMatch(BaseModel):
@@ -78,7 +95,16 @@ def _row_to_rule(row: sqlite3.Row) -> CategoryRule:
         account_id=row["account_id"],
         priority=row["priority"],
         active=bool(row["active"]),
+        min_amount=_opt_decimal(row["min_amount"]),
+        max_amount=_opt_decimal(row["max_amount"]),
     )
+
+
+def _opt_decimal(value: object) -> Decimal | None:
+    """Coerce a nullable TEXT bound to Decimal without touching float."""
+    if value is None:
+        return None
+    return value if isinstance(value, Decimal) else Decimal(str(value))
 
 
 def load_rules(
@@ -86,13 +112,36 @@ def load_rules(
 ) -> list[CategoryRule]:
     """Return every rule in priority order (lowest `priority` first)."""
     query = (
-        "SELECT id, pattern, category_id, source, account_id, priority, active "
+        "SELECT id, pattern, category_id, source, account_id, priority, active, "
+        "min_amount, max_amount "
         "FROM category_rules "
     )
     if not include_inactive:
         query += "WHERE active = 1 "
     query += "ORDER BY priority ASC, id ASC"
     return [_row_to_rule(r) for r in conn.execute(query).fetchall()]
+
+
+def _amount_in_bounds(rule: CategoryRule, amount: Decimal | None) -> bool:
+    """Whether ``amount`` satisfies a rule's optional bounds.
+
+    Compared on absolute value, so a bound reads the same for an inflow as
+    for an outflow. A rule with no bounds always passes — that is every rule
+    written before migration 017.
+
+    A bounded rule against a request carrying no amount **fails**. Skipping
+    is the safe direction: matching a threshold without knowing the number
+    would be a guess, and the caller that cannot supply an amount is
+    precisely the caller that cannot know.
+    """
+    if rule.min_amount is None and rule.max_amount is None:
+        return True
+    if amount is None:
+        return False
+    magnitude = abs(amount)
+    if rule.min_amount is not None and magnitude < rule.min_amount:
+        return False
+    return not (rule.max_amount is not None and magnitude > rule.max_amount)
 
 
 def suggest(
@@ -125,7 +174,8 @@ def suggest(
     # the scope filtering; we do the regex matching in Python.
     rows = conn.execute(
         """
-        SELECT id, pattern, category_id, source, account_id, priority, active
+        SELECT id, pattern, category_id, source, account_id, priority, active,
+               min_amount, max_amount
         FROM category_rules
         WHERE active = 1
           AND (source IS NULL OR source = ?)
@@ -141,6 +191,8 @@ def suggest(
 
     for row in rows:
         rule = _row_to_rule(row)
+        if not _amount_in_bounds(rule, request.amount):
+            continue
         if _compile(rule.pattern).search(description):
             assert rule.id is not None
             return RuleMatch(

@@ -418,6 +418,7 @@ CHECKS: tuple[IntegrityCheck, ...] = (
             SELECT id FROM transactions
              WHERE category_id IS NULL
                AND needs_review = 0
+               AND parked = 0
                AND kind NOT IN ('transfer', 'adjustment')
              ORDER BY id
         """,

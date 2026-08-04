@@ -206,6 +206,94 @@ def reconcile_converts(
         raise typer.Exit(code=1)
 
 
+@reconcile_app.command("categories")
+def reconcile_categories(
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Report what would be categorised, then roll back."
+    ),
+) -> None:
+    """Apply the category rules to every still-uncategorised row (rule-006).
+
+    The rules engine runs during backfill but not during live ingest, so a
+    rule added after a row was imported never reaches it. This sweeps.
+
+    Only fills blanks — a category already set, by a rule or by hand, is
+    never overwritten.
+    """
+    from finances.migration.backfill import apply_category_rules
+
+    conn = get_connection(DB_PATH)
+    apply_migrations(conn)
+    try:
+        before = conn.execute(
+            "SELECT COUNT(*) FROM transactions WHERE category_id IS NULL "
+            "AND kind IN ('income', 'expense')"
+        ).fetchone()[0]
+        conn.execute("BEGIN")
+        try:
+            categorized = apply_category_rules(conn)
+            if dry_run:
+                conn.execute("ROLLBACK")
+            else:
+                conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+    finally:
+        conn.close()
+
+    suffix = " (dry run — rolled back)" if dry_run else ""
+    typer.echo(
+        f"categorised {categorized} row(s); {before} income/expense rows "
+        f"were uncategorised{suffix}"
+    )
+
+
+@reconcile_app.command("park")
+def reconcile_park(
+    before: str = typer.Option(
+        ...,
+        "--before",
+        help="Park uncategorised income/expense rows dated before this YYYY-MM-DD.",
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Report what would be parked, then roll back."
+    ),
+) -> None:
+    """Defer a period you have decided not to triage.
+
+    Parking is durable and survives re-ingest. It changes no amount and no
+    balance — it only answers "do you want to categorise this?" with no, so
+    the rows stop appearing in the queue and in `finances doctor`.
+    """
+    from finances.domain.triage_admin import park_before
+
+    try:
+        cutoff = datetime.strptime(before, "%Y-%m-%d").replace(tzinfo=CARACAS_TZ)
+    except ValueError:
+        typer.echo(f"error: --before {before!r} is not a YYYY-MM-DD date", err=True)
+        raise typer.Exit(code=2) from None
+
+    conn = get_connection(DB_PATH)
+    apply_migrations(conn)
+    try:
+        conn.execute("BEGIN")
+        try:
+            parked = park_before(conn, before=cutoff)
+            if dry_run:
+                conn.execute("ROLLBACK")
+            else:
+                conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+    finally:
+        conn.close()
+
+    suffix = " (dry run — rolled back)" if dry_run else ""
+    typer.echo(f"parked {parked} row(s) dated before {before}{suffix}")
+
+
 @reconcile_app.command("balances")
 def reconcile_balances(
     account: str = typer.Option(..., "--account", help="Account name, e.g. 'Binance Spot'."),
