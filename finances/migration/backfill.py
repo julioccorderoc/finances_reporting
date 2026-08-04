@@ -1010,8 +1010,14 @@ def apply_category_rules(conn: sqlite3.Connection, *, commit: bool = True) -> in
     get the rule's category_id and ``needs_review=0``; unmatched rows
     stay exactly as they were."""
     rows = conn.execute(
+        # kind is filtered here, not left to the rules: rule-006 says
+        # transfers are not categorised at all, and an Earn subscription —
+        # a transfer whose description contains the word "subscription" —
+        # otherwise matches the Subscriptions rule, which is about streaming
+        # services. Adjustments are excluded for the same reason (ADR-018).
         "SELECT id, description, source, account_id, amount "
-        "FROM transactions WHERE category_id IS NULL"
+        "FROM transactions WHERE category_id IS NULL "
+        "AND kind IN ('income', 'expense')"
     ).fetchall()
     categorized = 0
     for row in rows:

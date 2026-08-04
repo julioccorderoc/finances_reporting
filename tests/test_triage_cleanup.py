@@ -259,3 +259,34 @@ def test_apply_category_rules_can_leave_the_transaction_open(spot):
 
     assert categorized == 1
     assert txn_repo.get_by_id(conn, txn_id).category_id is None
+
+
+def test_the_rules_sweep_never_categorises_a_transfer(spot):
+    """rule-006: transfers are not categorised, so rules must not touch them.
+
+    An Earn subscription is a transfer whose description contains the word
+    "subscription", which matched the Subscriptions rule — the streaming
+    kind. 38 transfer legs on the live ledger were filed as an expense
+    category they have nothing to do with. The word collision is the trigger;
+    sweeping transfers at all is the defect.
+    """
+    from finances.migration.backfill import apply_category_rules
+
+    conn, account = spot
+    conn.execute(
+        "INSERT INTO category_rules (pattern, category_id, source, priority, active) "
+        "VALUES ('subscription', ?, 'binance', 20, 1)",
+        (_category(conn, "Subscriptions"),),
+    )
+    leg = _row(
+        conn,
+        account,
+        amount="-750",
+        description="Binance Earn subscription — 750 USDT into Earn (order 1)",
+        ref="earn-subscribe:1:from",
+        kind=TransactionKind.TRANSFER,
+    )
+
+    apply_category_rules(conn)
+
+    assert txn_repo.get_by_id(conn, leg).category_id is None
