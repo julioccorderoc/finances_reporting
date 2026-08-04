@@ -133,7 +133,8 @@ def test_an_adjustment_is_not_income(spot):
     )
     after = consolidated_usd.build_report(conn)
 
-    assert after.grand_total_usd == before.grand_total_usd
+    assert after.total_usd == before.total_usd
+    assert len(after.rows) == len(before.rows)
 
 
 def test_a_matching_position_is_left_alone(spot):

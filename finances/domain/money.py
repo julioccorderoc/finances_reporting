@@ -64,6 +64,7 @@ MOVEMENT_CATEGORY_KIND = TransactionKind.TRANSFER
 # the rows that are movement but could never be paired.
 SQL_NOT_CURRENCY_MOVEMENT = """
     kind <> 'transfer'
+    AND kind <> 'adjustment'
     AND (
         category_id IS NULL
         OR category_id NOT IN (SELECT id FROM categories WHERE kind = 'transfer')

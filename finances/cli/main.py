@@ -206,6 +206,81 @@ def reconcile_converts(
         raise typer.Exit(code=1)
 
 
+@reconcile_app.command("balances")
+def reconcile_balances(
+    account: str = typer.Option(..., "--account", help="Account name, e.g. 'Binance Spot'."),
+    currency: str = typer.Option(..., "--currency", help="Asset, e.g. USDT."),
+    actual: str = typer.Option(
+        ...,
+        "--actual",
+        help="The balance the custodian reports for this position, right now.",
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show the adjustment, then roll back."
+    ),
+) -> None:
+    """Bring one position to the balance its custodian reports (ADR-018).
+
+    For a gap the ledger can no longer explain because the source history is
+    gone — Binance serves internal transfers for six months only. Writes one
+    ``kind='adjustment'`` row carrying the difference, dated today. Balances
+    include it; income and expense never do.
+
+    Do NOT use this for a gap a pending ingest would close: adjusting
+    un-synced interest double-counts it the moment the rows arrive. Run
+    ``finances ingest binance`` first, then reconcile what is left.
+
+    The custodian figure is yours to supply. Reading it from the API would
+    make the ledger agree with the API by construction.
+    """
+    from finances.db.repos import accounts as accounts_repo
+    from finances.domain.reconciliation_adjustments import record_adjustment
+
+    try:
+        actual_amount = Decimal(actual)
+    except InvalidOperation:
+        typer.echo(f"error: --actual {actual!r} is not a number", err=True)
+        raise typer.Exit(code=2) from None
+
+    conn = get_connection(DB_PATH)
+    apply_migrations(conn)
+    try:
+        target = accounts_repo.get_by_name(conn, account)
+        if target is None or target.id is None:
+            typer.echo(f"error: no account named {account!r}", err=True)
+            raise typer.Exit(code=2)
+
+        conn.execute("BEGIN")
+        try:
+            result = record_adjustment(
+                conn,
+                account_id=target.id,
+                currency=currency,
+                actual=actual_amount,
+                occurred_at=datetime.now(tz=CARACAS_TZ),
+            )
+            if dry_run:
+                conn.execute("ROLLBACK")
+            else:
+                conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+    finally:
+        conn.close()
+
+    if result is None:
+        typer.echo(f"{account} {currency.upper()}: already matches — nothing written")
+        return
+
+    suffix = " (dry run — rolled back)" if dry_run else ""
+    typer.echo(
+        f"{account} {result.currency}: ledger {result.ledger_balance:f} → "
+        f"custodian {result.actual_balance:f} "
+        f"(adjustment {result.delta:+f}){suffix}"
+    )
+
+
 @ingest_app.command("binance")
 def ingest_binance(
     since: datetime | None = typer.Option(
