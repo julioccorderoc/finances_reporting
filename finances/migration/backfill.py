@@ -1002,7 +1002,7 @@ def _amount_or_none(value: object) -> Decimal | None:
     return value if isinstance(value, Decimal) else Decimal(str(value))
 
 
-def apply_category_rules(conn: sqlite3.Connection) -> int:
+def apply_category_rules(conn: sqlite3.Connection, *, commit: bool = True) -> int:
     """Run the seeded categorization engine across every row with
     ``category_id IS NULL``. Per rule-006 this is the one sanctioned
     place for the engine to stamp ``category_id`` during backfill;
@@ -1034,7 +1034,12 @@ def apply_category_rules(conn: sqlite3.Connection) -> int:
             (match.category_id, int(row["id"])),
         )
         categorized += 1
-    conn.commit()
+    # ``commit=False`` lets a caller that opened its own transaction decide
+    # the outcome — without it, `finances reconcile categories --dry-run`
+    # had its transaction ended here and could not roll back, so a dry run
+    # wrote. Backfill keeps the committing default it has always had.
+    if commit:
+        conn.commit()
     return categorized
 
 

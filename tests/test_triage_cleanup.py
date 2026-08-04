@@ -227,3 +227,35 @@ def test_doctor_stops_counting_parked_rows_as_outstanding(spot):
 
     after = integrity.run_checks(conn)
     assert not any(f.check == "uncategorized_not_flagged" for f in after.findings)
+
+
+# ---------------------------------------------------------------------------
+# --dry-run must not write. It did.
+# ---------------------------------------------------------------------------
+
+
+def test_apply_category_rules_can_leave_the_transaction_open(spot):
+    """A caller managing its own transaction must be able to roll back.
+
+    apply_category_rules() committed unconditionally, so the --dry-run path
+    of `finances reconcile categories` had its transaction ended underneath
+    it: the ROLLBACK then raised "no transaction is active" and the writes
+    were already durable. A dry run that writes is worse than no dry run.
+    """
+    from finances.migration.backfill import apply_category_rules
+
+    conn, account = spot
+    rule_target = _category(conn, "Internal Transfer")
+    conn.execute(
+        "INSERT INTO category_rules (pattern, category_id, source, priority, active) "
+        "VALUES ('WIDGET', ?, 'binance', 20, 1)",
+        (rule_target,),
+    )
+    txn_id = _row(conn, account, amount="-10", description="WIDGET purchase", ref="z")
+
+    conn.execute("BEGIN")
+    categorized = apply_category_rules(conn, commit=False)
+    conn.execute("ROLLBACK")
+
+    assert categorized == 1
+    assert txn_repo.get_by_id(conn, txn_id).category_id is None

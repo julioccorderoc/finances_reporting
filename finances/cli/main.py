@@ -231,7 +231,10 @@ def reconcile_categories(
         ).fetchone()[0]
         conn.execute("BEGIN")
         try:
-            categorized = apply_category_rules(conn)
+            # commit=False: this command owns the transaction, so --dry-run
+            # can actually roll back. Without it the sweep committed and the
+            # dry run wrote.
+            categorized = apply_category_rules(conn, commit=False)
             if dry_run:
                 conn.execute("ROLLBACK")
             else:
