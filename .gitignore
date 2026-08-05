@@ -16,6 +16,7 @@ wheels/
 # local files
 inputs/
 data/
+.playwright-mcp/
 
 # DB backups + archived pre-revival working artifacts (root cleanup 2026-07-11)
 backups/
