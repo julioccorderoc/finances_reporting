@@ -384,14 +384,14 @@ class TestIngestCsvHappyPath:
         [txn] = txn_repo.list_by_account(seeded_db, account.id)
         assert txn.currency == "VES"
 
-    def test_needs_review_true_when_no_categorizer(
+    def test_needs_review_true_when_no_rule_matches(
         self, tmp_path: Path, seeded_db: sqlite3.Connection
     ) -> None:
         from finances.ingest.provincial import ingest_csv
 
         csv_path = _write_csv(
             tmp_path,
-            [_HEADER, "19/04/2026;COM. PAGO MOVIL;-14,4;8.240,23"],
+            [_HEADER, "19/04/2026;ZZ UNMATCHABLE MEMO 999;-14,4;8.240,23"],
         )
 
         ingest_csv(seeded_db, csv_path)
@@ -474,6 +474,95 @@ class TestCategorizerHook:
         unmatched = txns["DR OB V07372929 191NAC.C"]
         assert unmatched.category_id is None
         assert unmatched.needs_review is True
+
+
+class TestDefaultRulesEngine:
+    """With no explicit ``categorizer``, live ingest runs the DB rules engine.
+
+    The hook shipped in EPIC-008 waiting for EPIC-004, but no production
+    caller (CLI, update ritual, web upload) was ever wired — every
+    commission since the backfill landed uncategorised (2026-08-04).
+    """
+
+    def test_db_rules_categorize_without_explicit_categorizer(
+        self, tmp_path: Path, seeded_db: sqlite3.Connection
+    ) -> None:
+        from finances.db.repos import categories as categories_repo
+        from finances.ingest.provincial import ingest_csv
+
+        fees = categories_repo.get_by_name(seeded_db, TransactionKind.EXPENSE, "Fees")
+        assert fees is not None
+
+        csv_path = _write_csv(
+            tmp_path,
+            [_HEADER, "19/04/2026;COM. PAGO MOVIL;-14,4;8.240,23"],
+        )
+
+        ingest_csv(seeded_db, csv_path)
+
+        account = accounts_repo.get_by_name(seeded_db, "Provincial Bolivares")
+        assert account is not None and account.id is not None
+        [txn] = txn_repo.list_by_account(seeded_db, account.id)
+        assert txn.category_id == fees.id
+        assert txn.needs_review is False
+
+    def test_reingest_never_clobbers_manual_category(
+        self, tmp_path: Path, seeded_db: sqlite3.Connection
+    ) -> None:
+        """A hand-set category survives re-ingest even when a rule matches."""
+        from finances.db.repos import categories as categories_repo
+        from finances.ingest.provincial import ingest_csv
+
+        health = categories_repo.get_by_name(
+            seeded_db, TransactionKind.EXPENSE, "Health"
+        )
+        assert health is not None and health.id is not None
+
+        csv_path = _write_csv(
+            tmp_path,
+            [_HEADER, "19/04/2026;COM. PAGO MOVIL;-14,4;8.240,23"],
+        )
+        ingest_csv(seeded_db, csv_path)
+
+        account = accounts_repo.get_by_name(seeded_db, "Provincial Bolivares")
+        assert account is not None and account.id is not None
+        [txn] = txn_repo.list_by_account(seeded_db, account.id)
+        seeded_db.execute(
+            "UPDATE transactions SET category_id = ? WHERE id = ?",
+            (health.id, txn.id),
+        )
+
+        ingest_csv(seeded_db, csv_path)
+
+        [txn] = txn_repo.list_by_account(seeded_db, account.id)
+        assert txn.category_id == health.id
+
+    def test_paired_transfer_row_gains_no_category_on_reingest(
+        self, tmp_path: Path, seeded_db: sqlite3.Connection
+    ) -> None:
+        """A rules match must not decorate a row pairing turned into a transfer."""
+        from finances.ingest.provincial import ingest_csv
+
+        csv_path = _write_csv(
+            tmp_path,
+            [_HEADER, "19/04/2026;COM. PAGO MOVIL;-14,4;8.240,23"],
+        )
+        ingest_csv(seeded_db, csv_path)
+
+        account = accounts_repo.get_by_name(seeded_db, "Provincial Bolivares")
+        assert account is not None and account.id is not None
+        [txn] = txn_repo.list_by_account(seeded_db, account.id)
+        seeded_db.execute(
+            "UPDATE transactions SET kind = 'transfer', transfer_id = 'tr-x', "
+            "category_id = NULL WHERE id = ?",
+            (txn.id,),
+        )
+
+        ingest_csv(seeded_db, csv_path)
+
+        [txn] = txn_repo.list_by_account(seeded_db, account.id)
+        assert txn.kind is TransactionKind.TRANSFER
+        assert txn.category_id is None
 
 
 # ---------------------------------------------------------------------------
