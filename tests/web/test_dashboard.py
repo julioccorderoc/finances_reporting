@@ -550,122 +550,119 @@ def test_recent_activity_uses_canonical_card_partial(
 
 
 # ---------------------------------------------------------------------------
-# 6-month spend trend.
+# Monthly flows chart (income vs expenses, the dashboard's main object).
 # ---------------------------------------------------------------------------
 
 
-def test_spend_trend_returns_expected_months(
+def test_monthly_flows_shape_and_labels(
     seeded_web_db: sqlite3.Connection,
     web_client_factory,
 ) -> None:
     client = web_client_factory()
-    resp = client.get("/api/dashboard/spend-trend")
+    resp = client.get("/api/dashboard/flows")
     assert resp.status_code == 200
     payload = resp.json()
-    # 6 months total.
     assert len(payload["months"]) == 6
-    # fallback shadow series matches the months count.
-    assert len(payload["fallback_total_per_month"]) == 6
-    # each series carries one value per month.
-    for s in payload["series"]:
-        assert len(s["values"]) == 6
+    assert len(payload["labels"]) == 6
+    assert len(payload["income_usd"]) == 6
+    assert len(payload["expense_usd"]) == 6
+    # Human-readable labels ("Aug 2026"), aligned with the YYYY-MM keys.
+    for key, label in zip(payload["months"], payload["labels"], strict=True):
+        year, month = key.split("-")
+        assert label.endswith(year)
+        assert not label.startswith(year)  # not the raw YYYY-MM
 
 
-def test_spend_trend_top_5_plus_other(
+def test_monthly_flows_totals_keep_sign_convention(
     web_db: sqlite3.Connection,
     web_client_factory,
 ) -> None:
-    """7 distinct expense categories used in the window → top-5 + 'Other' = 6 series."""
+    """Income positive, expenses NEGATIVE (project sign convention)."""
     today = datetime.now(tz=UTC)
     cash = accounts_repo.insert(
         web_db,
         Account(name="Cash USD", kind=AccountKind.CASH, currency="USD"),
     )
-
-    # Use 7 seeded categories with distinct totals (1..7) so top-5 is unambiguous.
-    cat_names = [
-        "Groceries",
-        "Leisure",
-        "Transport",
-        "Health",
-        "Subscriptions",
-        "Utilities",
-        "Personal Care",
-    ]
-    for idx, name in enumerate(cat_names, start=1):
-        cat = categories_repo.get_by_name(web_db, TransactionKind.EXPENSE, name)
-        assert cat is not None, f"seed category missing: {name}"
-        transactions_repo.insert(
-            web_db,
-            Transaction(
-                account_id=cash.id,
-                occurred_at=today,
-                kind=TransactionKind.EXPENSE,
-                amount=Decimal(f"-{idx * 10}.00"),
-                currency="USD",
-                description=f"probe-{name}",
-                category_id=cat.id,
-                source="cash_cli",
-                source_ref=f"probe-{name}",
-            ),
-        )
-
-    client = web_client_factory()
-    resp = client.get("/api/dashboard/spend-trend")
-    payload = resp.json()
-    series_names = [s["category"] for s in payload["series"]]
-    assert len(series_names) == 6
-    assert "Other" in series_names
-
-
-def test_spend_trend_fallback_shadow_series(
-    web_db: sqlite3.Connection,
-    web_client_factory,
-) -> None:
-    today = datetime.now(tz=UTC)
-    cur_month_dt = today.replace(day=1, hour=12, minute=0, second=0, microsecond=0)
-    cur_month = cur_month_dt.strftime("%Y-%m")
-
-    provincial = accounts_repo.insert(
-        web_db,
-        Account(name="Provincial", kind=AccountKind.BANK, currency="VES"),
-    )
     food = categories_repo.get_by_name(web_db, TransactionKind.EXPENSE, "Groceries")
     assert food is not None
-
-    rates_repo.upsert(
+    transactions_repo.insert(
         web_db,
-        Rate(
-            as_of_date=cur_month_dt.date(),
-            base="USD",
-            quote="VES",
-            rate=Decimal("100.0"),
-            source="bcv",
+        Transaction(
+            account_id=cash.id,
+            occurred_at=today,
+            kind=TransactionKind.INCOME,
+            amount=Decimal("100.00"),
+            currency="USD",
+            description="flows income probe",
+            source="cash_cli",
+            source_ref="flows-inc-1",
         ),
     )
     transactions_repo.insert(
         web_db,
         Transaction(
-            account_id=provincial.id,
-            occurred_at=cur_month_dt,
+            account_id=cash.id,
+            occurred_at=today,
             kind=TransactionKind.EXPENSE,
-            amount=Decimal("50000.00"),
-            currency="VES",
-            description="bcv only",
+            amount=Decimal("-40.00"),
+            currency="USD",
+            description="flows expense probe",
             category_id=food.id,
-            source="provincial",
-            source_ref="fb-1",
+            source="cash_cli",
+            source_ref="flows-exp-1",
         ),
     )
 
     client = web_client_factory()
-    resp = client.get("/api/dashboard/spend-trend")
-    payload = resp.json()
-    months = payload["months"]
-    fb = payload["fallback_total_per_month"]
-    idx = months.index(cur_month)
-    # 50000 VES / 100 = 500 USD fallback. Stored as Decimal-compatible str.
-    assert Decimal(fb[idx]) != Decimal("0")
+    payload = client.get("/api/dashboard/flows").json()
+    assert Decimal(payload["income_usd"][-1]) == Decimal("100.00")
+    assert Decimal(payload["expense_usd"][-1]) == Decimal("-40.00")
+
+
+def test_monthly_flows_ignore_transfers(
+    web_db: sqlite3.Connection,
+    web_client_factory,
+) -> None:
+    """Currency movement is not spending (domain/money.py)."""
+    today = datetime.now(tz=UTC)
+    cash = accounts_repo.insert(
+        web_db,
+        Account(name="Cash USD", kind=AccountKind.CASH, currency="USD"),
+    )
+    for amount, ref in ((Decimal("500.00"), "flows-tr-a"), (Decimal("-500.00"), "flows-tr-b")):
+        transactions_repo.insert(
+            web_db,
+            Transaction(
+                account_id=cash.id,
+                occurred_at=today,
+                kind=TransactionKind.TRANSFER,
+                amount=amount,
+                currency="USD",
+                description="flows transfer probe",
+                transfer_id="flows-tr-1",
+                source="cash_cli",
+                source_ref=ref,
+            ),
+        )
+
+    client = web_client_factory()
+    payload = client.get("/api/dashboard/flows").json()
+    assert all(Decimal(v) == 0 for v in payload["income_usd"])
+    assert all(Decimal(v) == 0 for v in payload["expense_usd"])
+
+
+def test_dashboard_page_leads_with_flows_chart(
+    seeded_web_db: sqlite3.Connection,
+    web_client_factory,
+) -> None:
+    """The flows chart is the dashboard's main object: right after the KPI
+    tiles, before the sync strip and recent activity."""
+    client = web_client_factory()
+    body = client.get("/").text
+    assert 'id="flows-chart"' in body
+    assert body.index('id="flows-chart"') < body.index('id="sync-status-strip"')
+    # The old stacked category chart is gone from the dashboard.
+    assert "spend-trend-chart" not in body
 
 
 # ---------------------------------------------------------------------------
