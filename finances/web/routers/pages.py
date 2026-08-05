@@ -30,8 +30,8 @@ from finances.web.services.accounts_view import build_account_cards
 from finances.web.services.category_stats import top_categories
 from finances.web.services.dashboard import (
     build_kpis,
+    build_monthly_flows,
     build_recent_activity,
-    build_spend_trend,
     build_sync_status,
 )
 from finances.web.services.monthly_view import (
@@ -130,7 +130,7 @@ def dashboard(
     kpis = build_kpis(conn, today=today)
     chips = build_sync_status(conn)
     recent = build_recent_activity(conn, limit=10)
-    trend = build_spend_trend(conn, today=today, months_back=6)
+    flows = build_monthly_flows(conn, today=today, months_back=6)
     templates = request.app.state.templates
     return templates.TemplateResponse(
         request,
@@ -140,7 +140,7 @@ def dashboard(
             "kpis": kpis,
             "chips": chips,
             "recent": recent,
-            "trend": trend,
+            "flows": flows,
         },
     )
 

@@ -26,10 +26,10 @@ from finances.web.routers._tx_filter_dep import filter_from_query
 from finances.web.services.accounts_view import AccountCard, build_account_cards
 from finances.web.services.dashboard import (
     KpiTiles,
-    SpendTrend,
+    MonthlyFlows,
     build_kpis,
+    build_monthly_flows,
     build_recent_activity,
-    build_spend_trend,
 )
 from finances.web.services.monthly_view import (
     MonthlyFilter,
@@ -195,13 +195,13 @@ def dashboard_recent(
     return build_recent_activity(conn, limit=10)
 
 
-@router.get("/dashboard/spend-trend", response_model=SpendTrend)
-def dashboard_spend_trend(
+@router.get("/dashboard/flows", response_model=MonthlyFlows)
+def dashboard_flows(
     conn: sqlite3.Connection = Depends(get_conn),
-) -> SpendTrend:
-    """Return the 6-month stacked-bar dataset for the spend chart."""
+) -> MonthlyFlows:
+    """Return the income-vs-expense grouped-bar dataset for the main chart."""
     today = datetime.now(tz=UTC).date()
-    return build_spend_trend(conn, today=today, months_back=6)
+    return build_monthly_flows(conn, today=today, months_back=6)
 
 
 # ---------------------------------------------------------------------------

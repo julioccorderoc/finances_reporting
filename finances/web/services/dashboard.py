@@ -1,7 +1,7 @@
 """Dashboard aggregation services (EPIC-023, Phase 2a).
 
 Composes existing reports/repos to build the four KPI tiles, the sync
-status strip, the recent-activity card list, and the 6-month spend-trend
+status strip, the recent-activity card list, and the monthly income-vs-expense
 chart data. Per rule-012 we never reimplement domain logic — every
 USD-equivalence call here ultimately routes through
 :func:`finances.domain.rates.resolve` (via :mod:`finances.reports.monthly`)
@@ -329,32 +329,30 @@ def build_recent_activity(
 
 
 # ---------------------------------------------------------------------------
-# 6-month spend trend stacked bar.
+# Monthly flows — income vs expenses, the dashboard's main chart.
 # ---------------------------------------------------------------------------
 
 
-class SpendSeries(BaseModel):
-    """One stacked-bar series: a category and its values across months."""
+class MonthlyFlows(BaseModel):
+    """Grouped-bar dataset: one income and one expense total per month.
 
-    model_config = ConfigDict(extra="forbid")
-
-    category: str
-    values: list[Decimal]
-
-
-class SpendTrend(BaseModel):
-    """6-month stacked-bar dataset."""
+    ``expense_usd`` keeps the ledger's sign convention (negative); the
+    template takes the magnitude for bar heights and shows the signed
+    figure in tooltips.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     months: list[str]
-    series: list[SpendSeries]
-    fallback_total_per_month: list[Decimal]
+    """``YYYY-MM`` keys, used for the drill-down link into /monthly."""
+    labels: list[str]
+    """Human-readable month labels ("Aug 2026"), aligned with ``months``."""
+    income_usd: list[Decimal]
+    expense_usd: list[Decimal]
 
 
 def _months_back_iter(today: date, months_back: int) -> list[str]:
     """Return ``months_back`` ``YYYY-MM`` labels ending with today's month."""
-    # Compute starting from ``today.year, today.month`` and walk back.
     months: list[tuple[int, int]] = []
     y, m = today.year, today.month
     for _ in range(months_back):
@@ -367,104 +365,54 @@ def _months_back_iter(today: date, months_back: int) -> list[str]:
     return [f"{yy:04d}-{mm:02d}" for (yy, mm) in months]
 
 
-_OTHER_BUCKET = "Other"
-
-# Rows with no category need a label of their own. Sharing "Other" with the
-# overflow bucket was harmless only while the inverted ranking kept
-# uncategorized spending out of the top five; once it ranks on magnitude it
-# lands there, gets a series from `top5` *and* a second one from the overflow
-# append, and the chart draws it twice — $8,701 double-counted on the live
-# ledger. `monthly_view` has always kept the two apart; this matches its
-# label so the two surfaces name the same bucket the same way.
-_UNCATEGORIZED_LABEL = "Uncategorized"
+def _month_label(key: str) -> str:
+    """``2026-08`` → ``Aug 2026``."""
+    y, m = key.split("-")
+    return f"{date(int(y), int(m), 1):%b} {y}"
 
 
-def build_spend_trend(
+def build_monthly_flows(
     conn: sqlite3.Connection,
     *,
     today: date,
     months_back: int = 6,
-) -> SpendTrend:
-    """Build the 6-month stacked-bar dataset.
+) -> MonthlyFlows:
+    """Total income and expense per month over the window, headline USD.
 
-    * Filter to ``kind == 'expense'``.
-    * Top 5 categories by total over the window become their own series;
-      the rest collapse into ``"Other"``.
-    * ``fallback_total_per_month`` is the BCV-mixed shadow series — the
-      sum of ``fallback_usd`` per month (one value per month).
+    Transfers never appear: ``monthly_report.build_report`` only emits
+    income/expense rows (currency movement is not spending, domain/money.py).
     """
     months = _months_back_iter(today, months_back)
     if not months:
-        return SpendTrend(months=[], series=[], fallback_total_per_month=[])
+        return MonthlyFlows(months=[], labels=[], income_usd=[], expense_usd=[])
 
-    since = months[0]
-    until = months[-1]
+    report = monthly_report.build_report(conn, since=months[0], until=months[-1])
 
-    report = monthly_report.build_report(conn, since=since, until=until)
-    expense_rows = [r for r in report.rows if r.kind == "expense"]
-
-    # Total per category over window.
-    cat_total: dict[str, Decimal] = {}
-    for r in expense_rows:
-        key = r.category_name or _UNCATEGORIZED_LABEL
-        cat_total[key] = cat_total.get(key, Decimal("0")) + r.total_usd
-
-    # Rank by magnitude, not by signed value. Expense totals are negative, so
-    # reverse-sorting them put the *least* negative first and the chart was
-    # built out of the cheapest categories — Fees at $3.26 displacing
-    # Purchases at $1,103. monthly_view has always ranked with abs(); this is
-    # the copy that drifted.
-    sorted_cats = sorted(
-        cat_total.items(),
-        key=lambda kv: (abs(kv[1]), kv[0]),
-        reverse=True,
-    )
-    top5 = [name for (name, _) in sorted_cats[:5]]
-    bucketed: set[str] = set(top5)
-
-    # Per-month per-category accumulation.
-    per_month: dict[str, dict[str, Decimal]] = {m: {} for m in months}
-    fallback_per_month: dict[str, Decimal] = {m: Decimal("0") for m in months}
-    for r in expense_rows:
-        if r.month not in per_month:
+    income: dict[str, Decimal] = {m: Decimal("0") for m in months}
+    expense: dict[str, Decimal] = {m: Decimal("0") for m in months}
+    for r in report.rows:
+        if r.month not in income:
             continue
-        cat = r.category_name or _UNCATEGORIZED_LABEL
-        bucket = cat if cat in bucketed else _OTHER_BUCKET
-        per_month[r.month][bucket] = (
-            per_month[r.month].get(bucket, Decimal("0")) + r.total_usd
-        )
-        fallback_per_month[r.month] += r.fallback_usd
+        if r.kind == "income":
+            income[r.month] += r.total_usd
+        elif r.kind == "expense":
+            expense[r.month] += r.total_usd
 
-    series_names = list(top5)
-    # The overflow series exists only if something actually overflowed. It
-    # can no longer collide with a named series, because every name in
-    # `top5` comes from a real category or the distinct uncategorized label.
-    if any(per_month[m].get(_OTHER_BUCKET, Decimal("0")) != 0 for m in months):
-        series_names.append(_OTHER_BUCKET)
-
-    series = [
-        SpendSeries(
-            category=name,
-            values=[per_month[m].get(name, Decimal("0")) for m in months],
-        )
-        for name in series_names
-    ]
-
-    return SpendTrend(
+    return MonthlyFlows(
         months=months,
-        series=series,
-        fallback_total_per_month=[fallback_per_month[m] for m in months],
+        labels=[_month_label(m) for m in months],
+        income_usd=[income[m] for m in months],
+        expense_usd=[expense[m] for m in months],
     )
 
 
 __all__ = [
     "KpiTile",
     "KpiTiles",
-    "SpendSeries",
-    "SpendTrend",
+    "MonthlyFlows",
     "SyncChip",
     "build_kpis",
     "build_recent_activity",
-    "build_spend_trend",
+    "build_monthly_flows",
     "build_sync_status",
 ]

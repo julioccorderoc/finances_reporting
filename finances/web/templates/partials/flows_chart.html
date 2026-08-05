@@ -1,0 +1,152 @@
+{# Income vs expenses — the dashboard's main chart.
+   Context: ``flows`` (services.dashboard.MonthlyFlows).
+
+   Two bars per month, grouped: income (blue) and expense (orange), both
+   drawn as magnitudes so the pair reads side by side; tooltips keep the
+   ledger's signed figures. Decimals are serialized as strings (tojson
+   cannot encode Decimal) and parsed with Number() below. The data-chart
+   attribute is single-quoted on purpose — a double-quoted attribute
+   truncates the JSON at the first embedded quote.
+#}
+{%- set _income_str = [] -%}
+{%- for v in flows.income_usd -%}
+  {%- set _ = _income_str.append(v|string) -%}
+{%- endfor -%}
+{%- set _expense_str = [] -%}
+{%- for v in flows.expense_usd -%}
+  {%- set _ = _expense_str.append(v|string) -%}
+{%- endfor -%}
+{%- set _payload = {
+  'months': flows.months,
+  'labels': flows.labels,
+  'income': _income_str,
+  'expense': _expense_str,
+} -%}
+
+<section aria-labelledby="flows-heading">
+  <header class="mb-2 flex items-baseline justify-between">
+    <h2 id="flows-heading" class="text-lg font-semibold">
+      Income vs expenses
+    </h2>
+    <span class="text-xs text-slate-500">
+      Last 6 months, headline USD — click a bar to open that month
+    </span>
+  </header>
+
+  <div class="rounded-lg border border-slate-200 bg-white p-4">
+    <div class="flows-chart">
+      <canvas
+        id="flows-chart"
+        role="img"
+        aria-label="Bar chart of total income and total expenses per month for the last six months"
+        data-chart='{{ _payload | tojson }}'
+      ></canvas>
+    </div>
+
+    {# Same numbers as a table for screen readers and no-JS. #}
+    <table class="visually-hidden">
+      <caption>Income and expenses per month, headline USD</caption>
+      <thead>
+        <tr><th scope="col">Month</th><th scope="col">Income</th><th scope="col">Expenses</th></tr>
+      </thead>
+      <tbody>
+        {% for label in flows.labels %}
+          <tr>
+            <th scope="row">{{ label }}</th>
+            <td>{{ flows.income_usd[loop.index0] }}</td>
+            <td>{{ flows.expense_usd[loop.index0] }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<script>
+  (function () {
+    var canvas = document.getElementById('flows-chart');
+    if (!canvas || typeof Chart === 'undefined') { return; }
+    var raw = canvas.getAttribute('data-chart');
+    if (!raw) { return; }
+    var payload;
+    try { payload = JSON.parse(raw); } catch (e) { return; }
+
+    var months = payload.months || [];
+    var income = (payload.income || []).map(Number);
+    var expense = (payload.expense || []).map(Number);
+
+    var fmtAxis = new Intl.NumberFormat('en-US', {
+      style: 'currency', currency: 'USD', maximumFractionDigits: 0
+    });
+    var fmtTip = new Intl.NumberFormat('en-US', {
+      style: 'currency', currency: 'USD', minimumFractionDigits: 2
+    });
+
+    var chart = new Chart(canvas.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: payload.labels || months,
+        datasets: [
+          {
+            label: 'Income',
+            data: income.map(Math.abs),
+            backgroundColor: '#2a78d6',
+            borderRadius: { topLeft: 4, topRight: 4 },
+            borderSkipped: 'bottom'
+          },
+          {
+            label: 'Expenses',
+            data: expense.map(Math.abs),
+            backgroundColor: '#eb6834',
+            borderRadius: { topLeft: 4, topRight: 4 },
+            borderSkipped: 'bottom'
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        // Thin paired bars with air between the pair and between months.
+        datasets: { bar: { barPercentage: 0.82, categoryPercentage: 0.62 } },
+        scales: {
+          x: { grid: { display: false }, ticks: { color: '#64748b' } },
+          y: {
+            beginAtZero: true,
+            grid: { color: 'rgba(100, 116, 139, 0.12)' },
+            border: { display: false },
+            ticks: {
+              color: '#64748b',
+              callback: function (v) { return fmtAxis.format(v); }
+            }
+          }
+        },
+        plugins: {
+          legend: {
+            position: 'bottom',
+            labels: { usePointStyle: true, pointStyleWidth: 10, boxHeight: 6 }
+          },
+          tooltip: {
+            callbacks: {
+              // Tooltips keep the ledger's signed figures (-$ order).
+              label: function (ctx) {
+                var signed = ctx.datasetIndex === 0
+                  ? income[ctx.dataIndex]
+                  : expense[ctx.dataIndex];
+                return ctx.dataset.label + ': ' + fmtTip.format(signed);
+              }
+            }
+          }
+        },
+        onClick: function (evt, els) {
+          if (!els || els.length === 0) { return; }
+          var month = months[els[0].index];
+          if (!month) { return; }
+          window.location.href =
+            '/monthly?since=' + encodeURIComponent(month) +
+            '&until=' + encodeURIComponent(month);
+        }
+      }
+    });
+    canvas.__finances_chart = chart;
+  })();
+</script>

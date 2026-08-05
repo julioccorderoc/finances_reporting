@@ -13,7 +13,10 @@
     {# 1. KPI tiles. #}
     {% include "partials/kpi_tiles.html" %}
 
-    {# 2. Sync status strip. Polled every 60s for live updates, plus one
+    {# 2. The main chart: income vs expenses per month. #}
+    {% include "partials/flows_chart.html" %}
+
+    {# 3. Sync status strip. Polled every 60s for live updates, plus one
        early poll: the startup refresh (web.services.refresh) takes roughly
        ten seconds, so a 60s-only cadence would show the owner stale chips
        for most of a minute after the data behind them already changed. #}
@@ -27,10 +30,7 @@
       {% include "partials/sync_status_strip.html" %}
     </div>
 
-    {# 3. Recent activity. Reuses the canonical card partial. #}
+    {# 4. Recent activity. Reuses the canonical card partial. #}
     {% include "partials/recent_activity.html" %}
-
-    {# 4. 6-month stacked-bar spend chart. #}
-    {% include "partials/spend_trend_chart.html" %}
   </section>
 {% endblock %}

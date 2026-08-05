@@ -124,15 +124,30 @@
 /* Spend chart canvas: bound the height so the chart never blows up the
  * fold. Chart.js handles internal resizing.
  */
-.spend-chart {
+/* The dashboard's main object: taller than the old category chart it
+   replaced so it reads first. */
+.flows-chart {
   position: relative;
   width: 100%;
-  height: 320px;
+  height: 380px;
 }
 @media (max-width: 640px) {
-  .spend-chart {
-    height: 240px;
+  .flows-chart {
+    height: 260px;
   }
+}
+
+/* Screen-reader-only (the vendored tailwind build has no sr-only). */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* === END dashboard === */
