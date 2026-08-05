@@ -129,6 +129,26 @@ def update_cmd(
         typer.echo(render_integrity(integrity))
 
 
+@app.command("backup")
+def backup_cmd(
+    label: str = typer.Option(
+        None,
+        "--label",
+        help="Optional tag appended to the snapshot filename (e.g. adr019).",
+    ),
+) -> None:
+    """Snapshot the live DB into backups/ (WAL-safe, single file)."""
+    from finances import config as _config
+    from finances.db.backup import create_backup
+
+    try:
+        dest = create_backup(_config.DB_PATH, _config.BACKUPS_DIR, label=label)
+    except ValueError as exc:
+        typer.echo(f"backup: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    typer.echo(f"backup: wrote {dest}")
+
+
 @app.command("doctor")
 def doctor_cmd(
     strict: bool = typer.Option(
@@ -142,10 +162,12 @@ def doctor_cmd(
     The test suite verifies code against seeded fixtures; this verifies
     the actual data. Read-only — it reports, it never repairs.
     """
+    from finances import config as _config
+    from finances.db.backup import stray_backups
     from finances.domain.integrity import render_report as render_integrity
     from finances.domain.integrity import run_checks
 
-    conn = get_connection(DB_PATH)
+    conn = get_connection(_config.DB_PATH)
     apply_migrations(conn)
     try:
         report = run_checks(conn)
@@ -153,6 +175,16 @@ def doctor_cmd(
         conn.close()
 
     typer.echo(render_integrity(report))
+
+    strays = stray_backups(_config.PROJECT_ROOT)
+    if strays:
+        typer.echo("")
+        typer.echo(
+            f"warning: {len(strays)} stray backup file(s) in the project root — "
+            "move them to backups/ (use `finances backup` next time):"
+        )
+        for path in strays:
+            typer.echo(f"  {path.name}")
 
     if strict and report.has_errors:
         raise typer.Exit(code=1)

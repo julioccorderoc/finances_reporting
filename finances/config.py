@@ -16,6 +16,9 @@ INPUTS_DIR = PROJECT_ROOT / "inputs"
 # EPIC "Thing 4": default destination for the single self-contained static
 # report file (`finances html`). Gitignored at repo root.
 REPORT_HTML_PATH = PROJECT_ROOT / "report.html"
+# Every DB snapshot lives here — never next to the live finances.db.
+# `finances backup` writes here; `finances doctor` flags strays in the root.
+BACKUPS_DIR = PROJECT_ROOT / "backups"
 CARACAS_TZ = ZoneInfo("America/Caracas")
 
 # EPIC-007: default lookback window for Binance incremental sync (5 weeks of
