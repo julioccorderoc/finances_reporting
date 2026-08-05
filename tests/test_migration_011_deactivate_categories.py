@@ -29,17 +29,16 @@ def migrated_db(tmp_path) -> sqlite3.Connection:
     conn.close()
 
 
-def test_interest_and_fees_deactivated(migrated_db: sqlite3.Connection) -> None:
+def test_interest_deactivated(migrated_db: sqlite3.Connection) -> None:
+    # Fees was deactivated here too, but migration 018 brought it back
+    # (owner decision 2026-08-05) — its end-state lives in the 018 tests.
     interest = categories_repo.get_by_name(migrated_db, "income", "Interest")
-    fees = categories_repo.get_by_name(migrated_db, "expense", "Fees")
     assert interest is not None and interest.active is False
-    assert fees is not None and fees.active is False
 
 
-def test_pickers_no_longer_offer_them(migrated_db: sqlite3.Connection) -> None:
+def test_picker_no_longer_offers_interest(migrated_db: sqlite3.Connection) -> None:
     active_names = {c.name for c in categories_repo.list_all(migrated_db)}
     assert "Interest" not in active_names
-    assert "Fees" not in active_names
 
 
 def test_get_by_name_still_resolves_for_auto_assignment(
