@@ -176,7 +176,6 @@ def test_going_out_category_is_seeded(in_memory_db: sqlite3.Connection) -> None:
         "COM.EM.EDO.CTA",
         "COM.RZO.PAG.MOVIL",
         "COM.REF.BANC.",
-        "REVERSO CARGO",
     ],
 )
 def test_bank_fee_strings_categorize_as_fees(
@@ -184,8 +183,10 @@ def test_bank_fee_strings_categorize_as_fees(
 ) -> None:
     """Migration 007 fee rules map the real Provincial commission strings to
     Fees — regression for the needs_review pile-up on abbreviated fee memos
-    (COM. PAGO MOV PB, COM.MTTO.CTA., REVERSO CARGO, …) that the seed's
-    `COM\\. PAGO MOVIL` / `COM\\. MANTENIMIENTO` patterns never matched."""
+    (COM. PAGO MOV PB, COM.MTTO.CTA., …) that the seed's `COM\\. PAGO MOVIL`
+    / `COM\\. MANTENIMIENTO` patterns never matched. REVERSO CARGO left this
+    list with migration 019: a reversal pairs with its failed charge
+    (ADR-019) instead of being filed as fee income."""
     (fees_id,) = in_memory_db.execute(
         "SELECT id FROM categories WHERE kind='expense' AND name='Fees'"
     ).fetchone()

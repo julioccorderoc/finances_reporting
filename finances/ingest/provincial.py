@@ -47,6 +47,7 @@ from finances.domain.reconciliation import (
     ReconciliationReport,
     run_reconciliation_pass,
 )
+from finances.domain.reversals import BankReversalPairing
 from finances.domain.transfers import BankAnchoredP2pPairing
 
 # ---------------------------------------------------------------------------
@@ -329,6 +330,7 @@ class IngestReport:
     rows_inserted: int = 0
     rows_updated: int = 0
     reconciliation: ReconciliationReport | None = None
+    reversals: ReconciliationReport | None = None
     warnings: list[str] = field(default_factory=list)
 
 
@@ -528,6 +530,11 @@ def ingest_csv(
                     bank_source=SOURCE,
                 )
                 report.reconciliation = run_reconciliation_pass(strategy)
+                # ADR-019: a rejected payment's return and the failed
+                # charge cancel each other; pair them so neither counts.
+                report.reversals = run_reconciliation_pass(
+                    BankReversalPairing(conn, source=SOURCE)
+                )
 
             if dry_run:
                 conn.execute("ROLLBACK")

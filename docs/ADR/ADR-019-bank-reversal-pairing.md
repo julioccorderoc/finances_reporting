@@ -1,7 +1,7 @@
 # ADR-019: Bank Reversals (RETORNOS) Pair With Their Failed Charge and Leave Spending
 
 **Date:** 2026-08-04
-**Status:** Proposed — awaiting owner confirmation
+**Status:** Accepted (owner, 2026-08-05)
 **Related:** [ADR-002](./ADR-002-double-entry-transfers.md) — reuses the shared-`transfer_id`, sum-to-zero mechanism; [ADR-017](./ADR-017-same-account-conversions.md) — precedent for a same-account zero-sum pair
 **Rule:** [rule-002](../architecture/rules/rule-002-double-entry-transfers.md)
 
@@ -10,7 +10,7 @@
 When Provincial rejects a pago móvil, the statement records the failed attempt, then the bank returns the money, then the owner retries. The commission is charged and returned in exactly the same shape. A single successful payment of 1,250 Bs therefore lands as **six rows**:
 
 | id | description | kind | amount |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 7193 | DR OB V27209763 102BANCO | expense | −1,250.00 |
 | 7192 | COM. PAGO MOVIL | expense | −3.75 |
 | 7196 | REVERSO CARGO | income | +1,250.00 |
@@ -34,10 +34,10 @@ Treat a reversal and the failed charge it undoes as a **zero-sum pair sharing a 
 
 Mechanically, a new reconciliation strategy `ReversalPairing` (EPIC-006 Strategy protocol, the designed extension point) runs after Provincial ingest, like `BankAnchoredP2pPairing`:
 
-1. Collect unpaired `REVERSO CARGO` income rows (the recognizable-name list is a module constant; extendable when other RETORNO wordings appear).
-2. For each, find candidate expenses on the same account: identical `abs(amount)`, occurred at or before the reversal, within a ±4-day window, not already paired.
-3. **Exactly one candidate → auto-pair.** Several → prefer the closest by statement order (`occurred_at`, then row order); if still ambiguous, emit a proposal for the triage queue instead of guessing — same confirm flow as P2P pair proposals.
-4. Paired legs: `kind='transfer'`, shared fresh `transfer_id`, `category_id=NULL`, `needs_review=0`.
+1. Collect unpaired `REVERSO CARGO` income rows (the recognizable-name list is a module constant, `REVERSAL_MARKERS`; extendable when other RETORNO wordings appear).
+2. For each, find candidate expenses on the same account: exact opposite amount, occurred at most 4 days before (or on) the reversal's day, not already paired.
+3. **Claim greedily, each charge at most once** — the ADR-002 amendment's reasoning applies verbatim: when the failed attempt and the successful retry both qualify (same amount, same day), any assignment yields identical totals. Preference keeps the most information: an uncategorized charge over a hand-triaged one, then the closest day, then the newest row. A reversal with no candidate is left alone.
+4. Paired legs: `kind='transfer'`, shared fresh `transfer_id`, `needs_review=0`. The reversal leg sheds its category (rule-27 noise); the charge leg keeps its own — it may be hand triage, and reports ignore categories on transfer rows.
 
 Backlog cleanup ships as `finances reconcile reversals [--dry-run]`, consistent with `reconcile converts` / `reconcile categories`.
 

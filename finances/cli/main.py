@@ -238,6 +238,49 @@ def reconcile_converts(
         raise typer.Exit(code=1)
 
 
+@reconcile_app.command("reversals")
+def reconcile_reversals(
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Report what would be paired, then roll back without writing.",
+    ),
+) -> None:
+    """Pair bank reversals (RETORNOS) with the failed charge they undo (ADR-019).
+
+    New statements pair on ingest; this repairs reversals already in the
+    ledger. Idempotent — eligibility is ``transfer_id IS NULL``.
+    """
+    from finances.domain.reconciliation import run_reconciliation_pass
+    from finances.domain.reversals import BankReversalPairing
+
+    conn = get_connection(DB_PATH)
+    apply_migrations(conn)
+    try:
+        conn.execute("BEGIN")
+        try:
+            report = run_reconciliation_pass(BankReversalPairing(conn))
+            if dry_run:
+                conn.execute("ROLLBACK")
+            else:
+                conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+    finally:
+        conn.close()
+
+    suffix = " (dry run — rolled back)" if dry_run else ""
+    typer.echo(
+        f"reversal pairing: {report.proposals_applied}/{report.proposals_found} "
+        f"pair(s) applied{suffix}"
+    )
+    for err in report.errors:
+        typer.echo(f"  error: {err}", err=True)
+    if report.errors:
+        raise typer.Exit(code=1)
+
+
 @reconcile_app.command("categories")
 def reconcile_categories(
     dry_run: bool = typer.Option(
@@ -518,6 +561,15 @@ def ingest_provincial(
             f"errors={len(rec.errors)}"
         )
         for err in rec.errors:
+            typer.echo(f"    err: {err}", err=True)
+    if report.reversals is not None and report.reversals.proposals_found:
+        rev = report.reversals
+        typer.echo(
+            f"  reversals ({rev.strategy}): "
+            f"found={rev.proposals_found} applied={rev.proposals_applied} "
+            f"errors={len(rev.errors)}"
+        )
+        for err in rev.errors:
             typer.echo(f"    err: {err}", err=True)
     if not dry_run:
         _regenerate_default_report()
