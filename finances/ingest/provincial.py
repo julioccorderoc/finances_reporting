@@ -16,10 +16,10 @@ Design notes:
 * The ingest keeps the CSV reader honest (``extra='forbid'`` equivalent
   via strict Pydantic), but tolerates blank trailing lines that
   spreadsheet exports frequently produce.
-* Categorization is passed in as a callable so EPIC-008 can ship ahead
-  of EPIC-004 without cross-importing; when the real categorizer lands
-  (or a caller supplies one), matched rows drop their ``needs_review``
-  flag and pick up a ``category_id``.
+* Categorization runs the EPIC-004 DB rules engine by default; matched
+  rows pick up a ``category_id`` and drop ``needs_review``. Tests (or a
+  future caller) may still inject a plain ``categorizer`` callable to
+  bypass the engine.
 """
 from __future__ import annotations
 
@@ -39,6 +39,7 @@ from pydantic import BaseModel, ConfigDict, field_validator
 
 from finances.config import CARACAS_TZ
 from finances.db.repos import accounts as accounts_repo
+from finances.domain.categorization import CategorizationRequest, suggest
 from finances.db.repos import import_state
 from finances.db.repos import transactions as txn_repo
 from finances.domain.models import Transaction, TransactionKind
@@ -427,9 +428,10 @@ def ingest_csv(
     caller can create it before retrying.
 
     ``categorizer`` is an optional callable ``(description) -> category_id
-    | None``; rows that don't match are inserted with ``needs_review=True``
-    (rule-006 fall-through). The real rules engine from EPIC-004 plugs in
-    here without requiring a new ADR.
+    | None`` that *overrides* the default: when it is ``None`` every row is
+    run through the EPIC-004 rules engine (:func:`suggest`, scoped to this
+    source/account and amount-aware). Rows nothing matches are inserted
+    with ``needs_review=True`` (rule-006 fall-through).
 
     After the row loop, the bank-anchored P2P pairing strategy runs a
     single reconciliation pass (ADR-002 amendment). Callers who want the
@@ -478,6 +480,17 @@ def ingest_csv(
                 category_id: int | None = None
                 if categorizer is not None:
                     category_id = categorizer(raw.descripcion)
+                else:
+                    match = suggest(
+                        conn,
+                        CategorizationRequest(
+                            description=raw.descripcion,
+                            source=SOURCE,
+                            account_id=resolved_account_id,
+                            amount=raw.monto,
+                        ),
+                    )
+                    category_id = match.category_id if match else None
                 needs_review = category_id is None
 
                 twin_key = (raw.fecha, format(raw.monto, "f"), raw.descripcion)

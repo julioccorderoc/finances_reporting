@@ -187,7 +187,16 @@ def upsert_by_source_ref(conn: sqlite3.Connection, txn: Transaction) -> dict[str
             -- Enrichment (triage category, pairing, user rate) lives on the
             -- row but is not sourced from raw statements: keep existing
             -- values unless the incoming row actually carries one.
-            category_id  = COALESCE(excluded.category_id, transactions.category_id),
+            -- Category: an already-set value (hand triage or an earlier rule)
+            -- always wins over what re-ingest suggests, and a row pairing
+            -- turned into a transfer never gains one (currency movement is
+            -- not spending).
+            category_id  = CASE
+                               WHEN transactions.transfer_id IS NOT NULL
+                                   THEN transactions.category_id
+                               ELSE COALESCE(transactions.category_id,
+                                             excluded.category_id)
+                           END,
             transfer_id  = COALESCE(excluded.transfer_id, transactions.transfer_id),
             user_rate    = COALESCE(excluded.user_rate, transactions.user_rate),
             -- Notes are manual-only enrichment (viewer edit modal). Stronger
