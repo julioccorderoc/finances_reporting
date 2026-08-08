@@ -93,7 +93,11 @@ def test_opening_rows_are_dated_at_the_ledger_start(
 
     start = ledger_start(seeded_db)
     assert start.date().isoformat() == "2025-10-03"
-    assert _opening_rows(seeded_db)[0]["occurred_at"].startswith("2025-10-03")
+
+    occurred = _opening_rows(seeded_db)[0]["occurred_at"]
+    if isinstance(occurred, str):
+        occurred = datetime.fromisoformat(occurred)
+    assert occurred.date().isoformat() == "2025-10-03"
 
 
 def test_an_overstated_position_records_the_movement_not_a_negative_balance(

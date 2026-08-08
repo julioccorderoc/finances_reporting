@@ -238,6 +238,113 @@ def reconcile_converts(
         raise typer.Exit(code=1)
 
 
+@reconcile_app.command("opening")
+def reconcile_opening(
+    account: str = typer.Option(..., "--account", help="Account name."),
+    currency: str = typer.Option(..., "--currency", help="Asset, e.g. USDT."),
+    actual: str = typer.Option(
+        ...,
+        "--actual",
+        help="What the custodian reports for this position, right now.",
+    ),
+    moved_to: str | None = typer.Option(
+        None,
+        "--moved-to",
+        help=(
+            "Required when the ledger OVERSTATES the position: the account "
+            "the value actually moved to. Recorded as a transfer."
+        ),
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Report what would change, then roll back."
+    ),
+) -> None:
+    """State what a position held before the ledger began (ADR-020).
+
+    For a gap whose history no longer exists anywhere — Binance serves
+    internal-transfer records for six months only. The row is dated at the
+    ledger's start and carries a stable source_ref, so re-running this with a
+    new figure *restates* the position instead of stacking another correction
+    on it. That is the difference from ``reconcile balances``, which is still
+    the right command for a gap that arose on a known date.
+
+    An overstated position is never closed with a negative opening balance.
+    Pass ``--moved-to`` so it is recorded as the movement it was.
+    """
+    from decimal import Decimal, InvalidOperation
+
+    from finances.db.repos import accounts as accounts_repo
+    from finances.domain.opening_positions import OpeningShape, record_opening
+
+    try:
+        actual_value = Decimal(actual)
+    except InvalidOperation:
+        typer.echo(f"opening: not a number: {actual!r}", err=True)
+        raise typer.Exit(code=2) from None
+
+    conn = get_connection(DB_PATH)
+    apply_migrations(conn)
+    try:
+        resolved = accounts_repo.get_by_name(conn, account)
+        if resolved is None or resolved.id is None:
+            typer.echo(f"opening: no account named {account!r}", err=True)
+            raise typer.Exit(code=2)
+
+        counterpart_id: int | None = None
+        if moved_to is not None:
+            counterpart = accounts_repo.get_by_name(conn, moved_to)
+            if counterpart is None or counterpart.id is None:
+                typer.echo(f"opening: no account named {moved_to!r}", err=True)
+                raise typer.Exit(code=2)
+            counterpart_id = counterpart.id
+
+        conn.execute("BEGIN")
+        try:
+            result = record_opening(
+                conn,
+                account_id=resolved.id,
+                currency=currency,
+                actual=actual_value,
+                counterpart_account_id=counterpart_id,
+            )
+            if dry_run:
+                conn.execute("ROLLBACK")
+            else:
+                conn.execute("COMMIT")
+        except ValueError as exc:
+            # A mis-modelled gap is a user-correctable mistake, not a crash:
+            # the message names the missing --moved-to.
+            conn.execute("ROLLBACK")
+            typer.echo(f"opening: {exc}", err=True)
+            raise typer.Exit(code=2) from None
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+    finally:
+        conn.close()
+
+    suffix = " (dry run — rolled back)" if dry_run else ""
+    if result is None:
+        typer.echo(
+            f"opening: {account} {currency.upper()} already matches "
+            f"{actual_value}; nothing written{suffix}"
+        )
+        return
+
+    if result.shape is OpeningShape.TRANSFER:
+        typer.echo(
+            f"opening: {account} {result.currency} overstated by "
+            f"{-result.delta} — recorded as a transfer to {moved_to}"
+            f"{suffix}"
+        )
+    else:
+        typer.echo(
+            f"opening: {account} {result.currency} opening balance "
+            f"{result.delta} (ledger {result.ledger_balance}, custodian "
+            f"{result.actual_balance}){suffix}"
+        )
+
+
 @reconcile_app.command("legacy-dupes")
 def reconcile_legacy_dupes(
     dry_run: bool = typer.Option(
