@@ -1,7 +1,19 @@
 # ADR-018: Reconciliation Adjustments for History the Custodian Will Not Return
 
 **Date:** 2026-08-04
-**Status:** Accepted
+**Status:** Partially superseded by [ADR-020](./ADR-020-opening-positions.md) (2026-08-08)
+**Superseded parts:** §2.1 (dating at reconciliation time), §4's rejection of
+opening-balance rows, and the dating half of §2.3. The rest stands: §1.2's
+distinction between an unrecoverable gap and an un-synced one, §2.2's exclusion
+from income and expense, and §2.3's rule that the custodian figure is always an
+owner-supplied input are all carried forward unchanged.
+
+> **Why it was revisited.** Nine minutes before the first reconciliation ran, a
+> deep `--since` re-sync duplicated 105 events. The plugs written here were
+> sized against those corrupted balances, fit the corruption exactly, and left
+> `finances doctor` reporting a healthy ledger that overstated income by
+> 10,462.71 USDC. A residual absorbs whatever is wrong upstream without
+> distinguishing missing history from a bug. See ADR-020 §1.2.
 **Related:** [ADR-003](./ADR-003-earn-positions-table.md) — the unbuilt half whose repair exposed this; [ADR-002](./ADR-002-double-entry-transfers.md), [ADR-017](./ADR-017-same-account-conversions.md) — the transfer model this deliberately does not use
 **Rule:** [rule-012](../architecture/rules/rule-012-reconciliation-adjustments.md)
 
