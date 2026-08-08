@@ -156,9 +156,10 @@ def test_run_backfill_creates_missing_accounts(
 ) -> None:
     from finances.migration.backfill import run_backfill
 
-    # Fresh DB has no accounts seeded; backfill must create them.
+    # A fresh DB carries only migration 020's two empty bolivar accounts;
+    # none of the five the legacy CSVs assume. Backfill must create those.
     pre = _count(in_memory_db, "SELECT COUNT(*) FROM accounts")
-    assert pre == 0
+    assert pre == 2
 
     run_backfill(in_memory_db, backfill_data_dir)
 

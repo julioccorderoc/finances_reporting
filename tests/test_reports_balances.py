@@ -43,6 +43,17 @@ def _insert_account(
     )
 
 
+# Migration 020 seeds two empty bolivar accounts, so no DB is ever free of
+# accounts now. Each test below is about the accounts it creates itself; the
+# seeded pair reports a zero balance and is noise here.
+SEEDED_ACCOUNT_NAMES = frozenset({"Bancamiga Bolivares", "Venezuela Bolivares"})
+
+
+def _own(balances: list) -> list:
+    """Drop the migration-seeded accounts from a balances result."""
+    return [b for b in balances if b.account_name not in SEEDED_ACCOUNT_NAMES]
+
+
 def _insert_txn(
     conn: sqlite3.Connection,
     account_id: int,
@@ -97,7 +108,7 @@ def test_get_balances_happy_path_three_accounts(
         in_memory_db, a3.id, Decimal("42.00"), currency="USDT", source_ref="a3-1",
     )
 
-    balances = get_balances(in_memory_db)
+    balances = _own(get_balances(in_memory_db))
 
     assert all(isinstance(b, AccountBalance) for b in balances)
     # Ordered by account name.
@@ -116,12 +127,16 @@ def test_get_balances_happy_path_three_accounts(
     assert by_name["Charlie Spot"].currency == "USDT"
 
 
-def test_get_balances_empty_db_returns_empty_list(
+def test_get_balances_reports_only_the_seeded_accounts_on_a_fresh_db(
     in_memory_db: sqlite3.Connection,
 ) -> None:
     from finances.reports.balances import get_balances
 
-    assert get_balances(in_memory_db) == []
+    balances = get_balances(in_memory_db)
+
+    assert _own(balances) == []
+    assert {b.account_name for b in balances} == SEEDED_ACCOUNT_NAMES
+    assert all(b.balance_native == Decimal("0") for b in balances)
 
 
 def test_get_balances_account_with_no_transactions_is_zero(
@@ -131,7 +146,7 @@ def test_get_balances_account_with_no_transactions_is_zero(
 
     _insert_account(in_memory_db, "Idle Account")
 
-    balances = get_balances(in_memory_db)
+    balances = _own(get_balances(in_memory_db))
     assert len(balances) == 1
     assert balances[0].balance_native == Decimal("0")
 
@@ -166,7 +181,7 @@ def test_get_balances_mixed_sign_transactions_sum_correctly(
         source_ref="mix-3",
     )
 
-    balances = get_balances(in_memory_db)
+    balances = _own(get_balances(in_memory_db))
     assert len(balances) == 1
     assert balances[0].balance_native == Decimal("349.50")
 
@@ -219,7 +234,7 @@ def test_render_json_round_trips_with_decimal_as_string(
     assert acc.id is not None
     _insert_txn(in_memory_db, acc.id, Decimal("12.34"), source_ref="j-1")
 
-    balances = get_balances(in_memory_db)
+    balances = _own(get_balances(in_memory_db))
     payload = render_json(balances)
 
     parsed = json.loads(payload)
@@ -255,7 +270,7 @@ def test_render_csv_happy_path_header_and_row(
     # column will otherwise drop trailing zeros (e.g. "10.00" -> "10").
     _insert_txn(in_memory_db, acc.id, Decimal("12.34"), source_ref="c-1")
 
-    balances = get_balances(in_memory_db)
+    balances = _own(get_balances(in_memory_db))
     out = render_csv(balances)
 
     reader = csv.reader(io.StringIO(out))

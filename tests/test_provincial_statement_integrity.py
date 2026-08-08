@@ -56,6 +56,13 @@ def bank(in_memory_db):
     return conn
 
 
+def _provincial_id(conn) -> int:
+    """Provincial's id, looked up — migration 020's seed makes it stop being 1."""
+    account = accounts_repo.get_by_name(conn, provincial.DEFAULT_ACCOUNT_NAME)
+    assert account is not None and account.id is not None
+    return account.id
+
+
 def test_clean_statement_produces_no_warnings(bank, tmp_path):
     path = _statement(
         tmp_path,
@@ -120,7 +127,7 @@ def test_a_gap_against_existing_history_is_flagged(bank, tmp_path):
     txn_repo.insert(
         bank,
         Transaction(
-            account_id=1,
+            account_id=_provincial_id(bank),
             occurred_at=datetime(2026, 4, 30, tzinfo=UTC),
             kind=TransactionKind.EXPENSE,
             amount=Decimal("-10"),
@@ -147,7 +154,7 @@ def test_contiguous_statement_is_not_flagged_as_a_gap(bank, tmp_path):
     txn_repo.insert(
         bank,
         Transaction(
-            account_id=1,
+            account_id=_provincial_id(bank),
             occurred_at=datetime(2026, 5, 14, tzinfo=UTC),
             kind=TransactionKind.EXPENSE,
             amount=Decimal("-10"),

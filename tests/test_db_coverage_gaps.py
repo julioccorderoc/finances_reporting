@@ -70,11 +70,14 @@ def test_accounts_list_all_includes_inactive_when_requested(
             name="Retired One", kind=AccountKind.CASH, currency="USD", active=False
         ),
     )
-    active_only = {a.name for a in accounts_repo.list_all(db_conn)}
+    # Migration 020 seeds two bolivar accounts into every DB; this test is
+    # about the active flag, so they are excluded rather than enumerated.
+    seeded = {"Bancamiga Bolivares", "Venezuela Bolivares"}
+    active_only = {a.name for a in accounts_repo.list_all(db_conn)} - seeded
     assert active_only == {"Active One"}
     all_incl_inactive = {
         a.name for a in accounts_repo.list_all(db_conn, include_inactive=True)
-    }
+    } - seeded
     assert all_incl_inactive == {"Active One", "Retired One"}
 
 
@@ -545,4 +548,7 @@ def test_seeded_db_contains_v1_taxonomy(seeded_db: sqlite3.Connection) -> None:
         "Binance Funding",
         "Binance Earn",
         "Cash USD",
+        # Seeded by migration 020, empty since.
+        "Bancamiga Bolivares",
+        "Venezuela Bolivares",
     } == names

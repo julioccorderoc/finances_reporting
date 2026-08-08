@@ -238,6 +238,60 @@ def reconcile_converts(
         raise typer.Exit(code=1)
 
 
+@reconcile_app.command("legacy-dupes")
+def reconcile_legacy_dupes(
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Report what would be retired, then roll back without writing.",
+    ),
+    source: str = typer.Option(
+        "binance", "--source", help="Ledger source to sweep (default binance)."
+    ),
+) -> None:
+    """Retire backfill rows a later native-id sync re-imported.
+
+    The backfill hashes events the legacy CSV carried no id for; the live
+    sync uses the real external id. Dedup is keyed on (source, source_ref)
+    (rule-010), so one event written under both schemes leaves two rows and
+    UNIQUE never fires — which is what a deep ``--since`` re-sync did on
+    2026-08-04.
+
+    The native row survives, inheriting whatever the legacy row held and it
+    lacked. Rows with no twin are never touched. Idempotent.
+    """
+    from finances.domain.reconciliation import run_reconciliation_pass
+    from finances.domain.supersession import LegacyRefSupersession
+
+    conn = get_connection(DB_PATH)
+    apply_migrations(conn)
+    try:
+        conn.execute("BEGIN")
+        try:
+            report = run_reconciliation_pass(
+                LegacyRefSupersession(conn, source=source)
+            )
+            if dry_run:
+                conn.execute("ROLLBACK")
+            else:
+                conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+    finally:
+        conn.close()
+
+    suffix = " (dry run — rolled back)" if dry_run else ""
+    typer.echo(
+        f"legacy supersession: {report.proposals_applied}/"
+        f"{report.proposals_found} row(s) retired{suffix}"
+    )
+    for err in report.errors:
+        typer.echo(f"  error: {err}", err=True)
+    if report.errors:
+        raise typer.Exit(code=1)
+
+
 @reconcile_app.command("reversals")
 def reconcile_reversals(
     dry_run: bool = typer.Option(

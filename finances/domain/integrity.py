@@ -424,6 +424,38 @@ CHECKS: tuple[IntegrityCheck, ...] = (
         """,
     ),
     IntegrityCheck(
+        name="legacy_ref_superseded",
+        severity=Severity.ERROR,
+        description=(
+            "One event on the books twice under two source_ref schemes. The "
+            "backfill hashes what the legacy CSV gave no id for "
+            "(<prefix>:hash:<sha>); the live sync uses the real external id. "
+            "Dedup is keyed on (source, source_ref) (rule-010), so UNIQUE "
+            "cannot see they are the same event. Run "
+            "`finances reconcile legacy-dupes`."
+        ),
+        sql="""
+            SELECT legacy.id
+              FROM transactions AS legacy
+              JOIN transactions AS native
+                ON native.source = legacy.source
+               AND native.currency = legacy.currency
+               AND native.id <> legacy.id
+               AND instr(native.source_ref, ':hash:') = 0
+               AND substr(native.source_ref, 1, instr(native.source_ref, ':'))
+                 = substr(legacy.source_ref, 1, instr(legacy.source_ref, ':'))
+               AND ABS(julianday(substr(native.occurred_at, 1, 10))
+                     - julianday(substr(legacy.occurred_at, 1, 10))) <= 1
+               AND ABS(ABS(CAST(native.amount AS REAL))
+                     - ABS(CAST(legacy.amount AS REAL)))
+                 <= 0.01 * ABS(CAST(legacy.amount AS REAL))
+               AND (CAST(native.amount AS REAL) > 0)
+                 = (CAST(legacy.amount AS REAL) > 0)
+             WHERE instr(legacy.source_ref, ':hash:') > 0
+             ORDER BY legacy.id
+        """,
+    ),
+    IntegrityCheck(
         name="unpaired_p2p_sells",
         severity=Severity.WARNING,
         description=(

@@ -164,8 +164,8 @@ class TestBuildBalancesTab:
             "currency",
             "balance_native",
         ]
-        # seeded_db has 5 accounts with zero balance.
-        assert len(tab.rows) == 5
+        # seeded_db has 5 accounts, plus migration 020's 2, all zero.
+        assert len(tab.rows) == 7
         for row in tab.rows:
             assert len(row) == len(tab.headers)
 
@@ -521,7 +521,7 @@ class TestSyncToSheets:
         )
         # 2 non-transfer transactions → 2 transactions rows (nr row is included).
         assert report.rows_written[sheets_sync.TRANSACTIONS_TAB] == 2
-        assert report.rows_written[sheets_sync.BALANCES_TAB] == 5
+        assert report.rows_written[sheets_sync.BALANCES_TAB] == 7
         assert report.rows_written[sheets_sync.NEEDS_REVIEW_TAB] == 1
 
 
