@@ -22,6 +22,13 @@ def _finding(conn: sqlite3.Connection, name: str):
     return None
 
 
+def _account_id(conn: sqlite3.Connection, name: str) -> int:
+    """Resolve by name — migration 020 shifted every hardcoded account id."""
+    row = conn.execute("SELECT id FROM accounts WHERE name = ?", (name,)).fetchone()
+    assert row is not None, f"no account named {name!r}"
+    return int(row[0])
+
+
 def _bank_row(
     conn: sqlite3.Connection, *, occurred_at: str, amount: str = "10000"
 ) -> int:
@@ -30,9 +37,14 @@ def _bank_row(
         INSERT INTO transactions
             (account_id, occurred_at, kind, amount, currency, description,
              source, source_ref, needs_review)
-        VALUES (1, ?, 'income', ?, 'VES', 'TRAV0001', 'provincial', ?, 0)
+        VALUES (?, ?, 'income', ?, 'VES', 'TRAV0001', 'provincial', ?, 0)
         """,
-        (occurred_at, amount, f"hash:bank{occurred_at}{amount}"),
+        (
+            _account_id(conn, "Provincial Bolivares"),
+            occurred_at,
+            amount,
+            f"hash:bank{occurred_at}{amount}",
+        ),
     )
     return int(cur.lastrowid)
 
@@ -51,9 +63,10 @@ def _sell(
         INSERT INTO transactions
             (account_id, occurred_at, kind, amount, currency, description,
              user_rate, source, source_ref, needs_review)
-        VALUES (2, ?, 'expense', ?, 'USDT', ?, ?, 'binance', ?, 0)
+        VALUES (?, ?, 'expense', ?, 'USDT', ?, ?, 'binance', ?, 0)
         """,
         (
+            _account_id(conn, "Binance Spot"),
             occurred_at,
             amount,
             f"P2P SELL USDT @ {rate} {fiat} (order {order})",
@@ -127,9 +140,10 @@ def test_a_sell_whose_denomination_was_never_recorded_is_still_reported(
         INSERT INTO transactions
             (account_id, occurred_at, kind, amount, currency, description,
              source, source_ref, needs_review)
-        VALUES (2, '2026-01-15T00:00:00-04:00', 'expense', '-40', 'USDT',
+        VALUES (?, '2026-01-15T00:00:00-04:00', 'expense', '-40', 'USDT',
                 'P2P SELL USDT', 'binance', 'p2p:hash:legacy', 0)
-        """
+        """,
+        (_account_id(seeded_db, "Binance Spot"),),
     )
     legacy = int(cur.lastrowid)
 

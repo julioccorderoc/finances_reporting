@@ -459,17 +459,43 @@ CHECKS: tuple[IntegrityCheck, ...] = (
         name="unpaired_p2p_sells",
         severity=Severity.WARNING,
         description=(
-            "P2P sells with no bank counterpart. Each is a currency "
-            "conversion still counted as an expense. Usually means bank "
-            "statements are missing for those dates rather than anything "
-            "being broken."
+            "P2P sells that could still find a bank counterpart and have "
+            "not. Each is a currency conversion still counted as an "
+            "expense. Sells that no deposit could ever match are excluded: "
+            "those predating the first bank statement the ledger holds, and "
+            "those priced in a fiat no bank account is denominated in."
         ),
         sql="""
-            SELECT id FROM transactions
-             WHERE source_ref LIKE 'p2p:%'
-               AND CAST(amount AS REAL) < 0
-               AND transfer_id IS NULL
-             ORDER BY id
+            SELECT sell.id FROM transactions AS sell
+             WHERE sell.source_ref LIKE 'p2p:%'
+               AND CAST(sell.amount AS REAL) < 0
+               AND sell.transfer_id IS NULL
+               -- Statements start when they start. A sell from before the
+               -- earliest one has no deposit to pair with and never will,
+               -- so it is history, not a backlog item.
+               AND substr(sell.occurred_at, 1, 10) >= COALESCE(
+                   (SELECT MIN(substr(bank.occurred_at, 1, 10))
+                      FROM transactions AS bank
+                      JOIN accounts AS a ON a.id = bank.account_id
+                     WHERE a.kind = 'bank'),
+                   substr(sell.occurred_at, 1, 10)
+               )
+               -- Reject only a KNOWN fiat mismatch, mirroring
+               -- transfers._fiat_is_compatible. The ingest writes
+               -- '@ <rate> <FIAT> (order ...)'; a description without that
+               -- shape never had its denomination recorded, and those are
+               -- the rows that most need a human.
+               AND (
+                   sell.description IS NULL
+                   OR sell.description NOT LIKE '%(order%'
+                   OR EXISTS (
+                       SELECT 1 FROM accounts AS a
+                        WHERE a.kind = 'bank'
+                          AND sell.description
+                              LIKE '% ' || a.currency || ' (order%'
+                   )
+               )
+             ORDER BY sell.id
         """,
     ),
 )
