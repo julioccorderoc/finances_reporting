@@ -101,3 +101,86 @@ and is what gets re-ruled when an edge case recurs. A second copy in a template
 would drift the first time it changed. `finances.domain.category_definitions`
 parses it once per process; a pickable category with no sentence there fails the
 suite by name.
+
+---
+
+## Wave 1.1 — rate resolver + triage payload (ADR-021)
+
+### A3 vs the README's group order — bucket 1 is **pairs**, bucket 2 is *priced roughly*
+
+**Deviation.** Criterion A3 says the sort is `(bucket, occurred_at, item_id)`
+with "bucket 0 category, 1 rate, 2 pair". `README.md` §"Queue screen" lists the
+three groups in the order *Needs a category → Proposed pairs → Priced roughly*,
+and A8/D6 both say an approximate rate never blocks a sitting. Those two
+orderings cannot both hold.
+
+**Resolution: the README wins.** Rate items walk last. `bucket 0 = needs a
+category`, `bucket 1 = pair proposals`, `bucket 2 = priced roughly`. The group
+order and the modal's walk order come from one server-assigned bucket (K5), and
+A3's own rationale — cheap decisions first, non-blocking work last — is what the
+README's order actually implements. A row missing both a category and a rate
+sits in bucket 0, because the category is the half that blocks.
+
+**Where.** `finances/web/services/triage.py::_bucket_for`,
+`docs/ADR/ADR-021-nearest-rate-approximate-pricing.md` §3.
+
+### D4/K2 — "priced roughly" is a computed state, and today it is empty
+
+The queue no longer reads `transactions.needs_review` to decide what needs a
+rate; it reads the projection (`amount_usd is None`, or an ADR-021 `*_nearest`
+source). On the live ledger that means the 25 rows flagged in the database
+produce **no** rate item, and — because the deepest carry any bolívar row needs
+is six days — the *Priced roughly* group is currently **empty**. The group,
+the `≈` treatment and the nearest-rate suggestions are all real and tested;
+they will not show anything until a rate gap opens. Nothing was written to the
+database to achieve this.
+
+### K1 — `merchant` is a typographic cleanup, not a merchant database
+
+The README wants a cleaned name over the raw bank string. The repo has no
+merchant table and no mapping, and live Provincial descriptions mix real names
+(`LUNCHERIA MILY GOURMET`), bank jargon (`COM. PAGO MOVIL`) and pure references
+(`CAR.DRV0013196230`, `TRAV003126437900…`).
+
+`finances/format.py::clean_merchant` title-cases a string only when it already
+reads like a name — all caps, two or more alphabetic words, no run of four or
+more digits — and returns `None` otherwise. `None` is a supported state: the
+README says the raw string then takes the top line alone. No canonical merchant
+identity is inferred; that would be guessing at the owner's data.
+
+### K1 — account `detail` carries `institution`; there is no account-number column
+
+The design shows `Provincial · 0108 · 4471`. `accounts` has `name`, `kind`,
+`currency`, `institution`, `active` and nothing else. `TriageAccount.detail` is
+`institution` (nullable). Adding a column is a migration, and migrations were
+owned by the Wave 1.2 session this wave.
+
+### D9 — nearest-rate suggestions are one per tier, not an open list
+
+"OR TAKE ONE OF THESE" implies an arbitrary set of nearby rates.
+`rates_view.rates_for_day` returns exactly one candidate per tier (realized /
+median / BCV) — that tier's nearest usable rate — each with its source, a signed
+age (negative = published *after* the transaction) and the USD it would produce.
+Three labelled candidates is what the resolver can defend; a longer list would
+need a ranking rule nothing in the repo owns.
+
+This also reverses one ADR-016 display decision on purpose: an expired tier used
+to render **no** dollar figure, on the grounds that the chain had refused the
+rate. The chain now approximates with it instead, and the panel is where the
+owner accepts that number — so blanking it would hide the offer. It stays marked
+expired.
+
+### H1/H3 — `refused` is exposed but never true for an automatic proposal
+
+The payload carries `refused` + `refuse_reason` per pair, from the same
+`assess_pair` the write path raises on. The automatic matcher only proposes
+within ±1 day and ±2% drift, so a queue proposal is never refusable; the field
+earns its place on the **manual** pair picker, whose window is wider, and it is
+what lets the modal grey out the button and say why before the click.
+
+### Interim template edit — `partials/triage_queue.html` bucket labels
+
+The Wave 2 redesign replaces these templates. Their bucket labels ("Missing a
+rate" on bucket 1) became untrue the moment the buckets were reordered, so those
+three strings were updated in place and pointed at the payload's own named
+counts. No other template was touched by this wave.
