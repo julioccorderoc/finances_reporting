@@ -23,7 +23,7 @@ from finances.domain.category_definitions import (
     DEFINITIONS_PATH,
     category_tests,
     missing_tests,
-    test_for,
+    definition_for,
 )
 
 
@@ -63,8 +63,8 @@ def test_result_is_read_only() -> None:
         category_tests()["Groceries"] = "nope"  # type: ignore[index]
 
 
-def test_test_for_returns_none_for_an_unknown_category() -> None:
-    assert test_for("Nonexistent Category") is None
+def test_definition_for_returns_none_for_an_unknown_category() -> None:
+    assert definition_for("Nonexistent Category") is None
 
 
 def test_every_pickable_category_has_a_test(migrated_db: sqlite3.Connection) -> None:

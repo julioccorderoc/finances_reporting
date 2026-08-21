@@ -44,6 +44,9 @@ def top_categories(
     kind: TransactionKind | str | None = None,
     limit: int = 8,
     months: int = 12,
+    *,
+    chips_only: bool = False,
+    today: date | None = None,
 ) -> list[Category]:
     """Most-used active categories over the trailing ``months`` window.
 
@@ -52,10 +55,21 @@ def top_categories(
     list is padded with the remaining active categories in seed (id)
     order. ``kind`` filters to one ``TransactionKind`` (enum or plain
     string); ``None`` mixes all kinds (used by the bulk action bar).
+
+    ``chips_only`` narrows the pool to what may occupy a numbered chip in
+    the triage picker — ``auto_only = 0 AND chip_eligible = 1`` (migration
+    021). Without it the ranking is honest but useless as a shortcut list:
+    Fees and the transfer categories are the most-written rows in the
+    ledger precisely because nobody chooses them.
+
+    ``today`` anchors the window; it exists so callers (and tests) can ask
+    for a fixed one instead of the wall clock.
     """
     kind_value = kind.value if isinstance(kind, TransactionKind) else kind
+    ranked_chip_sql = "AND c.auto_only = 0 AND c.chip_eligible = 1" if chips_only else ""
+    pad_chip_sql = "AND auto_only = 0 AND chip_eligible = 1" if chips_only else ""
 
-    params: list[object] = [_cutoff_iso(months)]
+    params: list[object] = [_cutoff_iso(months, today=today)]
     kind_sql = ""
     if kind_value is not None:
         kind_sql = "AND c.kind = ?"
@@ -70,6 +84,7 @@ def top_categories(
         JOIN transactions t ON t.category_id = c.id
         WHERE c.active = 1
           AND t.occurred_at >= ?
+          {ranked_chip_sql}
           {kind_sql}
         GROUP BY c.id
         ORDER BY uses DESC, c.id ASC
@@ -81,7 +96,9 @@ def top_categories(
 
     if len(result) < limit:
         seen = {c.id for c in result}
-        pad_sql = "SELECT id, kind, name, active FROM categories WHERE active = 1"
+        pad_sql = (
+            f"SELECT id, kind, name, active FROM categories WHERE active = 1 {pad_chip_sql}"
+        )
         pad_params: list[object] = []
         if kind_value is not None:
             pad_sql += " AND kind = ?"

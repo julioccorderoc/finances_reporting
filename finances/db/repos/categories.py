@@ -5,12 +5,26 @@ import sqlite3
 from finances.domain.models import Category, TransactionKind
 
 
+_PICKER_COLUMNS = "auto_only, chip_eligible, icon"
+
+
 def _row_to_category(row: sqlite3.Row) -> Category:
+    """Project a row into ``Category``.
+
+    The picker columns (migration 021) are optional in the SELECT: the
+    older callers here list their columns by hand and do not need them,
+    so their absence falls back to the model defaults rather than
+    forcing every query to widen.
+    """
+    keys = row.keys()
     return Category(
         id=row["id"],
         kind=TransactionKind(row["kind"]),
         name=row["name"],
         active=bool(row["active"]),
+        auto_only=bool(row["auto_only"]) if "auto_only" in keys else False,
+        chip_eligible=bool(row["chip_eligible"]) if "chip_eligible" in keys else True,
+        icon=row["icon"] if "icon" in keys else None,
     )
 
 
@@ -64,6 +78,28 @@ def list_for_kind(
         sql += " AND active = 1"
     sql += " ORDER BY kind, name"
     rows = conn.execute(sql, (kind_value, transfer)).fetchall()
+    return [_row_to_category(r) for r in rows]
+
+
+def list_pickable(conn: sqlite3.Connection) -> list[Category]:
+    """Every category a human may choose by hand.
+
+    ``active = 1 AND auto_only = 0`` (migration 021) — not retired, and
+    not something the system writes for itself. This is the one place
+    that definition lives; picker surfaces read it rather than
+    re-deriving it, so "why is Fees in the list but not on a chip?" has a
+    single answer in the data.
+
+    Transfer and adjustment categories are all ``auto_only`` and so never
+    come back here. That is deliberate for the triage picker, where a
+    transfer is confirmed as a *pair* rather than declared by tagging one
+    leg; :func:`list_for_kind` still offers them for the surfaces that
+    let the owner say "this moved, it was not spent".
+    """
+    rows = conn.execute(
+        f"SELECT id, kind, name, active, {_PICKER_COLUMNS} FROM categories"
+        " WHERE active = 1 AND auto_only = 0 ORDER BY kind, name"
+    ).fetchall()
     return [_row_to_category(r) for r in rows]
 
 

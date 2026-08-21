@@ -10,6 +10,25 @@ Rule of thumb: a category earns its place only if it changes a decision.
 When two could fit, apply the disambiguating test below; when no test
 settles it, leave `needs_review = 1` rather than guessing.
 
+The **Test** column is machine-read. `finances.domain.category_definitions`
+parses the `## Expense` and `## Income` tables below and the triage picker
+shows the sentence at the moment of choosing, so the wording here is the
+wording on screen. A pickable category with no row here fails the suite by
+name — write the sentence, never hardcode one in a template.
+
+## Which categories can be picked by hand
+
+Three flags on `categories`, since migration 021:
+
+| Flag | Means |
+|---|---|
+| `active = 0` | **Retired.** Nothing new should land here. Never deleted — existing rows keep the id, and reviving one is a flag flip. |
+| `auto_only = 1` | **System-written.** Real rows land here constantly; a human just never chooses it. All transfer and adjustment kinds, plus `Interest`. |
+| `chip_eligible = 0` | Pickable, but kept off the eight numbered chips — its usage count reflects rules, not choices. `Fees` only. |
+
+**Pickable = `active = 1 AND auto_only = 0`.** A chip additionally needs
+`chip_eligible = 1`.
+
 ## Expense
 
 | Category | Test |
@@ -24,13 +43,12 @@ settles it, leave `needs_review = 1` rather than guessing.
 | **Transport** | Getting around: fuel, taxi, bus, vehicle upkeep. |
 | **Health** | Prescription, doctor, lab, clinic, hospital. |
 | **Personal Care** | Things you'd buy while *not* sick: pharmacy counter, grooming, barber, gym, skincare. |
-| **Clothing** | Apparel + footwear. Deliberately not folded into `Purchases` (migration 005). |
-| **Purchases** | Durable goods that aren't clothes: gadgets, furniture, household items. |
+| **Purchases** | Durable goods: gadgets, furniture, household items — and clothes and footwear, which used to have their own category (migration 021). |
 | **Subscriptions** | Recurring digital services. Auto-assigned (Netflix/Spotify/Disney/YT Premium). |
 | **Utilities** | Electricity, water, gas, internet, phone service. |
 | **Rent** | Monthly payment to the landlord. Distinct from `Utilities`. |
 | **Education** | Courses, tuition, books bought to learn. |
-| **Fees** | Bank commissions. **Auto-only** — `active = 0`, hidden from the picker (migration 011). |
+| **Fees** | Bank commissions. Nearly always auto-assigned by `category_rules`, but pickable by hand since migration 018 — the ADR-019 reversal cleanup needs it. Never occupies a numbered chip (`chip_eligible = 0`, migration 021). |
 | **Other Expense** | Escape hatch. Should trend toward zero; a large count here is a triage backlog, not a category. |
 
 ## Income
@@ -41,7 +59,7 @@ settles it, leave `needs_review = 1` rather than guessing.
 | **Gigs** | Freelance / one-off work. |
 | **Loan Repayment** | Money coming back from a `Lending` row. |
 | **Other Income** | Everything else. |
-| **Interest** | Binance Earn rewards. **Auto-only** — `active = 0` (migration 011). |
+| **Interest** | Binance Earn rewards. **Auto-only** — `auto_only = 1` (migration 021); still `active = 0` from migration 011 until the Wave 2 picker cutover. Not retired: rows land here every day. |
 
 ## Transfer + adjustment — never picked by hand
 
@@ -77,9 +95,10 @@ is a flag flip.
 
 | Category | Why | Migration |
 |---|---|---|
-| `Interest`, `Fees` | Always auto-assigned; only added picker noise. | 011 |
+| `Interest`, `Fees` | Always auto-assigned; only added picker noise. `Fees` came back in 018 and `Interest` is now expressed as `auto_only`, not retirement. | 011 |
 | `Lifestyle` | Zero rows in nine months, no definition; every example routes to `Leisure` / `Personal Care` / `Purchases` / `Clothing`. | 013 |
 | `Tools` | Zero rows in nine months; subset of `Purchases`. | 013 |
+| `Clothing` | Owner decision 2026-08-21: apparel is just `Purchases`. The split (migration 005) never changed a decision in nine months, which is the bar this file sets. The ten rows were moved to `Purchases`. | 021 |
 
 ## History
 
@@ -92,3 +111,6 @@ is a flag flip.
   person names) were left in `Leisure` for hand triage — they carry no
   intent signal.
 - **013** — `Lifestyle` + `Tools` deactivated.
+- **018** — `Fees` pickable again (reversal cleanup, ADR-019).
+- **021** — `auto_only` / `chip_eligible` / `icon` added, so `active` stops
+  carrying three meanings at once. `Clothing` retired into `Purchases`.

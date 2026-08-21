@@ -77,6 +77,13 @@ class Category(BaseModel):
     kind: TransactionKind
     name: str
     active: bool = True
+    # Picker metadata (migration 021). ``active`` means "not retired";
+    # ``auto_only`` means "the system writes this, a human never picks it".
+    # Pickable is ``active and not auto_only``; a chip additionally needs
+    # ``chip_eligible`` (Fees is pickable but must not own keyboard key 1).
+    auto_only: bool = False
+    chip_eligible: bool = True
+    icon: str | None = None
     created_at: datetime | None = None
 
     @field_validator("created_at")
