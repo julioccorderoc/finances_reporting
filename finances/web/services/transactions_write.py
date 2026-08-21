@@ -26,7 +26,7 @@ from finances.db.repos import transactions as transactions_repo
 from finances.domain import rates as rates_engine
 from finances.domain import realized_rates
 from finances.domain.money import MOVEMENT_CATEGORY_KIND
-from finances.domain.models import Category, Transaction
+from finances.domain.models import Category, Transaction, TransactionKind
 from finances.web.services.transactions_query import (
     TransactionCard,
     _project_card,
@@ -68,6 +68,19 @@ def _is_p2p_sell(txn: Transaction) -> bool:
     return txn.source_ref.startswith("p2p:") and txn.amount < 0
 
 
+def category_fits(txn_kind: TransactionKind, category_kind: TransactionKind) -> bool:
+    """Whether a category of ``category_kind`` may be applied to a row.
+
+    The predicate behind :func:`_reject_contradictory_category`, exposed so
+    the triage queue can apply it to a *guess* before offering it. A guess
+    the save path would refuse is a 422 waiting for a click, and the
+    accept-the-guess chip resolves a row without opening the modal.
+
+    Asymmetric on purpose — see :func:`_reject_contradictory_category`.
+    """
+    return category_kind is MOVEMENT_CATEGORY_KIND or category_kind is txn_kind
+
+
 def _reject_contradictory_category(txn: Transaction, category: Category) -> None:
     """Refuse a category whose kind contradicts the row's kind.
 
@@ -85,9 +98,7 @@ def _reject_contradictory_category(txn: Transaction, category: Category) -> None
     Raises ``ValueError`` (the 400 surface) before anything is written, so a
     rejected save leaves every field of the row alone.
     """
-    if category.kind is MOVEMENT_CATEGORY_KIND:
-        return
-    if category.kind is txn.kind:
+    if category_fits(txn.kind, category.kind):
         return
     raise ValueError(
         f"category {category.name!r} is a {category.kind.value} category and "
@@ -214,4 +225,5 @@ def apply_edit(
 __all__ = [
     "TransactionEditRequest",
     "apply_edit",
+    "category_fits",
 ]

@@ -41,6 +41,7 @@ from finances.web.routers.partials import _modal_url_for
 from finances.web.services.triage import (
     PairProposal,
     TriageItem,
+    TriageNeeds,
     TriageType,
     neighbours_of,
     next_item_after,
@@ -161,12 +162,19 @@ def _pair_item(deposit_id: int, sell_id: int) -> TriageItem:
         item_id=f"pair:{deposit_id}:{sell_id}",
         type=TriageType.PAIR,
         sort_key=datetime(2026, 1, 1, tzinfo=UTC),
-        bucket=2,
+        # Pairs are bucket 1 since the triage redesign — category first,
+        # pairs second, priced roughly last.
+        bucket=1,
+        needs=TriageNeeds(pair=True),
         pair_proposal=PairProposal(
             proposal_id=f"{deposit_id}:{sell_id}",
             deposit=_card(deposit_id),
             sell=_card(sell_id),
             confidence=1.0,
+            days_apart=0,
+            drift_pct=None,
+            implied_rate=None,
+            refused=False,
             details={
                 "bank_transaction_id": deposit_id,
                 "binance_transaction_id": sell_id,

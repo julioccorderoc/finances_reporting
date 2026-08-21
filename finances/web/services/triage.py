@@ -9,31 +9,57 @@ Per rule-012, this module reuses existing domain primitives:
   :func:`finances.domain.rates.resolve`.
 * PAIR items wrap :class:`finances.domain.transfers.BankAnchoredP2pPairing`
   proposals; we don't re-implement matching logic.
+* Guesses come from :func:`finances.domain.categorization.suggest` — the
+  same engine ingest runs — so a guess honours regex scope, priority,
+  ``active`` and the ADR-017 amount bounds without a second reading of the
+  rules table.
 * :func:`confirm_pair` delegates to :func:`finances.domain.transfers.create_transfer`
   (mode 3 — both anchors). The web layer never executes its own
   INSERT/UPDATE on ``transactions``.
+
+**Payload v2** (`design_handoff_triage/`, criteria A1-A4, A8, H1, K1-K6).
+Two things changed with the redesign:
+
+*Buckets follow the queue's own group order* — 0 needs a category,
+1 pair proposals, 2 priced roughly. An approximate rate never blocks a
+sitting (A8/D6), so it walks last; ``blocking_count`` is category + pair.
+Criterion A3 lists category/rate/pair instead, and the README's order
+wins — logged in `design_handoff_triage/NOTES.md`.
+
+*A rate item is computed, never read off the stored flag* (K2).
+``transactions.needs_review`` is what a write derives and what
+``reports/needs_review`` reads; it goes stale the moment a rate lands, and
+is wrong on 25 live rows. Membership here is the projection's answer:
+approximate (ADR-021 ``*_nearest``) or unpriceable. Nothing is written to
+make that true.
 """
 
 from __future__ import annotations
 
 import sqlite3
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
+from finances.db.repos import accounts as accounts_repo
 from finances.db.repos import categories as categories_repo
+from finances.domain import categorization, money
+from finances.domain import rates as rates_engine
 from finances.domain import transfers as transfers_domain
+from finances.domain.models import Transaction, TransactionKind
 from finances.domain.transfers import BankAnchoredP2pPairing, create_transfer
+from finances.format import clean_merchant
 from finances.web.services.transactions_query import (
     TXN_QUERY_BASE,
     TransactionCard,
     _project_card,
     _row_to_transaction,
 )
+from finances.web.services.transactions_write import category_fits
 
 
 # ---------------------------------------------------------------------------
@@ -49,6 +75,34 @@ class TriageType(StrEnum):
     PAIR = "pair"
 
 
+class PairAssessment(BaseModel):
+    """The arithmetic behind "96% confident", and whether it is confirmable.
+
+    One implementation, two readers: the payload renders it (criterion H1,
+    the metadata row under the two legs) and
+    :func:`_reject_implausible_pair` raises on it. They cannot disagree
+    about what is refusable, which is the point — the modal must be able
+    to grey the button out *before* the click, and say why.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    days_apart: int
+    drift_pct: Decimal | None
+    """Percentage points — ``Decimal("12.4")`` means 12.4% — not a ratio.
+
+    ``None`` when the sell carries no ``user_rate``: there is nothing to
+    score the amounts against, and refusing such a pair outright would
+    block exactly the legacy rows the manual path exists to clear."""
+    implied_rate: Decimal | None
+    """Quote units per dollar implied by the two legs (VES / USDT).
+
+    ``None`` for a same-currency pair, where the ratio would be ~1 and
+    mean nothing."""
+    refused: bool
+    refuse_reason: str | None = None
+
+
 class PairProposal(BaseModel):
     """One BankAnchoredP2pPairing proposal projected for the UI."""
 
@@ -58,14 +112,73 @@ class PairProposal(BaseModel):
     deposit: TransactionCard
     sell: TransactionCard
     confidence: float
+    days_apart: int
+    drift_pct: Decimal | None
+    implied_rate: Decimal | None
+    refused: bool
+    refuse_reason: str | None = None
     details: dict[str, Any]
+
+
+class TriageNeeds(BaseModel):
+    """What this row is still missing. More than one may be true (A2)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    cat: bool = False
+    rate: bool = False
+    pair: bool = False
+
+
+class TriageAccount(BaseModel):
+    """The row's account, as the queue renders it.
+
+    ``detail`` is ``accounts.institution``. The design shows a masked
+    account number beside the name; the schema has no such column, and
+    adding one is a migration — see `design_handoff_triage/NOTES.md`.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    detail: str | None
+    kind: str
+    currency: str
+
+
+class TriageGuess(BaseModel):
+    """A proposed category, and the evidence for it (criteria K6, G7).
+
+    Exactly one of the two shapes is populated:
+
+    * ``rule_id`` + ``pattern`` — the categorization engine matched a rule,
+      honouring its regex scope, priority, ``active`` flag and amount
+      bounds. The chip's tooltip cites both.
+    * ``times`` — no rule matched, but this exact bank string has been
+      sorted into one category at least
+      :data:`LEARNED_GUESS_MIN` times on this account before.
+
+    A guess whose kind contradicts the row's is never offered: the save
+    path refuses it (``category_fits``), and the accept-the-guess chip
+    writes without opening the modal, so an offered-then-refused guess is
+    a 422 waiting for a click.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    category_id: int
+    label: str
+    rule_id: int | None = None
+    pattern: str | None = None
+    times: int | None = None
 
 
 class TriageItem(BaseModel):
     """One item in the unified queue.
 
     Type-discriminated payload: only ``txn_card`` (for RATE/CATEGORY) or
-    ``pair_proposal`` (for PAIR) is populated per item.
+    ``pair_proposal`` (for PAIR) is populated per item. Everything the
+    queue renders is here — the UI computes nothing from guesses (K1).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -74,8 +187,22 @@ class TriageItem(BaseModel):
     type: TriageType
     sort_key: datetime
     bucket: int
+    needs: TriageNeeds = Field(default_factory=TriageNeeds)
     txn_card: TransactionCard | None = None
     txn_issue_badges: list[str] = Field(default_factory=list)
+    account: TriageAccount | None = None
+    merchant: str | None = None
+    """Cleaned name, or ``None`` when the raw string is a bank reference.
+
+    See :func:`finances.format.clean_merchant`: a typographic cleanup, not
+    a merchant identity."""
+    guess: TriageGuess | None = None
+    rough: str | None = None
+    """How far off an approximate rate is — ``"BCV, 3 days later"``.
+
+    ``None`` for a row priced inside a tier's window, and for one that
+    cannot be priced at all: "roughly" and "not at all" are different
+    states and the design renders them differently."""
     pair_proposal: PairProposal | None = None
 
 
@@ -90,6 +217,39 @@ class TriageQueue(BaseModel):
     integrity_warnings: list[str]
     parked_items: list[TriageItem]
     parked_count: int
+
+    @computed_field
+    @property
+    def category_count(self) -> int:
+        """Rows needing a category — the first group, and bucket 0."""
+        return self.counts.get(TriageType.CATEGORY, 0)
+
+    @computed_field
+    @property
+    def pair_count(self) -> int:
+        """Proposed transfer pairs — the second group, and bucket 1."""
+        return self.counts.get(TriageType.PAIR, 0)
+
+    @computed_field
+    @property
+    def approximate_count(self) -> int:
+        """Rows priced roughly — the third group, and bucket 2."""
+        return self.counts.get(TriageType.RATE, 0)
+
+    @computed_field
+    @property
+    def blocking_count(self) -> int:
+        """What the header answers with: "N rows need you" (criterion A8).
+
+        Approximate rows are deliberately excluded. They are already
+        priced, the figure is usable, and the header must be able to read
+        "Nothing needs you" while the *Priced roughly* group still has
+        rows in it — otherwise the queue never clears and the sitting
+        never ends.
+
+        Derived rather than stored so it cannot drift from ``counts``.
+        """
+        return self.category_count + self.pair_count
 
     @property
     def total(self) -> int:
@@ -133,144 +293,297 @@ def _project_from_row(conn: sqlite3.Connection, row) -> TransactionCard:
 # ---------------------------------------------------------------------------
 
 
-def _collect_txn_items(
-    conn: sqlite3.Connection,
-) -> list[TriageItem]:
-    """Read needs_review + missing-category rows and merge into items.
+# How many times the same bank string must already have been sorted into
+# one category before the queue offers it as a guess. Three is the point
+# where "you always file this here" stops being a coincidence; below it the
+# chip would be proposing the owner's last stray click back to them.
+LEARNED_GUESS_MIN = 3
 
-    A single transaction with both issues becomes ONE item with two
-    badges. Transfer/adjustment rows are excluded from the CATEGORY
-    surface — those rarely carry a category by design and surfacing them
-    would noise the queue per the Q9 spec. Parked rows (spec §5.3) are
-    excluded from both surfaces — Park is a durable "not now", so a
-    parked item must not keep reappearing in the queue.
+# Short, human tier names for the ``rough`` label. Keyed by the *base*
+# source, with ADR-021's suffix stripped first.
+_TIER_LABELS: dict[str, str] = {
+    rates_engine.USER_RATE_SOURCE: "Yours",
+    rates_engine.REALIZED_SOURCE: "Realized",
+    rates_engine.BINANCE_P2P_SOURCE: "P2P median",
+    rates_engine.BCV_SOURCE: "BCV",
+}
+
+_LEARNED_GUESS_SQL = """
+    SELECT t.category_id AS category_id, c.name AS name, c.kind AS kind,
+           COUNT(*) AS n
+    FROM transactions t
+    JOIN categories c ON c.id = t.category_id
+    WHERE t.description = ?
+      AND t.account_id = ?
+      AND t.kind = ?
+      AND t.category_id IS NOT NULL
+    GROUP BY t.category_id
+    ORDER BY n DESC, t.category_id ASC
+    LIMIT 1
+"""
+
+
+def _rough_label(resolution: rates_engine.RateResolution | None) -> str | None:
+    """"P2P median, 21 days later" — the *Priced roughly* group's per-row line.
+
+    Direction is the rate's, relative to the transaction: a positive
+    ``age_days`` means the rate predates the row (it was carried forward
+    too far), a negative one means it was published afterwards, which is
+    hindsight. The design says both out loud, so neither is flattened into
+    a bare "approximate".
     """
-    rate_rows = conn.execute(
-        TXN_QUERY_BASE
-        + """
-        WHERE t.needs_review = 1
-          AND t.parked = 0
-        ORDER BY t.occurred_at, t.id
-        """
-    ).fetchall()
+    if resolution is None or not resolution.approximate:
+        return None
+    if resolution.age_days is None:  # pragma: no cover - defensive
+        return None
+    base = resolution.source.removesuffix(rates_engine.NEAREST_SUFFIX)
+    label = _TIER_LABELS.get(base, base)
+    days = abs(resolution.age_days)
+    unit = "day" if days == 1 else "days"
+    direction = "later" if resolution.age_days < 0 else "earlier"
+    return f"{label}, {days} {unit} {direction}"
+
+
+def _accounts_by_id(conn: sqlite3.Connection) -> dict[int, TriageAccount]:
+    """Every account, once per queue build rather than once per row.
+
+    There are six of them and a sitting can carry hundreds of rows; the
+    join would be per-row for a table that fits in a breath.
+    """
+    return {
+        account.id: TriageAccount(
+            name=account.name,
+            detail=account.institution,
+            kind=account.kind.value,
+            currency=account.currency,
+        )
+        for account in accounts_repo.list_all(conn, include_inactive=True)
+        if account.id is not None
+    }
+
+
+def _pricing_state(
+    conn: sqlite3.Connection,
+    cache: dict[tuple[str, date], rates_engine.RateResolution],
+    txn: Transaction,
+) -> rates_engine.RateResolution:
+    """Ask the resolver how this row prices, memoised by (currency, day).
+
+    Every row reaching here has ``user_rate IS NULL`` and a non-native
+    currency, so its resolution is a pure function of those two values —
+    which is what makes the memo safe, and what turns 748 live bolívar
+    rows into a few hundred lookups.
+    """
+    key = (txn.currency, txn.occurred_at.date())
+    resolution = cache.get(key)
+    if resolution is None:
+        resolution = rates_engine.resolve_detail(conn, txn)
+        cache[key] = resolution
+    return resolution
+
+
+def _guess_for(
+    conn: sqlite3.Connection, txn: Transaction
+) -> TriageGuess | None:
+    """Propose a category for ``txn``, or ``None`` (criteria K6, G7).
+
+    Tier one is the real engine — :func:`categorization.suggest`, the same
+    call ingest makes — so scope, priority, ``active`` and the ADR-017
+    amount bounds are honoured by construction rather than by a second
+    reading of the rules table (rule-006 forbids the second reading, and
+    G8 forbids this surface writing rules at all).
+
+    Tier two is the owner's own history: the same bank string, on the same
+    account, filed the same way at least :data:`LEARNED_GUESS_MIN` times.
+    Exact string equality on purpose — a fuzzy match here would propose a
+    category from a merchant the owner never linked.
+    """
+    if not txn.description:
+        return None
+
+    match = categorization.suggest(
+        conn,
+        categorization.CategorizationRequest(
+            description=txn.description,
+            source=txn.source,
+            account_id=txn.account_id,
+            amount=txn.amount,
+        ),
+    )
+    if match is not None:
+        category = categories_repo.get_by_id(conn, match.category_id)
+        if category is not None and category_fits(txn.kind, category.kind):
+            return TriageGuess(
+                category_id=match.category_id,
+                label=category.name,
+                rule_id=match.rule_id,
+                pattern=match.pattern,
+            )
+
+    row = conn.execute(
+        _LEARNED_GUESS_SQL,
+        (txn.description, txn.account_id, txn.kind.value),
+    ).fetchone()
+    if row is None or int(row["n"]) < LEARNED_GUESS_MIN:
+        return None
+    if not category_fits(txn.kind, TransactionKind(row["kind"])):
+        return None
+    return TriageGuess(
+        category_id=int(row["category_id"]),
+        label=row["name"],
+        times=int(row["n"]),
+    )
+
+
+def _bucket_for(needs: TriageNeeds) -> int:
+    """0 needs a category, 1 a pair, 2 priced roughly.
+
+    The redesign's group order, and the modal's walk order with it. A row
+    missing both a category and a rate sits in bucket 0: the category is
+    what blocks the sitting, the rate is not (A8/D6).
+
+    Criterion A3 lists category/rate/pair instead; the README's group
+    order wins, and the deviation is logged in
+    `design_handoff_triage/NOTES.md`.
+    """
+    if needs.cat:
+        return 0
+    if needs.pair:
+        return 1
+    return 2
+
+
+def _collect_txn_items(
+    conn: sqlite3.Connection, *, parked: bool = False
+) -> list[TriageItem]:
+    """Build one item per transaction that still needs a decision.
+
+    Two surfaces, merged by transaction id so a row missing both a
+    category and a trustworthy rate is ONE item with two badges (A2):
+
+    * **category** — ``category_id IS NULL``, income or expense only.
+      Transfers and adjustments are never asked about (rule-006,
+      ADR-018), so surfacing them would be noise.
+    * **rate** — the projection says the row is priced approximately
+      (ADR-021 ``*_nearest``) or cannot be priced at all. Candidates are
+      narrowed in SQL to the only rows that *can* be either: a native-USD
+      row is always 1:1, and a row carrying ``user_rate`` is priced by
+      that. Everything else is asked of the resolver.
+
+      This is criterion K2, and it is a change of question rather than a
+      change of data: ``needs_review`` stays exactly as stored, including
+      on the 25 live rows that carry it while pricing perfectly well.
+
+    ``parked`` selects the other side of the same predicates. A parked row
+    keeps its live badges — parking defers a row, it does not resolve it —
+    but leaves the queue entirely.
+    """
+    parked_flag = 1 if parked else 0
 
     cat_rows = conn.execute(
         TXN_QUERY_BASE
         + """
         WHERE t.category_id IS NULL
           AND t.kind NOT IN ('transfer', 'adjustment')
-          AND t.parked = 0
+          AND t.parked = ?
         ORDER BY t.occurred_at, t.id
-        """
+        """,
+        (parked_flag,),
     ).fetchall()
 
-    # Index both sets by id so a single txn that hits both can merge.
-    by_id: dict[int, dict[str, Any]] = {}
-    for row in rate_rows:
-        by_id.setdefault(int(row["id"]), {"row": row, "badges": []})[
-            "badges"
-        ].append("rate")
+    # The native-USD set is imported, never spelled out again
+    # (tests/test_money_is_the_only_definition.py pins that).
+    natives = sorted(money.NATIVE_USD_CURRENCIES)
+    placeholders = ",".join("?" * len(natives))
+    rate_candidates = conn.execute(
+        TXN_QUERY_BASE
+        + f"""
+        WHERE t.parked = ?
+          AND t.user_rate IS NULL
+          AND t.currency NOT IN ({placeholders})
+        ORDER BY t.occurred_at, t.id
+        """,  # noqa: S608 - placeholders only, values are bound
+        (parked_flag, *natives),
+    ).fetchall()
+
+    entries: dict[int, dict[str, Any]] = {}
     for row in cat_rows:
-        entry = by_id.setdefault(int(row["id"]), {"row": row, "badges": []})
-        entry["badges"].append("category")
+        entry = entries.setdefault(
+            int(row["id"]), {"row": row, "cat": False, "rate": False}
+        )
+        entry["cat"] = True
+
+    cache: dict[tuple[str, date], rates_engine.RateResolution] = {}
+    for row in rate_candidates:
+        resolution = _pricing_state(conn, cache, _row_to_transaction(row))
+        if not resolution.approximate and resolution.rate is not None:
+            continue
+        entry = entries.setdefault(
+            int(row["id"]), {"row": row, "cat": False, "rate": False}
+        )
+        entry["rate"] = True
+        entry["resolution"] = resolution
+
+    accounts = _accounts_by_id(conn)
 
     items: list[TriageItem] = []
-    for txn_id, entry in by_id.items():
+    for txn_id, entry in entries.items():
         row = entry["row"]
-        badges: list[str] = entry["badges"]
-        # Pick discriminator type: a merged item picks the more "blocking"
-        # of the two. RATE wins because a missing rate yields a None USD
-        # amount (more visible to triage).
-        item_type = TriageType.RATE if "rate" in badges else TriageType.CATEGORY
-        # Difficulty bucket (spec §5.5, ADR-012 Amendment): a missing rate
-        # dominates a missing category, because it is the expensive kind of
-        # thinking. Bucket 0 = category-only (needs_review=0), bucket 1 =
-        # needs_review=1 regardless of whether category is also missing.
-        bucket = 1 if "rate" in badges else 0
+        needs = TriageNeeds(cat=entry["cat"], rate=entry["rate"], pair=False)
+        txn = _row_to_transaction(row)
         card = _project_from_row(conn, row)
+        badges = [
+            badge
+            for badge, present in (("category", needs.cat), ("rate", needs.rate))
+            if present
+        ]
         items.append(
             TriageItem(
                 item_id=f"txn:{txn_id}",
-                type=item_type,
+                # The discriminator names the blocking problem, so the
+                # filter chips and the buckets agree with each other.
+                type=TriageType.CATEGORY if needs.cat else TriageType.RATE,
                 sort_key=card.occurred_at,
-                bucket=bucket,
+                bucket=_bucket_for(needs),
+                needs=needs,
                 txn_card=card,
-                txn_issue_badges=sorted(set(badges)),
+                txn_issue_badges=badges,
+                account=accounts.get(txn.account_id),
+                merchant=clean_merchant(card.description),
+                # Only a row being asked for a category gets one; guessing
+                # at a row that already has one is answering a question
+                # nobody asked.
+                guess=_guess_for(conn, txn) if needs.cat else None,
+                rough=_rough_label(entry.get("resolution")),
                 pair_proposal=None,
             )
         )
 
+    items.sort(key=lambda it: (it.bucket, it.sort_key, it.item_id))
     return items
 
 
 def _collect_parked_items(conn: sqlite3.Connection) -> list[TriageItem]:
-    """Read parked rows carrying a live issue, for the "Parked" group.
+    """The parked group: same predicates, other side of ``parked``.
 
-    Mirrors :func:`_collect_txn_items`'s two predicates exactly, but with
-    ``t.parked = 1`` — a parked row must still show its live issue
-    badges, because parking defers a row, it does not resolve it (Task 3
-    spec). A row that hits both predicates still merges into ONE item
-    with two badges, same as the main collector.
+    A separate list, never merged into ``items`` or into any count except
+    ``parked_count``.
     """
-    rate_rows = conn.execute(
-        TXN_QUERY_BASE
-        + """
-        WHERE t.needs_review = 1
-          AND t.parked = 1
-        ORDER BY t.occurred_at, t.id
-        """
-    ).fetchall()
-
-    cat_rows = conn.execute(
-        TXN_QUERY_BASE
-        + """
-        WHERE t.category_id IS NULL
-          AND t.kind NOT IN ('transfer', 'adjustment')
-          AND t.parked = 1
-        ORDER BY t.occurred_at, t.id
-        """
-    ).fetchall()
-
-    by_id: dict[int, dict[str, Any]] = {}
-    for row in rate_rows:
-        by_id.setdefault(int(row["id"]), {"row": row, "badges": []})[
-            "badges"
-        ].append("rate")
-    for row in cat_rows:
-        entry = by_id.setdefault(int(row["id"]), {"row": row, "badges": []})
-        entry["badges"].append("category")
-
-    items: list[TriageItem] = []
-    for txn_id, entry in by_id.items():
-        row = entry["row"]
-        badges: list[str] = entry["badges"]
-        item_type = TriageType.RATE if "rate" in badges else TriageType.CATEGORY
-        bucket = 1 if "rate" in badges else 0
-        card = _project_from_row(conn, row)
-        items.append(
-            TriageItem(
-                item_id=f"txn:{txn_id}",
-                type=item_type,
-                sort_key=card.occurred_at,
-                bucket=bucket,
-                txn_card=card,
-                txn_issue_badges=sorted(set(badges)),
-                pair_proposal=None,
-            )
-        )
-
-    # Not routed through build_queue's outer sort (it's a separate list,
-    # never merged into `items`), so sort here to preserve the same
-    # ``ORDER BY t.occurred_at, t.id`` ordering the SQL asked for.
-    items.sort(key=lambda it: (it.sort_key, it.item_id))
-    return items
+    return _collect_txn_items(conn, parked=True)
 
 
 def _collect_pair_items(conn: sqlite3.Connection) -> list[TriageItem]:
-    """Run BankAnchoredP2pPairing and project proposals."""
+    """Run BankAnchoredP2pPairing and project proposals.
+
+    The strategy decides *what* to propose; this adds the numbers the
+    modal shows underneath — days apart, drift, implied rate — and whether
+    the pair is confirmable at all, from the same assessment the write
+    path raises on (criterion H1).
+    """
     strategy = BankAnchoredP2pPairing(conn)
     proposals = strategy.match()
 
+    accounts = _accounts_by_id(conn)
     items: list[TriageItem] = []
     for proposal in proposals:
         # Per finances/domain/transfers.py, the strategy returns
@@ -286,21 +599,32 @@ def _collect_pair_items(conn: sqlite3.Connection) -> list[TriageItem]:
 
         deposit_card = _project_from_row(conn, deposit_row)
         sell_card = _project_from_row(conn, sell_row)
+        verdict = assess_pair(
+            _row_to_transaction(deposit_row), _row_to_transaction(sell_row)
+        )
 
+        needs = TriageNeeds(pair=True)
         proposal_id = f"{deposit_id}:{sell_id}"
         items.append(
             TriageItem(
                 item_id=f"pair:{proposal_id}",
                 type=TriageType.PAIR,
                 sort_key=deposit_card.occurred_at,
-                bucket=2,
+                bucket=_bucket_for(needs),
+                needs=needs,
                 txn_card=None,
                 txn_issue_badges=[],
+                account=accounts.get(_row_to_transaction(deposit_row).account_id),
                 pair_proposal=PairProposal(
                     proposal_id=proposal_id,
                     deposit=deposit_card,
                     sell=sell_card,
                     confidence=proposal.confidence,
+                    days_apart=verdict.days_apart,
+                    drift_pct=verdict.drift_pct,
+                    implied_rate=verdict.implied_rate,
+                    refused=verdict.refused,
+                    refuse_reason=verdict.refuse_reason,
                     details=dict(proposal.details),
                 ),
             )
@@ -343,17 +667,22 @@ def build_queue(
     """Assemble the unified triage queue.
 
     Order of operations:
-      1) Collect txn-issue items (RATE / CATEGORY, merging duplicates,
+      1) Collect txn-issue items (CATEGORY / RATE, merging duplicates,
          excluding parked rows — spec §5.3).
       2) Collect pair items (BankAnchoredP2pPairing.match).
-      3) Sort all items by (bucket, sort_key, item_id) — difficulty bucket
-         first, then oldest-first, with item_id as a mandatory tiebreak for
-         the many rows sharing a timestamp.
+      3) Sort all items by (bucket, sort_key, item_id) — group first, then
+         oldest-first, with item_id as a mandatory tiebreak for the many
+         rows sharing a timestamp.
       4) Compute counts + bucket_counts on the unfiltered set.
       5) Apply ``type_filter`` if provided.
       6) Build integrity warnings from unreconciled transfers.
       7) Collect parked items (Task 3) — a separate surface, never part of
          ``items``, ``counts``, ``bucket_counts``, or the type filter above.
+
+    Buckets are 0 category, 1 pairs, 2 priced roughly — see
+    :func:`_bucket_for`. They are server-assigned so the list and the modal
+    cannot disagree about order (criterion K5), and the modal walks them in
+    this order regardless of which groups the owner has collapsed.
     """
     txn_items = _collect_txn_items(conn)
     pair_items = _collect_pair_items(conn)
@@ -525,7 +854,59 @@ MANUAL_PAIR_MAX_DAYS = 5
 MANUAL_PAIR_MAX_DRIFT = Decimal("0.10")
 
 
-def _reject_implausible_pair(deposit: Any, sell: Any) -> None:
+def assess_pair(deposit: Transaction, sell: Transaction) -> PairAssessment:
+    """Score a candidate pairing: how far apart, how far off, confirmable?
+
+    The single implementation of the plausibility bounds. The payload
+    renders it under the two legs (criterion H1) and
+    :func:`_reject_implausible_pair` raises on it, so the modal's disabled
+    button and the write path's 400 always agree — the design's danger
+    banner has to state the reason *before* the click.
+
+    ``implied_rate`` is the pair's own arithmetic: the bank leg's bolívars
+    over the exchange leg's dollars. Same-currency pairs get ``None``,
+    where the ratio would be ~1 and say nothing.
+    """
+    days_apart = abs((sell.occurred_at.date() - deposit.occurred_at.date()).days)
+
+    implied_rate: Decimal | None = None
+    if sell.amount != 0 and deposit.currency != sell.currency:
+        implied_rate = abs(deposit.amount) / abs(sell.amount)
+
+    drift_pct: Decimal | None = None
+    drift: Decimal | None = None
+    if sell.user_rate is not None and sell.user_rate > 0 and deposit.amount != 0:
+        expected = abs(sell.amount) * sell.user_rate
+        drift = abs(abs(deposit.amount) - expected) / abs(deposit.amount)
+        drift_pct = drift * 100
+
+    if days_apart > MANUAL_PAIR_MAX_DAYS:
+        reason = (
+            f"refusing to pair: {days_apart} days apart "
+            f"({deposit.occurred_at.date()} vs {sell.occurred_at.date()}), "
+            f"limit is {MANUAL_PAIR_MAX_DAYS}"
+        )
+    elif drift is not None and drift > MANUAL_PAIR_MAX_DRIFT:
+        expected = abs(sell.amount) * sell.user_rate
+        reason = (
+            f"refusing to pair: the sell is worth {expected:.2f} "
+            f"{deposit.currency} at its recorded rate but the deposit is "
+            f"{abs(deposit.amount):.2f} — {drift:.0%} apart, limit is "
+            f"{MANUAL_PAIR_MAX_DRIFT:.0%}"
+        )
+    else:
+        reason = None
+
+    return PairAssessment(
+        days_apart=days_apart,
+        drift_pct=drift_pct,
+        implied_rate=implied_rate,
+        refused=reason is not None,
+        refuse_reason=reason,
+    )
+
+
+def _reject_implausible_pair(deposit: Transaction, sell: Transaction) -> None:
     """Refuse a pairing that cannot plausibly be the same movement of money.
 
     ``create_transfer`` drift-checks only same-currency pairs, ``doctor``
@@ -543,27 +924,13 @@ def _reject_implausible_pair(deposit: Any, sell: Any) -> None:
     A sell with no ``user_rate`` cannot be scored on amount, so only the
     date bound applies — refusing it outright would block exactly the
     legacy rows the manual path exists to clear.
+
+    The arithmetic itself lives in :func:`assess_pair`, which the queue
+    payload renders; this is the same verdict, raised.
     """
-    gap = abs((sell.occurred_at.date() - deposit.occurred_at.date()).days)
-    if gap > MANUAL_PAIR_MAX_DAYS:
-        raise ValueError(
-            f"refusing to pair: {gap} days apart "
-            f"({deposit.occurred_at.date()} vs {sell.occurred_at.date()}), "
-            f"limit is {MANUAL_PAIR_MAX_DAYS}"
-        )
-
-    if sell.user_rate is None or sell.user_rate <= 0 or deposit.amount == 0:
-        return
-
-    expected = abs(sell.amount) * sell.user_rate
-    drift = abs(abs(deposit.amount) - expected) / abs(deposit.amount)
-    if drift > MANUAL_PAIR_MAX_DRIFT:
-        raise ValueError(
-            f"refusing to pair: the sell is worth {expected:.2f} "
-            f"{deposit.currency} at its recorded rate but the deposit is "
-            f"{abs(deposit.amount):.2f} — {drift:.0%} apart, limit is "
-            f"{MANUAL_PAIR_MAX_DRIFT:.0%}"
-        )
+    verdict = assess_pair(deposit, sell)
+    if verdict.refused:
+        raise ValueError(verdict.refuse_reason)
 
 
 def confirm_pair(
@@ -619,10 +986,18 @@ def confirm_pair(
 
 
 __all__ = [
+    "LEARNED_GUESS_MIN",
+    "MANUAL_PAIR_MAX_DAYS",
+    "MANUAL_PAIR_MAX_DRIFT",
+    "PairAssessment",
     "PairProposal",
+    "TriageAccount",
+    "TriageGuess",
     "TriageItem",
+    "TriageNeeds",
     "TriageQueue",
     "TriageType",
+    "assess_pair",
     "build_queue",
     "confirm_pair",
     "neighbours_of",

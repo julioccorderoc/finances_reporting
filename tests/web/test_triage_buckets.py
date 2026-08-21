@@ -70,28 +70,36 @@ def bucket_db(web_db: sqlite3.Connection) -> sqlite3.Connection:
 
 
 def test_difficulty_beats_chronology(bucket_db: sqlite3.Connection) -> None:
+    """The two rows that block the sitting lead, oldest of them first.
+
+    The redesign reordered the buckets — 0 category, 1 pairs, 2 priced
+    roughly — so the rate-only row now goes last instead of second. The
+    principle is unchanged and stronger: an approximate rate does not
+    block a sitting at all (criteria A8/D6), so it walks after everything
+    that does.
+    """
     queue = build_queue(bucket_db)
 
-    # txn:2 is the NEWEST row but the only bucket-0 one, so it leads.
-    assert [i.item_id for i in queue.items] == ["txn:2", "txn:1", "txn:3"]
+    # txn:3 and txn:2 both need a category; txn:1 only needs a rate.
+    assert [i.item_id for i in queue.items] == ["txn:3", "txn:2", "txn:1"]
 
 
 def test_bucket_assignment(bucket_db: sqlite3.Connection) -> None:
     by_id = {i.item_id: i for i in build_queue(bucket_db).items}
 
     assert by_id["txn:2"].bucket == 0          # category only
-    assert by_id["txn:1"].bucket == 1          # rate issue
-    assert by_id["txn:3"].bucket == 1          # both -> rate dominates
+    assert by_id["txn:1"].bucket == 2          # priced roughly
+    assert by_id["txn:3"].bucket == 0          # both -> the category blocks
 
 
 def test_oldest_first_survives_inside_a_bucket(
     bucket_db: sqlite3.Connection,
 ) -> None:
     """Plan 1's guarantee must not be lost to the new leading sort key."""
-    bucket_1 = [i for i in build_queue(bucket_db).items if i.bucket == 1]
+    bucket_0 = [i for i in build_queue(bucket_db).items if i.bucket == 0]
 
-    assert [i.item_id for i in bucket_1] == ["txn:1", "txn:3"]
-    assert bucket_1[0].sort_key < bucket_1[1].sort_key
+    assert [i.item_id for i in bucket_0] == ["txn:3", "txn:2"]
+    assert bucket_0[0].sort_key < bucket_0[1].sort_key
 
 
 def test_tied_timestamps_still_break_on_item_id(
@@ -130,8 +138,12 @@ def test_bucket_counts_sum_to_the_item_count(
     queue = build_queue(bucket_db)
 
     assert sum(queue.bucket_counts.values()) == len(queue.items)
-    assert queue.bucket_counts[0] == 1
-    assert queue.bucket_counts[1] == 2
+    assert queue.bucket_counts[0] == 2
+    assert queue.bucket_counts[2] == 1
+    # And the named counts the header reads agree with them.
+    assert queue.category_count == 2
+    assert queue.approximate_count == 1
+    assert queue.blocking_count == 2
 
 
 def test_header_renders_counts_inside_the_swapped_region(
@@ -142,8 +154,9 @@ def test_header_renders_counts_inside_the_swapped_region(
     html = client.get("/triage").text
 
     queue_region = html.split('id="triage-queue"', 1)[1]
-    assert "Ready to categorize" in queue_region
-    assert "Missing a rate" in queue_region
+    assert "Needs a category" in queue_region
+    assert "Proposed pairs" in queue_region
+    assert "Priced roughly" in queue_region
     assert "Parked" in queue_region
 
 

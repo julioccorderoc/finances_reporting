@@ -296,8 +296,14 @@ def test_triage_queue_includes_category_items(
     }
 
     assert cat_only_id in cat_card_ids
-    # The merged one is a different item type (single merged row).
-    assert merged_id not in cat_card_ids
+    # The merged row is ONE item carrying both badges, and its type names
+    # the problem that blocks the sitting. Since the triage redesign that
+    # is the category, not the rate: an approximate rate never blocks
+    # (criteria A8/D6), so type and bucket agree on which group it walks in.
+    assert merged_id in cat_card_ids
+    merged = next(i for i in queue.items if i.txn_card and i.txn_card.id == merged_id)
+    assert merged.txn_issue_badges == ["category", "rate"]
+    assert merged.bucket == 0
 
 
 def test_triage_queue_excludes_transfer_kind_from_category_items(

@@ -21,6 +21,7 @@ so output never depends on the process locale.
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 
@@ -103,4 +104,54 @@ def fmt_month(value: date | datetime | str | None) -> str:
     return f"{_MONTH_ABBR[int(month_str) - 1]} {int(year_str)}"
 
 
-__all__ = ["EM_DASH", "fmt_date", "fmt_money", "fmt_month", "fmt_number"]
+# A run of this many digits or more marks a token as a reference number
+# rather than a name. Three is too aggressive (a street number survives);
+# four is where Provincial's own codes start (``CAR.DRV0013196230``).
+_CODE_DIGIT_RUN = 4
+
+_CODE_RUN = re.compile(rf"\d{{{_CODE_DIGIT_RUN},}}")
+_WORD = re.compile(r"[^\W\d_]{3,}", re.UNICODE)
+
+
+def clean_merchant(raw: str | None) -> str | None:
+    """A readable merchant name from a bank string, or ``None``.
+
+    Provincial writes every description in caps, and three different kinds
+    of thing land in the same column: real names
+    (``LUNCHERIA MILY GOURMET``), bank jargon (``COM. PAGO MOVIL``) and
+    pure references (``CAR.DRV0013196230``, ``TRAV0031264379000156203``).
+    Only the first two read as anything when title-cased; the third is a
+    number wearing letters.
+
+    So this is deliberately a *typographic* cleanup and nothing more. It
+    title-cases a string that already looks like a name and declines
+    everything else, rather than inferring a canonical merchant identity —
+    the repo has no merchant table, no mapping, and no basis for guessing
+    which of two strings is the same shop. ``None`` is a supported answer:
+    the raw string then stands on its own, which is what the triage design
+    specifies for a row with no cleaned name.
+
+    Deliberately not applied to a string that is already mixed-case: that
+    is a Binance memo or a hand-typed cash note, and it is already
+    readable.
+    """
+    if raw is None:
+        return None
+    text = raw.strip()
+    if not text or text != text.upper():
+        return None
+    if _CODE_RUN.search(text):
+        return None
+    if len(_WORD.findall(text)) < 2:
+        return None
+    return text.title()
+
+
+__all__ = [
+    "EM_DASH",
+    "clean_merchant",
+    "fmt_date",
+    "fmt_money",
+    "fmt_month",
+    "fmt_number",
+]

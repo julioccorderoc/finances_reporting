@@ -78,15 +78,15 @@ def tied_db(web_db: sqlite3.Connection) -> sqlite3.Connection:
 def test_tied_timestamps_order_by_item_id(tied_db: sqlite3.Connection) -> None:
     """Items sharing occurred_at fall back to item_id, not visit order.
 
-    Updated for Task 4 (ADR-012 Amendment): the difficulty bucket now
-    leads the sort, so bucket 0 (id 2, category-only) comes first, then
-    bucket 1 (ids 1 and 3, both carry a rate issue) tiebreaks on item_id
-    since all three rows share ``TIED_AT``.
+    The bucket leads the sort. Since the triage redesign that means the
+    two rows missing a category (ids 2 and 3) come first, tiebreaking on
+    item_id because all three rows share ``TIED_AT``, and the row that
+    only needs a rate (id 1) walks last.
     """
     queue = build_queue(tied_db)
     ids = [item.item_id for item in queue.items]
 
-    assert ids == ["txn:2", "txn:1", "txn:3"]
+    assert ids == ["txn:2", "txn:3", "txn:1"]
 
 
 def test_build_queue_is_repeatable(tied_db: sqlite3.Connection) -> None:

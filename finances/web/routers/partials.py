@@ -900,7 +900,7 @@ def _render_triage_pair_modal(
     by the advance path, same as the txn modal.
     """
     from finances.web.services.transactions_query import _project_card
-    from finances.web.services.triage import PairProposal
+    from finances.web.services.triage import PairProposal, assess_pair
 
     deposit = transactions_repo.get_by_id(conn, deposit_id)
     sell = transactions_repo.get_by_id(conn, sell_id)
@@ -929,11 +929,20 @@ def _render_triage_pair_modal(
         category_name=None,
     )
 
+    # The same assessment the queue payload renders and the confirm POST
+    # raises on, so the modal can grey out an impossible pair and say why
+    # before the click rather than after it.
+    verdict = assess_pair(deposit, sell)
     proposal = PairProposal(
         proposal_id=f"{deposit_id}:{sell_id}",
         deposit=deposit_card,
         sell=sell_card,
         confidence=1.0,
+        days_apart=verdict.days_apart,
+        drift_pct=verdict.drift_pct,
+        implied_rate=verdict.implied_rate,
+        refused=verdict.refused,
+        refuse_reason=verdict.refuse_reason,
         details={
             "bank_transaction_id": deposit_id,
             "binance_transaction_id": sell_id,

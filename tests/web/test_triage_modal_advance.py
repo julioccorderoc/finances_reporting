@@ -347,9 +347,15 @@ def test_unpark_still_returns_the_queue_partial(
 def test_advance_respects_an_active_type_filter(
     web_db: sqlite3.Connection, web_client_factory
 ) -> None:
-    """Advancing into an item the filter hides would strand the owner."""
+    """Advancing into an item the filter hides would strand the owner.
+
+    Bolívar rows with an empty ``rates`` table, because since ADR-021 a
+    rate item is the projection's answer and a USD row is always priced —
+    the previous USD fixture produced no rate items at all.
+    """
     account = accounts_repo.insert(
-        web_db, Account(name="Cash USD", kind=AccountKind.CASH, currency="USD")
+        web_db,
+        Account(name="Provincial", kind=AccountKind.BANK, currency="VES"),
     )
     cat = categories_repo.get_by_name(web_db, TransactionKind.EXPENSE, "Groceries")
     assert cat is not None
@@ -362,10 +368,10 @@ def test_advance_respects_an_active_type_filter(
                 occurred_at=datetime(2026, 5, day, tzinfo=UTC),
                 kind=TransactionKind.EXPENSE,
                 amount=Decimal("-10.00"),
-                currency="USD",
+                currency="VES",
                 description=ref,
                 category_id=category_id,
-                source="cash",
+                source="provincial",
                 source_ref=ref,
                 needs_review=needs_review,
             ),
