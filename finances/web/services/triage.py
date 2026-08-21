@@ -383,7 +383,9 @@ def _pricing_state(
 
 
 def _guess_for(
-    conn: sqlite3.Connection, txn: Transaction
+    conn: sqlite3.Connection,
+    txn: Transaction,
+    pickable: dict[int, str],
 ) -> TriageGuess | None:
     """Propose a category for ``txn``, or ``None`` (criteria K6, G7).
 
@@ -397,6 +399,19 @@ def _guess_for(
     account, filed the same way at least :data:`LEARNED_GUESS_MIN` times.
     Exact string equality on purpose — a fuzzy match here would propose a
     category from a merchant the owner never linked.
+
+    Both tiers are bounded by ``pickable`` — ``categories_repo.list_pickable``,
+    the one definition of "a category a human may choose" (migration 021).
+    Accepting a guess resolves the row in one click, so it must land
+    somewhere the owner could have chosen by hand; and a "sorted here N
+    times" count on an ``auto_only`` category is really a count of what
+    ``category_rules`` wrote, which is the trap that keeps ``Fees`` off
+    the chips. It also keeps a transfer being confirmed as a *pair*
+    rather than declared by tagging one leg.
+
+    A guess whose kind the save path would refuse is likewise never
+    offered (:func:`category_fits`): the chip writes without opening the
+    modal, so an offered-then-refused guess is a 422 waiting for a click.
     """
     if not txn.description:
         return None
@@ -410,7 +425,7 @@ def _guess_for(
             amount=txn.amount,
         ),
     )
-    if match is not None:
+    if match is not None and match.category_id in pickable:
         category = categories_repo.get_by_id(conn, match.category_id)
         if category is not None and category_fits(txn.kind, category.kind):
             return TriageGuess(
@@ -426,10 +441,13 @@ def _guess_for(
     ).fetchone()
     if row is None or int(row["n"]) < LEARNED_GUESS_MIN:
         return None
+    category_id = int(row["category_id"])
+    if category_id not in pickable:
+        return None
     if not category_fits(txn.kind, TransactionKind(row["kind"])):
         return None
     return TriageGuess(
-        category_id=int(row["category_id"]),
+        category_id=category_id,
         label=row["name"],
         times=int(row["n"]),
     )
@@ -525,6 +543,12 @@ def _collect_txn_items(
         entry["resolution"] = resolution
 
     accounts = _accounts_by_id(conn)
+    # ~21 rows, read once per build rather than per guess.
+    pickable = {
+        category.id: category.name
+        for category in categories_repo.list_pickable(conn)
+        if category.id is not None
+    }
 
     items: list[TriageItem] = []
     for txn_id, entry in entries.items():
@@ -553,7 +577,7 @@ def _collect_txn_items(
                 # Only a row being asked for a category gets one; guessing
                 # at a row that already has one is answering a question
                 # nobody asked.
-                guess=_guess_for(conn, txn) if needs.cat else None,
+                guess=_guess_for(conn, txn, pickable) if needs.cat else None,
                 rough=_rough_label(entry.get("resolution")),
                 pair_proposal=None,
             )

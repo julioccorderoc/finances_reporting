@@ -530,6 +530,47 @@ def test_a_guess_never_contradicts_the_row_kind(
     assert _by_ref(build_queue(queue_db), "usdt-cat").guess is None
 
 
+def test_a_guess_is_only_ever_a_category_the_owner_could_pick(
+    queue_db: sqlite3.Connection,
+) -> None:
+    """Criterion E2, applied to the chip as well as the picker.
+
+    Accepting a guess resolves the row in one click, so it must land
+    somewhere the owner could have chosen by hand. ``auto_only``
+    categories (migration 021) are system-written — a transfer is
+    confirmed as a *pair*, not declared by tagging one leg — and a
+    "you sorted this here 3 times" count on one of them is really a count
+    of what ``category_rules`` wrote, which is the Fees trap the picker
+    notes describe.
+    """
+    auto_only = queue_db.execute(
+        "SELECT id FROM categories WHERE auto_only = 1 AND active = 1 LIMIT 1"
+    ).fetchone()
+    assert auto_only is not None
+    _add_rule(queue_db, "bodega", int(auto_only["id"]), priority=1)
+
+    account_id = queue_db.execute(
+        "SELECT account_id FROM transactions WHERE source_ref = 'cat-only'"
+    ).fetchone()["account_id"]
+    for n in range(3):
+        transactions_repo.insert(
+            queue_db,
+            Transaction(
+                account_id=account_id,
+                occurred_at=_ago(20 + n),
+                kind=TransactionKind.EXPENSE,
+                amount=Decimal("-50.00"),
+                currency="VES",
+                description="BODEGA ZULIA",
+                category_id=int(auto_only["id"]),
+                source="provincial",
+                source_ref=f"auto-{n}",
+            ),
+        )
+
+    assert _by_ref(build_queue(queue_db), "cat-only").guess is None
+
+
 def test_only_category_items_carry_a_guess(queue_db: sqlite3.Connection) -> None:
     assert _by_ref(build_queue(queue_db), "rough-only").guess is None
 
