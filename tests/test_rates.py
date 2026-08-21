@@ -23,6 +23,14 @@ from tests.conftest import RateFactory, TransactionFactory
 
 
 def _txn_on(day: date, **overrides: Any) -> Transaction:
+    """A **VES** transaction on ``day``.
+
+    The ladder these tests exercise is the bolívar one. Since ADR-021 §2.3
+    the resolver short-circuits a native-USD currency above branch 1, so the
+    factory's ``USD`` default would send every case here down the
+    ``native_usd`` path and assert nothing about the chain.
+    """
+    overrides.setdefault("currency", "VES")
     return TransactionFactory.build(
         occurred_at=datetime(day.year, day.month, day.day, 12, 0, tzinfo=UTC),
         **overrides,
@@ -272,6 +280,13 @@ def test_does_not_raise_on_empty_rates_table(
 
 
 def test_ignores_future_dated_rates(in_memory_db: sqlite3.Connection) -> None:
+    """No *tier* reads forward — but ADR-021's terminal branch does.
+
+    The tier lookup is still ``latest_on_or_before``, so a rate published
+    after the row never counts as that tier's answer. It is picked up one
+    branch lower as an approximation, and the ``_nearest`` suffix (never
+    ``_carry``) is what says so.
+    """
     _insert_rate(
         in_memory_db,
         as_of_date=date(2025, 6, 20),
@@ -284,9 +299,9 @@ def test_ignores_future_dated_rates(in_memory_db: sqlite3.Connection) -> None:
 
     rate, source = rates_engine.resolve(in_memory_db, txn)
 
-    assert rate is None
-    assert source == "needs_review"
-    assert txn.needs_review is True
+    assert rate == Decimal("99")
+    assert source == "binance_p2p_median_nearest"
+    assert txn.needs_review is False
 
 
 def test_does_not_mutate_needs_review_when_resolved(
@@ -454,7 +469,9 @@ def test_property_p2p_always_beats_bcv_when_both_present(
 
 @given(
     txn_day=st.dates(min_value=date(2022, 1, 1), max_value=date(2030, 12, 31)),
-    bcv_offset=st.integers(min_value=0, max_value=30),
+    bcv_offset=st.integers(
+        min_value=0, max_value=rates_engine.BCV_MAX_AGE_DAYS
+    ),
 )
 @settings(
     max_examples=30,
@@ -466,6 +483,8 @@ def test_property_bcv_used_only_when_no_p2p_available(
     txn_day: date,
     bcv_offset: int,
 ) -> None:
+    """Bounded to the ADR-021 cap; past it BCV approximates rather than carries
+    (``tests/test_rates_nearest.py::test_property_one_bcv_row_prices_every_day``)."""
     in_memory_db.execute("DELETE FROM rates")
     _insert_rate(
         in_memory_db,
@@ -741,10 +760,16 @@ def test_median_expires_one_day_past_window_falls_through_to_bcv(
     assert source == "bcv"
 
 
-def test_expired_median_with_no_bcv_flags_needs_review(
+def test_expired_median_is_demoted_to_an_approximation(
     in_memory_db: sqlite3.Connection,
 ) -> None:
-    """An expired median must not be the answer of last resort."""
+    """An expired median must not be the answer *as a tier*.
+
+    ADR-016 made it fall through; ADR-021 says what it falls through to.
+    With nothing else in the table it comes back as the nearest rate — the
+    same number, now labelled an approximation rather than a market median,
+    and no longer flagged for review (design criterion D6).
+    """
     captured = date(2025, 7, 1)
     _insert_median(in_memory_db, as_of_date=captured, rate=Decimal("50"))
     spend_day = captured + timedelta(days=rates_engine.MEDIAN_MAX_AGE_DAYS + 1)
@@ -752,15 +777,20 @@ def test_expired_median_with_no_bcv_flags_needs_review(
 
     rate, source = rates_engine.resolve(in_memory_db, txn)
 
-    assert rate is None
-    assert source == "needs_review"
-    assert txn.needs_review is True
+    assert rate == Decimal("50")
+    assert source == "binance_p2p_median_nearest"
+    assert txn.needs_review is False
 
 
-def test_bcv_still_carries_without_limit(
+def test_bcv_expires_like_every_other_tier(
     in_memory_db: sqlite3.Connection,
 ) -> None:
-    """ADR-016 caps the median only; BCV is the floor and stays uncapped."""
+    """ADR-016 left BCV uncapped; ADR-021 caps it too.
+
+    The rationale for leaving it uncapped was that expiring the floor of the
+    chain turns a stale reference into triage work. ADR-021 removes that
+    cost: past the cap the value is still used, as an approximation.
+    """
     captured = date(2025, 7, 1)
     _insert_rate(
         in_memory_db,
@@ -775,7 +805,7 @@ def test_bcv_still_carries_without_limit(
     rate, source = rates_engine.resolve(in_memory_db, _txn_on(spend_day))
 
     assert rate == Decimal("36")
-    assert source == "bcv_carry"
+    assert source == "bcv_nearest"
 
 
 @given(
