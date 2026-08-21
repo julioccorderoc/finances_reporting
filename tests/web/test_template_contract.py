@@ -299,7 +299,7 @@ def test_every_template_file_is_reachable(env: Environment) -> None:
 # Macro libraries are pulled in with {% import %}, which binds a namespace
 # rather than splicing a context — they are reachable, just not by the
 # include/extends edges the walk above follows.
-_MACRO_ONLY = {"_macros.html"}
+_MACRO_ONLY = {"_macros.html", "_icons.html"}
 
 
 def test_the_analyzer_sees_the_real_template_tree(env: Environment) -> None:

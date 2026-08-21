@@ -23,6 +23,15 @@
 
     <link rel="stylesheet" href="/static/css/app.css">
 
+    <!-- SIGNAL foundation (Triage redesign, Wave 1.3). fonts.css declares
+         @font-face over woff2 vendored under static/fonts/ — no Google Fonts
+         request, same offline rule as tailwind.css above. signal.css is the
+         token layer: custom properties, the :focus-visible ring and the
+         reduced-motion override, nothing else. Loading them globally is inert
+         for pages that reference no variable. -->
+    <link rel="stylesheet" href="/static/css/fonts.css">
+    <link rel="stylesheet" href="/static/css/signal.css">
+
     {# Identity of the server process that rendered this page. Read from
        request.app.state rather than a context key on purpose: Starlette
        injects `request` into every template context, so no TemplateResponse

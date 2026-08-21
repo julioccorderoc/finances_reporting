@@ -1,0 +1,307 @@
+/* SIGNAL — the token layer for the Triage redesign.
+ *
+ * Ported verbatim from design_handoff_triage/design/tokens/*.css (colors,
+ * typography, spacing, elevation, motion). Every hex and px in the handoff is
+ * authoritative; nothing here was rounded, renamed or "improved".
+ *
+ * WHAT THIS FILE IS: custom properties, one global :focus-visible ring, and the
+ * reduced-motion override. Nothing else. No component styles, no utility
+ * classes, no element selectors — Wave 2 builds those on top of these names.
+ * Loading this file on a page that references none of the variables is inert.
+ *
+ * Light-only on purpose: SIGNAL is a paper system (raised sits LIGHTER than
+ * canvas, depth comes from hairlines). A dark inversion is not a token swap and
+ * is not in scope.
+ *
+ * The vendored tailwind.css is a fixed extract with no build step and must not
+ * be touched; anything new lives here or in app.css
+ * (tests/web/test_template_css_classes.py enforces the class half of that).
+ */
+
+:root {
+  /* ── Ink: SIGNAL's neutral ramp. Warm-grey, flat, never blue ───────────── */
+  --ink-900: #131312;
+  --ink-800: #22221f;
+  --ink-700: #33332f;
+  --ink-600: #4b4b46;
+  --ink-500: #6d6d69;
+  --ink-400: #9a9a95;
+  --ink-300: #bebdb8;
+  --ink-200: #c7c6c0;
+  --ink-100: #dbdad5;
+  --ink-050: #e4e4e1;
+
+  /* ── Paper: no harsh white anywhere. Raised sits LIGHTER than canvas ───── */
+  --paper-000: #f5f5f3;
+  --paper-050: #f5f5f3;
+  --paper-100: #ececea;
+  --paper-200: #e4e4e1;
+
+  /* ── Red: the one accent. 500 is the brand red — it fills and rules but
+        does not label (#e5231b on canvas is 3.9:1); 600 is the text-safe red.
+        Attention and the primary action share the hue and are separated by
+        WEIGHT: solid red fill = the one way forward, red hairline on a faint
+        tint = something needs you. ────────────────────────────────────────── */
+  --red-050: #fbe9e8;
+  --red-200: #efc4c1;
+  --red-300: #e88b85;
+  --red-500: #e5231b;
+  --red-600: #c51a13;
+  --red-700: #a5140e;
+  --red-800: #7f0f0a;
+
+  /* ── The four Bodega hue families kept their NAMES and lost their hues, so
+        components written against them still resolve under a one-accent
+        system. Do not reintroduce a second hue through these. ─────────────── */
+  --thyme-900: #0b0b0a;
+  --thyme-800: #131312;
+  --thyme-700: #22221f;
+  --thyme-600: #131312;
+  --thyme-500: #33332f;
+  --thyme-300: #c7c6c0;
+  --thyme-100: #dbdad5;
+  --thyme-050: #e4e4e1;
+
+  --ochre-700: var(--red-700);
+  --ochre-600: var(--red-600);
+  --ochre-500: var(--red-500);
+  --ochre-200: var(--red-200);
+  --ochre-050: var(--red-050);
+
+  --clay-700: var(--red-800);
+  --clay-600: var(--red-700);
+  --clay-200: var(--red-200);
+  --clay-050: var(--red-050);
+
+  --slate-600: var(--ink-600);
+  --slate-200: var(--ink-100);
+  --slate-050: var(--paper-200);
+
+  /* ── Semantic: text ───────────────────────────────────────────────────── */
+  --text-primary: var(--ink-900);
+  --text-secondary: var(--ink-600);
+  --text-tertiary: var(--ink-500);
+  --text-placeholder: var(--ink-400);
+  --text-disabled: var(--ink-300);
+  --text-inverse: var(--paper-050);
+  --text-accent: var(--red-600);
+  --text-danger: var(--red-700);
+  --text-signal: var(--red-600);
+  /* Money is ink with a sign, never a colour: red on a credit reads as a loss,
+     and green never enters this system at all. */
+  --text-positive: var(--ink-900);
+  --text-negative: var(--ink-900);
+
+  /* ── Semantic: surface ────────────────────────────────────────────────── */
+  --surface-canvas: var(--paper-100);
+  --surface-raised: var(--paper-000);
+  --surface-sunken: var(--paper-200);
+  --surface-hover: rgba(19, 19, 18, 0.045);
+  --surface-active: rgba(19, 19, 18, 0.08);
+  /* Selection is grey, not tinted: a red row in a ledger reads as an error. */
+  --surface-selected: var(--paper-200);
+  --surface-inverse: var(--ink-900);
+  /* The primary action is the one red fill on the screen. */
+  --surface-accent: var(--red-500);
+  --surface-accent-hover: var(--red-600);
+  --surface-accent-active: var(--red-700);
+
+  /* ── Semantic: border. Hairlines do the structural work ───────────────── */
+  --border-subtle: #dbdad5;
+  --border-default: #c7c6c0;
+  --border-strong: var(--ink-700);
+  --border-accent: var(--red-600);
+  --border-danger: var(--red-200);
+
+  /* ── Status trios: bg / border / text.
+        Success is greyscale — "done" is not an event worth the accent. ───── */
+  --status-success-bg: var(--paper-200);
+  --status-success-border: var(--ink-100);
+  --status-success-text: var(--ink-700);
+  --status-warning-bg: var(--red-050);
+  --status-warning-border: var(--red-200);
+  --status-warning-text: var(--red-700);
+  --status-danger-bg: var(--red-500);
+  --status-danger-border: var(--red-600);
+  --status-danger-text: var(--paper-050);
+  --status-info-bg: var(--paper-200);
+  --status-info-border: var(--ink-100);
+  --status-info-text: var(--ink-600);
+  --status-neutral-bg: var(--paper-200);
+  --status-neutral-border: var(--border-default);
+  --status-neutral-text: var(--ink-600);
+
+  --focus-ring: 0 0 0 2px var(--paper-000), 0 0 0 4px var(--red-500);
+  --focus-ring-flush: 0 0 0 3px rgba(229, 35, 27, 0.4);
+
+  /* ── Type families. Doto is dot-matrix: a signature, not a face you read
+        in. Allowed at >=22px only — hero lines, three-word empty states, one
+        big figure. Never in a table row, never in a sentence. Table figures
+        stay in the mono. Fallbacks are local system faces, so a page renders
+        correctly before (or without) the vendored woff2 in fonts.css. ────── */
+  --font-display: "Doto", "JetBrains Mono", ui-monospace, monospace;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  /* Display — Doto. Heavy weights only; the dot grid falls apart below 700. */
+  --display-weight: 900;
+  --display-1-size: 46px;
+  --display-1-line: 1.02;
+  --display-1-tracking: -0.02em;
+  --display-2-size: 34px;
+  --display-2-line: 1.06;
+  --display-2-tracking: -0.018em;
+  --display-3-size: 26px;
+  --display-3-line: 1.14;
+  --display-3-tracking: -0.014em;
+
+  /* Title — Inter. All in-product hierarchy. */
+  --title-1-size: 23px;
+  --title-1-line: 1.24;
+  --title-1-tracking: -0.02em;
+  --title-2-size: 19px;
+  --title-2-line: 1.3;
+  --title-2-tracking: -0.018em;
+  --title-3-size: 16px;
+  --title-3-line: 1.38;
+  --title-3-tracking: -0.012em;
+
+  /* Body — 16/1.55 is the reading spec; the dense product sizes sit under it. */
+  --body-lg-size: 16px;
+  --body-lg-line: 1.55;
+  --body-size: 14px;
+  --body-line: 1.55;
+  --body-sm-size: 13px;
+  --body-sm-line: 1.5;
+  --caption-size: 12.5px;
+  --caption-line: 1.45;
+
+  /* Eyebrow / micro — mono, caps, wide. The system's voice: every label, tag,
+     date, column head and badge is set here, never in the sans. (Buttons are
+     the one exception — mono caps break on "Bring back all 266".) */
+  --eyebrow-size: 11px;
+  --eyebrow-line: 1.2;
+  --eyebrow-tracking: 0.14em;
+  --eyebrow-weight: 500;
+  --micro-size: 10.5px;
+  --micro-tracking: 0.08em;
+
+  /* Numeric — JetBrains Mono carries every figure in a table or a stat. */
+  --num-size: 13px;
+  --num-line: 1.4;
+  --num-tracking: 0;
+  --num-lg-size: 30px;
+  --num-lg-line: 1.05;
+  --num-lg-tracking: -0.02em;
+  /* Dot-matrix figure: the one place numbers get the display face. */
+  --figure-size: 34px;
+  --figure-line: 1;
+  --figure-weight: 700;
+
+  /* ── Spacing: 4-based (SIGNAL's 4·8·12·16·24·32·48·64·96). 6 and 10 survive
+        because dense ledger rows need them. ──────────────────────────────── */
+  --space-0: 0px;
+  --space-05: 2px;
+  --space-1: 4px;
+  --space-15: 6px;
+  --space-2: 8px;
+  --space-25: 10px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 48px;
+  --space-9: 64px;
+  --space-10: 80px;
+  --space-11: 96px;
+
+  /* Radii — near-square: 2 / 4 / 8, nothing softer. --radius-pill is retired
+     to 2px rather than deleted, so pill markup collapses to the right shape
+     instead of breaking. Nothing in this system is a lozenge. */
+  --radius-xs: 2px;
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 8px;
+  --radius-xl: 8px;
+  --radius-pill: 2px;
+
+  /* Control heights and row heights — the density contract. */
+  --control-sm: 26px;
+  --control-md: 32px;
+  --control-lg: 40px;
+  --row-compact: 36px;
+  --row-default: 44px;
+  --row-relaxed: 56px;
+
+  --sidebar-width: 244px;
+  --content-max: 1040px;
+  --doc-max: 720px;
+  --border-hairline: 1px;
+
+  /* ── Elevation: effectively none. Structure comes from 1px lines, not from
+        shadows; only things that truly float — overlays, popovers, toasts —
+        cast anything at all. ─────────────────────────────────────────────── */
+  --shadow-none: none;
+  --shadow-xs: none;
+  --shadow-sm: 0 0 0 1px rgba(19, 19, 18, 0.06);
+  --shadow-md: 0 1px 2px rgba(19, 19, 18, 0.06);
+  --shadow-lg: 0 8px 24px -12px rgba(19, 19, 18, 0.22);
+  --shadow-pop: 0 24px 48px -24px rgba(19, 19, 18, 0.34);
+  --shadow-press: inset 0 1px 2px rgba(19, 19, 18, 0.18);
+  /* The primary button is a flat red rectangle — no gloss, no inner highlight. */
+  --shadow-accent: 0 1px 0 rgba(19, 19, 18, 0.08);
+
+  --scrim: rgba(19, 19, 18, 0.34);
+  --blur-overlay: blur(10px);
+
+  --z-base: 0;
+  --z-sticky: 10;
+  --z-dropdown: 100;
+  --z-overlay: 200;
+  --z-toast: 300;
+
+  /* ── Motion: SIGNAL moves once, quickly, and stops. Nothing bounces. ───── */
+  --dur-instant: 90ms;
+  --dur-fast: 150ms;
+  --dur-base: 220ms;
+  --dur-slow: 320ms;
+
+  --ease-standard: cubic-bezier(0, 0, 0.2, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  /* Lift keeps a trace of overshoot for overlays and toasts. */
+  --ease-lift: cubic-bezier(0.1, 0.9, 0.2, 1);
+
+  --transition-control: background-color var(--dur-fast) var(--ease-standard),
+    border-color var(--dur-fast) var(--ease-standard),
+    box-shadow var(--dur-fast) var(--ease-standard),
+    color var(--dur-fast) var(--ease-standard),
+    transform var(--dur-fast) var(--ease-standard);
+}
+
+/* The one non-variable rule in this file, and the one deliberate change to
+   every existing page: keyboard focus is a two-layer ring — a paper gap, then
+   the brand red — instead of the browser's own outline. It is drawn with
+   box-shadow so it follows the border radius, and it appears only for keyboard
+   focus (:focus-visible), never on a mouse click. */
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-sm);
+}
+
+/* Everything in the system collapses to a single frame here — the durations
+   are the only knob because every animation and transition reads them. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-instant: 1ms;
+    --dur-fast: 1ms;
+    --dur-base: 1ms;
+    --dur-slow: 1ms;
+  }
+}
