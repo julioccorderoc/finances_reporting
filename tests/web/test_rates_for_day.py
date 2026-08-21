@@ -199,7 +199,9 @@ def test_a_non_ves_amount_is_not_priced_by_a_ves_series(
     ids=[tier[2] for tier in rates_domain._FALLBACK_TIERS],
 )
 @pytest.mark.parametrize(
-    "suffix", ["", rates_domain.CARRY_SUFFIX], ids=["exact", "carry"]
+    "suffix",
+    ["", rates_domain.CARRY_SUFFIX, rates_domain.NEAREST_SUFFIX],
+    ids=["exact", "carry", "nearest"],
 )
 def test_every_resolver_tier_has_exactly_one_modal_winner(
     web_db: sqlite3.Connection, base: str, quote: str, source: str, suffix: str
@@ -263,10 +265,16 @@ def test_expired_median_is_shown_not_hidden(web_db: sqlite3.Connection) -> None:
     assert median.as_of_date == stale_day
 
 
-def test_expired_median_carries_no_dollar_figure(
+def test_expired_median_is_priced_as_an_approximation(
     web_db: sqlite3.Connection,
 ) -> None:
-    """No USD may be rendered from a rate the chain refused."""
+    """ADR-016 suppressed this figure; ADR-021 restores it, marked.
+
+    The suppression was right while an expired tier meant "the chain
+    refuses this rate". The chain now approximates with it instead, and the
+    panel is where the owner accepts that number or types a better one
+    (design criterion D9), so a blank would be hiding the offer.
+    """
     stale_day = DAY - timedelta(days=60)
     _seed(web_db, "binance_p2p_median", stale_day, "633.52")
 
@@ -274,7 +282,8 @@ def test_expired_median_carries_no_dollar_figure(
         s for s in _series(web_db, "bcv") if s.source == "binance_p2p_median"
     )
 
-    assert median.amount_usd is None
+    assert median.amount_usd == AMOUNT / Decimal("633.52")
+    assert median.is_approximate is True
 
 
 def test_median_on_final_day_of_window_is_priced_normally(
@@ -291,12 +300,13 @@ def test_median_on_final_day_of_window_is_priced_normally(
     assert median.amount_usd == AMOUNT / Decimal("800.00")
 
 
-def test_bcv_never_expires(web_db: sqlite3.Connection) -> None:
-    """ADR-016 caps the median only; BCV is the floor of the chain."""
+def test_bcv_expires_like_every_other_tier(web_db: sqlite3.Connection) -> None:
+    """ADR-021 caps BCV too — and prices it anyway, as an approximation."""
     ancient = DAY - timedelta(days=400)
     _seed(web_db, "bcv", ancient, "36.00", base="USD", quote="VES")
 
     bcv = next(s for s in _series(web_db, "bcv") if s.source == "bcv")
 
-    assert bcv.is_expired is False
+    assert bcv.is_expired is True
+    assert bcv.is_approximate is True
     assert bcv.amount_usd == AMOUNT / Decimal("36.00")

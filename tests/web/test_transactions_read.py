@@ -322,32 +322,56 @@ def test_rate_source_user_rate_when_set(
     )
 
 
-def test_rate_source_needs_review_when_no_rate(
-    seeded_web_db: sqlite3.Connection,
-    web_client_factory,
-) -> None:
-    client = web_client_factory()
-    # Pull the row dated 2010 — no matching rate exists.
+def _legacy_row(client, **params):
     resp = client.get(
         "/api/transactions",
-        params={
-            "q": "LEGACY",
-            "date_from": "2000-01-01",
-        },
+        params={"q": "LEGACY", "date_from": "2000-01-01", **params},
     )
     assert resp.status_code == 200
     rows = resp.json()["rows"]
     assert len(rows) == 1
-    row = rows[0]
-    assert row["rate_source"] == "needs_review"
-    assert row["amount_usd"] is None
+    return rows[0]
 
-    # The HTML card for the same row should carry the needs-review marker.
+
+def test_a_row_with_no_rate_in_range_is_priced_approximately(
+    seeded_web_db: sqlite3.Connection,
+    web_client_factory,
+) -> None:
+    """The 2010 row: sixteen years from the nearest rate, and priced anyway.
+
+    Before ADR-021 this row carried no dollar figure at all. It now takes
+    the nearest rate the table holds — the median dated today — and says so
+    in the suffix, which is what the "priced roughly" group reads.
+    """
+    client = web_client_factory()
+
+    row = _legacy_row(client)
+
+    assert row["rate_source"] == "binance_p2p_median_nearest"
+    assert row["approximate"] is True
+    assert Decimal(row["amount_usd"]) == Decimal("-999.00") / Decimal("36.50")
+
+    # The stored flag is untouched, so the card still carries its marker.
     html = client.get(
         "/transactions",
         params={"q": "LEGACY", "date_from": "2000-01-01"},
     ).text
     assert 'data-needs-review="true"' in html
+
+
+def test_rate_source_needs_review_only_when_the_table_is_empty(
+    seeded_web_db: sqlite3.Connection,
+    web_client_factory,
+) -> None:
+    """The one surviving unpriceable case (ADR-021 §2.2)."""
+    seeded_web_db.execute("DELETE FROM rates")
+    client = web_client_factory()
+
+    row = _legacy_row(client)
+
+    assert row["rate_source"] == "needs_review"
+    assert row["amount_usd"] is None
+    assert row["approximate"] is False
 
 
 def test_txn_query_base_selects_every_column_row_to_transaction_needs(

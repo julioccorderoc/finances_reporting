@@ -607,3 +607,102 @@ def test_build_report_does_not_write_to_db(seeded_db: sqlite3.Connection) -> Non
 
 # Silence unused-import warnings for symbols consumed only via __all__.
 _ = (consolidated_usd,)
+
+
+# ---------------------------------------------------------------------------
+# ADR-021: an approximated row is priced, flagged, and refused by --strict.
+# ---------------------------------------------------------------------------
+
+
+def test_approximated_market_row_is_flagged_and_still_headline(
+    seeded_db: sqlite3.Connection,
+) -> None:
+    """The two axes are independent: approximate, but not BCV.
+
+    A median from outside every window is a weak number, not a *reference*
+    number, so it lands in the headline total exactly as the same tier's
+    in-window answer would — carrying a flag that says how it was reached.
+    """
+    _insert_rate(
+        seeded_db,
+        as_of_date=date(2025, 1, 1),
+        base="USDT",
+        quote="VES",
+        source="binance_p2p_median",
+        rate=Decimal("40"),
+    )
+    inserted = _insert_txn(
+        seeded_db,
+        account_id=1,
+        amount=Decimal("-400"),
+        currency="VES",
+        user_rate=None,
+        kind=TransactionKind.EXPENSE,
+        **_txn_on(date(2025, 6, 15)),
+    )
+
+    report = build_report(seeded_db)
+
+    row = report.rows[0]
+    assert row.rate_source == "binance_p2p_median_nearest"
+    assert row.is_approximate is True
+    assert row.is_bcv_fallback is False
+    assert row.amount_usd == Decimal("-10")
+    assert report.total_usd == Decimal("-10")
+    assert report.fallback_total_usd == Decimal("0")
+    assert report.strict_violations == [inserted.id]
+
+
+def test_approximated_bcv_row_is_both_and_counted_once(
+    seeded_db: sqlite3.Connection,
+) -> None:
+    _insert_rate(
+        seeded_db,
+        as_of_date=date(2025, 1, 1),
+        base="USD",
+        quote="VES",
+        source="bcv",
+        rate=Decimal("40"),
+    )
+    inserted = _insert_txn(
+        seeded_db,
+        account_id=1,
+        amount=Decimal("-400"),
+        currency="VES",
+        user_rate=None,
+        kind=TransactionKind.EXPENSE,
+        **_txn_on(date(2025, 6, 15)),
+    )
+
+    report = build_report(seeded_db)
+
+    row = report.rows[0]
+    assert (row.is_bcv_fallback, row.is_approximate) == (True, True)
+    assert report.fallback_total_usd == Decimal("-10")
+    assert report.total_usd == Decimal("0")
+    assert report.strict_violations == [inserted.id]
+
+
+def test_an_in_window_row_is_not_approximate(seeded_db: sqlite3.Connection) -> None:
+    _insert_rate(
+        seeded_db,
+        as_of_date=date(2025, 6, 15),
+        base="USDT",
+        quote="VES",
+        source="binance_p2p_median",
+        rate=Decimal("40"),
+    )
+    _insert_txn(
+        seeded_db,
+        account_id=1,
+        amount=Decimal("-400"),
+        currency="VES",
+        user_rate=None,
+        kind=TransactionKind.EXPENSE,
+        **_txn_on(date(2025, 6, 15)),
+    )
+
+    report = build_report(seeded_db)
+
+    assert report.rows[0].is_approximate is False
+    assert report.strict_violations == []

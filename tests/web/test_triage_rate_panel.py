@@ -247,15 +247,23 @@ def test_expired_median_row_is_marked_in_the_html(
     assert "60d old" in median_row
 
 
-def test_expired_median_row_shows_no_dollar_figure(
+def test_expired_median_row_shows_what_it_would_price_at(
     stale_median_db: sqlite3.Connection, web_client_factory
 ) -> None:
-    """The whole point: no USD may be rendered from a refused rate."""
+    """ADR-016 rendered no USD here; ADR-021 renders it, marked expired.
+
+    The panel is the surface where the owner takes one of these rates or
+    types a better one (design criterion D9). An expired tier is exactly
+    what the resolver's nearest branch would use, so hiding its figure
+    hides the offer — while the ``data-rate-expired`` marking beside it
+    keeps "stale" distinguishable from "current".
+    """
     client: TestClient = web_client_factory()
     html = client.get("/_partial/triage/1/modal").text
 
     median_row = _row(html, "binance_p2p_median")
-    assert "data-rate-usd" not in median_row
+    assert "data-rate-usd" in median_row
+    assert "data-rate-expired" in median_row
 
 
 def test_expired_median_keeps_its_number_visible(

@@ -207,9 +207,44 @@ def test_apply_edit_flips_needs_review_when_user_rate_cleared(
 ) -> None:
     """Clearing user_rate on the legacy 2010 txn should re-derive needs_review.
 
-    The 2010 txn has no rate available (P2P / BCV both miss); the engine must
-    fall through to ``needs_review``. We first set a user_rate (making it
-    "ok"), then clear it, and assert needs_review flips back to True.
+    Since ADR-021 the chain approximates from the nearest rate rather than
+    giving up, so the fixture's rates are cleared first: ``needs_review``
+    now means "the table holds nothing for this pair", and that is the state
+    this test is about. The rate-still-available case is covered by
+    ``test_clearing_a_rate_leaves_an_approximation_not_a_flag``.
+    """
+    from finances.web.services.transactions_write import (
+        TransactionEditRequest,
+        apply_edit,
+    )
+
+    seeded_web_db.execute("DELETE FROM rates")
+    txn_id = _legacy_needs_review_id(seeded_web_db)
+    apply_edit(
+        seeded_web_db,
+        txn_id=txn_id,
+        req=TransactionEditRequest(set_user_rate=True, user_rate=Decimal("36.5")),
+    )
+
+    card = apply_edit(
+        seeded_web_db,
+        txn_id=txn_id,
+        req=TransactionEditRequest(set_user_rate=True, user_rate=None),
+    )
+
+    assert card.needs_review is True
+    assert card.rate_source == "needs_review"
+
+
+def test_clearing_a_rate_leaves_an_approximation_not_a_flag(
+    seeded_web_db: sqlite3.Connection,
+) -> None:
+    """The same edit with the rates table intact (ADR-021, criterion D6).
+
+    Clearing ``user_rate`` on the 2010 row drops it to the nearest rate the
+    table holds — sixteen years away, and still a number. The row is not
+    flagged for review, because an approximate rate must never block a
+    triage sitting; it is flagged *approximate*, which is a different queue.
     """
     from finances.web.services.transactions_write import (
         TransactionEditRequest,
@@ -229,8 +264,36 @@ def test_apply_edit_flips_needs_review_when_user_rate_cleared(
         req=TransactionEditRequest(set_user_rate=True, user_rate=None),
     )
 
-    assert card.needs_review is True
-    assert card.rate_source == "needs_review"
+    assert card.needs_review is False
+    assert card.approximate is True
+    assert card.rate_source.endswith("_nearest")
+
+
+def test_a_native_row_edit_never_consults_the_ladder(
+    seeded_web_db: sqlite3.Connection,
+) -> None:
+    """ADR-021 §2.3 — the guard that protects 142 live USDT rows.
+
+    ``apply_edit`` re-derives ``needs_review`` by running the resolver. On a
+    USDT row carrying a P2P fill's bolívar price as ``user_rate``, the old
+    chain took branch 1 and would have priced 100 USDT at 165.40 Bs/$.
+    """
+    from finances.web.services.transactions_write import (
+        TransactionEditRequest,
+        apply_edit,
+    )
+
+    txn_id = _first_provincial_txn_id(seeded_web_db, source_ref="bin-1")
+
+    card = apply_edit(
+        seeded_web_db,
+        txn_id=txn_id,
+        req=TransactionEditRequest(set_user_rate=True, user_rate=Decimal("165.40")),
+    )
+
+    assert card.rate_source == "native_usd"
+    assert card.amount_usd == Decimal("100.00")
+    assert card.needs_review is False
 
 
 def test_apply_edit_setting_category_does_not_touch_needs_review(
