@@ -229,6 +229,7 @@
         <span class="amt">
           {% if t.needs_review %}<span class="dot-review" title="needs review">●</span>{% endif %}
           {% if t.is_bcv_fallback %}<span class="bcv" title="BCV fallback rate">BCV</span>{% endif %}
+          {% if t.approximate %}<span class="bcv" title="approximate rate — nearest available, outside every window">&approx;</span>{% endif %}
         </span>
       </div>
       {% else %}

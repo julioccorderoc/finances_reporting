@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict
 from finances.db.repos import rates as rates_repo
 from finances.domain import money
 from finances.domain import rates as rates_domain
-from finances.domain.rates import CARRY_SUFFIX
+from finances.domain.rates import CARRY_SUFFIX, NEAREST_SUFFIX
 
 DEFAULT_RANGE_DAYS = 30
 
@@ -89,15 +89,26 @@ class DayRate(BaseModel):
 
     ``amount_usd`` is the counterfactual: what the transaction's native
     amount would be worth priced at THIS tier, whether or not this tier
-    won. ``None`` when the tier has no rate for the day, when the
-    transaction's currency is not the tier's quote currency, or when the
-    tier has expired (ADR-016) — no dollar figure may be rendered from a
-    rate the chain refused.
+    won. ``None`` only when the tier has no rate at all, or when the
+    transaction's currency is not the tier's quote currency.
+
+    ADR-016 additionally suppressed the figure for an expired tier, on the
+    grounds that no dollar amount may be rendered from a rate the chain
+    refused. ADR-021 is what changed: the chain no longer refuses it, it
+    *approximates* with it, and this panel is where the owner accepts that
+    number or types a better one (design criterion D9). Blanking it would
+    hide the offer.
 
     ``is_expired`` marks a rate older than its tier's carry-forward bound.
+    ``is_approximate`` is the wider fact — expired **or** dated after the
+    transaction — and is what the resolver's ``_nearest`` suffix means.
     Such a row is still rendered, with ``age_days``, rather than hidden:
-    "no data for this period" and "data exists, rejected as stale" are
+    "no data for this period" and "data exists, out of window" are
     different facts and the owner needs to tell them apart.
+
+    ``age_days`` is **signed**, like ``RateResolution.age_days``: positive
+    for a rate that predates the transaction, negative for one published
+    after it. "BCV, 3 days later" cannot be said without the direction.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -111,6 +122,7 @@ class DayRate(BaseModel):
     is_winner: bool
     is_reference_only: bool
     is_expired: bool
+    is_approximate: bool
     age_days: int | None
 
 
@@ -217,8 +229,17 @@ def rates_for_day(
     ``winning_source`` is the ``rate_source`` already computed by
     ``rates.resolve`` via ``_project_card``. This function NEVER re-derives
     the winner — duplicating resolver logic here is exactly what rule-012
-    forbids. Sources with no table-backed series (``user_rate``,
+    forbids. Both of the resolver's suffixes are stripped before matching;
+    a suffix the panel does not know about would leave three tiers and no
+    winner marked. Sources with no table-backed series (``user_rate``,
     ``native_usd``, ``needs_review``) simply mark nothing.
+
+    Each tier offers its **best available** rate, in the resolver's own
+    order of preference: the in-window backward answer if it has one, else
+    the nearest row in either direction (ADR-021), which is the same row
+    the resolver's terminal branch would have used. The bound comes from
+    ``rates.max_age_days`` rather than a second copy — that is the whole
+    point of ``max_age_days`` existing.
 
     ``amount_native``/``currency`` are the transaction's own, and are
     required rather than defaulted: a caller that forgets them would
@@ -229,25 +250,39 @@ def rates_for_day(
     quote currency is not the transaction's is left unpriced: dividing,
     say, COP by a VES rate would invent a number.
     """
-    winner = winning_source.removesuffix(CARRY_SUFFIX)
+    winner = winning_source.removesuffix(CARRY_SUFFIX).removesuffix(NEAREST_SUFFIX)
 
     series: list[DayRate] = []
     for base, quote, source, label in _MODAL_SERIES_SPEC:
         found = rates_repo.latest_on_or_before(
             conn, as_of_date=day, base=base, quote=quote, source=source
         )
-        age_days = (day - found.as_of_date).days if found is not None else None
         max_age = rates_domain.max_age_days(source)
+        age_days = (day - found.as_of_date).days if found is not None else None
         is_expired = (
             age_days is not None and max_age is not None and age_days > max_age
         )
+        if found is None or is_expired:
+            # Nothing usable behind the transaction: fall to the same row
+            # the resolver's terminal branch would take, which may well be
+            # the expired one it just rejected — or a later one it could
+            # not see.
+            nearest = rates_repo.nearest(
+                conn, as_of_date=day, base=base, quote=quote, source=source
+            )
+            if nearest is not None:
+                found = nearest
+                age_days = (day - found.as_of_date).days
+                is_expired = max_age is not None and age_days > max_age
+
+        is_approximate = age_days is not None and (is_expired or age_days < 0)
         # Priced through the shared helper, so the panel and the winning
         # row cannot disagree about the arithmetic. A series whose quote
         # currency is not the transaction's stays unpriced: dividing, say,
         # COP by a VES rate would invent a number.
         amount_usd = (
             money.to_usd_at(amount_native, currency, found.rate)
-            if found is not None and currency == quote and not is_expired
+            if found is not None and currency == quote
             else None
         )
         series.append(
@@ -261,6 +296,7 @@ def rates_for_day(
                 is_winner=source == winner,
                 is_reference_only=source in _REFERENCE_ONLY_SOURCES,
                 is_expired=is_expired,
+                is_approximate=is_approximate,
                 age_days=age_days,
             )
         )

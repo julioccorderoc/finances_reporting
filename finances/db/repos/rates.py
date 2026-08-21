@@ -130,3 +130,37 @@ def latest_on_or_before(
         (base, quote, source, as_of_date.isoformat()),
     ).fetchone()
     return _row_to_rate(row) if row else None
+
+
+def nearest(
+    conn: sqlite3.Connection, *, as_of_date: date, base: str, quote: str, source: str
+) -> Rate | None:
+    """Return the row closest to ``as_of_date`` in **either** direction.
+
+    The companion to :func:`latest_on_or_before`, and the primitive behind
+    ADR-021's terminal branch: once every tier has expired, the question
+    stops being "what was the last known rate" and becomes "what is the
+    closest thing this table knows", which a backward-only lookup cannot
+    answer — a rate published the day after the transaction is one day
+    away and was previously invisible.
+
+    Ties resolve **backwards**. At equal distance a carried rate is the
+    weaker claim against a same-day one but the stronger claim against
+    hindsight: the earlier rate was at least knowable when the money moved.
+
+    Scoped to one ``(base, quote, source)``. Ordering *across* tiers stays
+    in :func:`finances.domain.rates.resolve` — this is a lookup, not a
+    second chain (rule-005).
+    """
+    row = conn.execute(
+        """
+        SELECT id, as_of_date, base, quote, rate, source
+        FROM rates
+        WHERE base = ? AND quote = ? AND source = ?
+        ORDER BY ABS(julianday(as_of_date) - julianday(?)) ASC,
+                 as_of_date ASC
+        LIMIT 1
+        """,
+        (base, quote, source, as_of_date.isoformat()),
+    ).fetchone()
+    return _row_to_rate(row) if row else None

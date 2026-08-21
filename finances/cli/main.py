@@ -1071,7 +1071,8 @@ def report_consolidated(
 
     if strict and report.strict_violations:
         typer.echo(
-            f"--strict: {len(report.strict_violations)} row(s) use a BCV-sourced rate "
+            f"--strict: {len(report.strict_violations)} row(s) use a "
+            f"BCV-sourced or approximated rate "
             f"(ids={report.strict_violations[:10]}"
             f"{'…' if len(report.strict_violations) > 10 else ''}).",
             err=True,

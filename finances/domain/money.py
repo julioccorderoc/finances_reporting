@@ -97,29 +97,51 @@ def is_currency_movement(txn: Transaction, movement_ids: frozenset[int]) -> bool
     return txn.category_id is not None and txn.category_id in movement_ids
 
 
-def to_usd(
+def to_usd_detail(
     conn: sqlite3.Connection, txn: Transaction
-) -> tuple[Decimal | None, str]:
-    """Convert ``txn`` to USD. The only implementation of this arithmetic.
+) -> tuple[Decimal | None, rates_engine.RateResolution]:
+    """Convert ``txn`` to USD, keeping the resolution that produced it.
 
-    Returns ``(amount_usd, rate_source)``. ``amount_usd`` is ``None`` exactly
-    when the resolver could not price the row, in which case ``rate_source``
-    is ``needs_review``.
+    The only implementation of this arithmetic. ``amount_usd`` is ``None``
+    exactly when the chain could not price the row at all, in which case the
+    resolution's source is ``needs_review``.
 
-    A native-USD currency short-circuits before the resolver is consulted,
-    which is why a P2P fill's ``user_rate`` — the realized VES price of that
-    fill, recorded as provenance — is never mistaken for a conversion factor
-    on the USDT row that carries it.
+    A native-USD currency passes through *unchanged* rather than being
+    divided by the resolver's rate of one: division renormalises a Decimal's
+    exponent, and a ledger that turns ``-12.50`` into ``-12.5`` on its way to
+    a report is doing arithmetic nobody asked for.
+
+    The guard against reading a P2P fill's ``user_rate`` — the bolívar price
+    the fill was struck at — as a conversion factor now lives in the
+    resolver itself (ADR-021 §2.3), so every caller has it, not just this
+    one.
+
+    Callers that need only the label use :func:`to_usd`. The card projection
+    and the triage queue need the rate and its date too, to say *how*
+    approximate an approximation is.
 
     All arithmetic is ``Decimal``; floats never enter the path (ADR-009).
     """
-    if txn.currency in NATIVE_USD_CURRENCIES:
-        return txn.amount, NATIVE_USD_SOURCE
+    resolution = rates_engine.resolve_detail(conn, txn)
+    if resolution.source == NATIVE_USD_SOURCE:
+        return txn.amount, resolution
+    if resolution.rate is None:
+        return None, resolution
+    return txn.amount / resolution.rate, resolution
 
-    rate, source = rates_engine.resolve(conn, txn)
-    if rate is None:
-        return None, source
-    return txn.amount / rate, source
+
+def to_usd(
+    conn: sqlite3.Connection, txn: Transaction
+) -> tuple[Decimal | None, str]:
+    """Convert ``txn`` to USD, as ``(amount_usd, rate_source)``.
+
+    The two-value view of :func:`to_usd_detail`, which is what most callers
+    want. ``rate_source`` carries the full provenance, including ADR-021's
+    ``_nearest`` suffix — read it with :func:`is_approximate` and
+    :func:`is_bcv_sourced`, never by re-deriving it from dates.
+    """
+    amount_usd, resolution = to_usd_detail(conn, txn)
+    return amount_usd, resolution.source
 
 
 def to_usd_at(
@@ -150,8 +172,29 @@ def to_usd_at(
 
 
 def is_bcv_sourced(source: str) -> bool:
-    """Whether a ``rate_source`` label came from the BCV fallback tier."""
+    """Whether a ``rate_source`` label came from the BCV fallback tier.
+
+    Prefix-matched, so ``bcv``, ``bcv_carry`` and ADR-021's ``bcv_nearest``
+    are all caught: an approximation of a BCV rate is still a BCV claim and
+    stays barred from every headline and from net worth.
+    """
     return source.startswith(BCV_SOURCE_PREFIX)
+
+
+def is_approximate(source: str) -> bool:
+    """Whether a ``rate_source`` came from ADR-021's nearest-rate branch.
+
+    The suffix is the whole provenance: no consumer may re-derive
+    "is this an approximation" from dates or amounts (rule-005). This is
+    the one reader, and ``TransactionCard.approximate`` /
+    ``ConsolidatedRow.is_approximate`` are the one derivation each.
+
+    Independent of :func:`is_bcv_sourced`. A row can be both (``bcv_nearest``),
+    either, or neither, and collapsing the two axes would lose a fact:
+    "priced off the official floor" and "priced off a rate from outside
+    every window" are different weaknesses.
+    """
+    return source.endswith(rates_engine.NEAREST_SUFFIX)
 
 
 __all__ = [
@@ -160,9 +203,11 @@ __all__ = [
     "NATIVE_USD_CURRENCIES",
     "NATIVE_USD_SOURCE",
     "SQL_NOT_CURRENCY_MOVEMENT",
+    "is_approximate",
     "is_bcv_sourced",
     "is_currency_movement",
     "movement_category_ids",
     "to_usd",
+    "to_usd_detail",
     "to_usd_at",
 ]

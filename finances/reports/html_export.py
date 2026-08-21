@@ -136,6 +136,12 @@ class RecentTxn(BaseModel):
     category: str | None
     needs_review: bool
     is_bcv_fallback: bool
+    approximate: bool = False
+    """ADR-021: priced from the nearest rate rather than an in-window tier.
+
+    Carried from ``TransactionCard.approximate`` — the export marks it the
+    same way it marks a BCV fallback, because a static report the owner
+    reads later cannot ask where a number came from."""
 
 
 class ReportContext(BaseModel):
@@ -244,6 +250,7 @@ def _recent_txn(card: TransactionCard) -> RecentTxn:
         category=card.category_name,
         needs_review=card.needs_review,
         is_bcv_fallback=card.is_bcv_fallback,
+        approximate=card.approximate,
     )
 
 

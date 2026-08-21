@@ -26,7 +26,6 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from finances.domain import money
-from finances.domain import rates as rates_engine
 from finances.domain.models import Transaction, TransactionKind
 
 _NATIVE_USD_CURRENCIES = money.NATIVE_USD_CURRENCIES
@@ -121,6 +120,21 @@ class TransactionCard(BaseModel):
     category_name: str | None
     needs_review: bool
     notes: str | None = None
+    rate: Decimal | None = None
+    """The rate ``amount_usd`` was computed at, whatever tier produced it.
+
+    ``Decimal(1)`` on a native-USD row — one quote unit per dollar — and
+    ``None`` only when the row could not be priced at all."""
+    approximate: bool = False
+    """ADR-021: priced from the nearest rate rather than an in-window tier.
+
+    Derived from ``rate_source`` in one place (:func:`_project_card`) and
+    nowhere else. **Pinned cross-surface contract field** — the redesigned
+    triage queue keys its "priced roughly" group off it, so it is not
+    renamed without renaming that group too."""
+    source_ref: str | None = None
+    """The row's deterministic external id (rule-010), for surfaces that
+    name a row rather than link to it."""
 
 
 class TransactionsPage(BaseModel):
@@ -257,9 +271,10 @@ def _project_card(
 
     * USD/USDT/USDC → ``native_usd``, amount_usd = amount_native, no rate
       lookup (matches ConsolidatedRow native-currency branch).
-    * Otherwise call :func:`rates.resolve` and divide native by rate.
-    * resolver returning ``(None, "needs_review")`` keeps amount_usd as
-      ``None``.
+    * Otherwise call :func:`rates.resolve_detail` and divide native by rate.
+    * a chain that found nothing at all keeps amount_usd as ``None``; since
+      ADR-021 that means the rates table is empty for the pair, not that
+      the row fell out of a window.
     """
     assert txn.id is not None
 
@@ -267,7 +282,8 @@ def _project_card(
     # be a third hand-written copy of "native currencies pass through, else
     # divide by the resolved rate" — the review found five such copies and
     # the fifth had drifted.
-    amount_usd, source = money.to_usd(conn, txn)
+    amount_usd, resolution = money.to_usd_detail(conn, txn)
+    source = resolution.source
     unresolved = amount_usd is None
 
     return TransactionCard(
@@ -288,6 +304,12 @@ def _project_card(
         # whatever the stored column says — the card is what triage reads.
         needs_review=True if unresolved else txn.needs_review,
         notes=txn.notes,
+        rate=resolution.rate,
+        # The one derivation of "approximate" on this surface. Every other
+        # reader takes the field (rule-005: provenance is carried, never
+        # re-inferred).
+        approximate=money.is_approximate(source),
+        source_ref=txn.source_ref,
     )
 
 

@@ -89,7 +89,10 @@ def usdt_value(
     figure. That is now enforced by *reading the resolver's answer* rather
     than by keeping a private chain — a BCV-sourced result returns ``None``,
     the account reports as a missing pair, and the total omits it, exactly
-    as before.
+    as before. ``is_bcv_sourced`` is prefix-matched, so ADR-021's
+    ``bcv_nearest`` is barred by the same line that bars ``bcv_carry``; an
+    approximation of a *market* tier is allowed through, because the rule
+    is about BCV, not about precision.
 
     Shared by :func:`compute_net_worth` (dashboard) and
     :func:`finances.web.services.accounts_view.build_account_cards`

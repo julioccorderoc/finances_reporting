@@ -11,8 +11,9 @@ headline, BCV for reference only"):
   marked ``is_bcv_fallback = True``.
 * They are **excluded** from the headline aggregate ``total_usd`` and
   instead rolled up into ``fallback_total_usd`` / ``fallback_row_count``.
-* Their ``transaction_id`` is collected into ``strict_violations`` so the
-  CLI layer can exit non-zero when invoked with ``--strict``.
+* Their ``transaction_id`` — and, since ADR-021, that of any row priced
+  from the nearest rate rather than an in-window tier — is collected into
+  ``strict_violations`` so the CLI layer can exit non-zero on ``--strict``.
 * Rows whose resolver returned ``needs_review`` are surfaced with
   ``amount_usd = None`` and *do not* count as BCV-fallback violations —
   they simply need a rate, which is a separate problem.
@@ -62,8 +63,13 @@ class ConsolidatedRow(BaseModel):
     * ``binance_p2p_median_carry``  — carry-forward Binance P2P median
     * ``bcv``                       — exact-day BCV fallback
     * ``bcv_carry``                 — carry-forward BCV fallback
+    * ``<tier>_nearest``            — ADR-021: priced from the nearest rate
+                                      in the table, in or out of window,
+                                      before or after the day
     * ``native_usd``                — currency is USD/USDT/USDC, no rate used
-    * ``needs_review``              — resolver could not find any rate
+    * ``needs_review``              — the rates table holds nothing for the
+                                      pair; the only remaining unpriceable
+                                      case
     """
 
     model_config = ConfigDict(strict=True, extra="forbid")
@@ -78,6 +84,13 @@ class ConsolidatedRow(BaseModel):
     rate_source: str
     description: str | None
     is_bcv_fallback: bool
+    is_approximate: bool = False
+    """ADR-021: priced from the nearest rate rather than an in-window tier.
+
+    Independent of ``is_bcv_fallback`` — a row can be both. The two answer
+    different questions ("priced off the official floor" vs "priced off a
+    rate from outside every window") and either one is enough to keep the
+    row out of a ``--strict`` run."""
 
 
 class ConsolidatedReport(BaseModel):
@@ -132,6 +145,7 @@ def _compute_row(conn: sqlite3.Connection, txn: Transaction) -> ConsolidatedRow:
     assert txn.id is not None, "transactions persisted via the repo always have an id"
 
     amount_usd, source = money.to_usd(conn, txn)
+    priced = amount_usd is not None
     return ConsolidatedRow(
         transaction_id=txn.id,
         occurred_at=txn.occurred_at,
@@ -144,7 +158,8 @@ def _compute_row(conn: sqlite3.Connection, txn: Transaction) -> ConsolidatedRow:
         description=txn.description,
         # An unresolved row is not a BCV fallback — it simply needs a rate,
         # which is a different problem and a different remedy.
-        is_bcv_fallback=amount_usd is not None and money.is_bcv_sourced(source),
+        is_bcv_fallback=priced and money.is_bcv_sourced(source),
+        is_approximate=priced and money.is_approximate(source),
     )
 
 
@@ -175,9 +190,14 @@ def build_report(
         if row.is_bcv_fallback:
             fallback_total_usd += row.amount_usd
             fallback_row_count += 1
-            strict_violations.append(row.transaction_id)
         elif row.rate_source != rates_engine.NEEDS_REVIEW_SOURCE:
             total_usd += row.amount_usd
+        # Two independent reasons to refuse a strict run, counted once per
+        # row: a BCV-sourced figure (ADR-005 amendment) and, since ADR-021,
+        # one approximated from outside every window. Bucketing is by tier;
+        # this is about how much weight the number can carry.
+        if row.is_bcv_fallback or row.is_approximate:
+            strict_violations.append(row.transaction_id)
 
     return ConsolidatedReport(
         rows=rows,

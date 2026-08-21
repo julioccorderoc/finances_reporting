@@ -198,6 +198,12 @@ def _resolve_contribution(
     The conversion itself is :func:`finances.domain.money.to_usd`, shared
     with :mod:`finances.reports.consolidated_usd`; only the bucketing is
     this report's own.
+
+    An ADR-021 approximation buckets by the tier it came from, not by its
+    precision: ``bcv_nearest`` is caught by the prefix match and lands in
+    ``fallback``, any other ``_nearest`` is a market rate and counts toward
+    the headline. The two axes are independent, and ``rate_source`` carries
+    both for anything that wants to separate them.
     """
     amount_usd, source = money.to_usd(conn, txn)
     if amount_usd is None:

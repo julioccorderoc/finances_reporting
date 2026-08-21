@@ -170,6 +170,17 @@ def apply_edit(
 
     # Step 4 — re-derive rate/source. ``resolve`` may flip needs_review on
     # the in-memory object as a side effect; we don't depend on that.
+    #
+    # This used to run the whole VES ladder against native-USD rows, which
+    # was harmless only by luck: the guard is now inside the resolver
+    # (ADR-021 §2.3), above the ``user_rate`` branch, so a USDT row whose
+    # ``user_rate`` records the bolívar price of a P2P fill cannot have that
+    # price read as a conversion factor here or anywhere else.
+    #
+    # ``needs_review`` now means "the rates table holds nothing for this
+    # pair". A row the chain can only approximate resolves to a
+    # ``*_nearest`` source and is NOT flagged — an approximate rate must
+    # never block a triage sitting (design criterion D6).
     _rate, source = rates_engine.resolve(conn, txn)
     derived_needs_review = source == rates_engine.NEEDS_REVIEW_SOURCE
 
