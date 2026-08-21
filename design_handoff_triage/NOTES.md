@@ -81,6 +81,17 @@ tagging one leg. The older `categories.list_for_kind()` still offers them, and
 is deliberately left alone: it backs the surfaces where the owner says "this
 money moved, it was not spent" (`finances.domain.money`).
 
+### Icons are constrained to what `_icons.html` vendors
+
+The fixture's names are seeded verbatim where they exist. The five categories
+the fixture never modelled needed names chosen here, and they are chosen from
+the 48 the Wave 1.3 icon macro actually inlines — an unknown name renders
+*nothing*, deliberately, so a typo would surface as a blank square rather than
+an error. `External Transfer` → `banknote`, `FX Diff` → `percent`, and the two
+retired ones → `tag` / `package`, rather than the more obvious `arrow-up-right`
+/ `coins` / `sparkles` / `wrench`, none of which are vendored. A test pins the
+two sides together.
+
 ### The tests come from the doc, not the fixture
 
 Criterion K7. `triage-data.js` carries its own, friendlier test sentences

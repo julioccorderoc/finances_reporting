@@ -89,8 +89,10 @@ UPDATE categories SET active = 0 WHERE kind = 'expense' AND name = 'Clothing';
 -- Lucide names. Taken from the design kit
 -- (design_handoff_triage/design/ui_kits/finances/triage-data.js) wherever the
 -- category exists there; the five it never modelled — the two real transfer
--- categories, FX Diff, and the two retired ones — are chosen here. Retired
--- categories get one too, so reviving one is still just a flag flip.
+-- categories, FX Diff, and the two retired ones — are chosen here, and chosen
+-- from the set `templates/_icons.html` actually vendors, since an unknown name
+-- renders nothing at all. Retired categories get one too, so reviving one is
+-- still just a flag flip.
 UPDATE categories SET icon = CASE name
     WHEN 'Groceries'        THEN 'shopping-basket'
     WHEN 'Going Out'        THEN 'utensils'
@@ -110,16 +112,16 @@ UPDATE categories SET icon = CASE name
     WHEN 'Education'        THEN 'graduation-cap'
     WHEN 'Other Expense'    THEN 'circle-dashed'
     WHEN 'Fees'             THEN 'receipt'
-    WHEN 'Lifestyle'        THEN 'sparkles'
-    WHEN 'Tools'            THEN 'wrench'
+    WHEN 'Lifestyle'        THEN 'tag'
+    WHEN 'Tools'            THEN 'package'
     WHEN 'Salary'           THEN 'briefcase'
     WHEN 'Gigs'             THEN 'laptop'
     WHEN 'Loan Repayment'   THEN 'rotate-ccw'
     WHEN 'Other Income'     THEN 'arrow-down-left'
     WHEN 'Interest'         THEN 'percent'
     WHEN 'Internal Transfer' THEN 'arrow-left-right'
-    WHEN 'External Transfer' THEN 'arrow-up-right'
-    WHEN 'FX Diff'          THEN 'coins'
+    WHEN 'External Transfer' THEN 'banknote'
+    WHEN 'FX Diff'          THEN 'percent'
     WHEN 'Reconciliation'   THEN 'scale'
     ELSE icon
 END;

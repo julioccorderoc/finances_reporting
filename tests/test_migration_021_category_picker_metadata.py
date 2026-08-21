@@ -21,6 +21,7 @@ design's stale read:
 
 from __future__ import annotations
 
+import re
 import shutil
 import sqlite3
 from pathlib import Path
@@ -119,10 +120,38 @@ def test_icons_match_the_design_kit(migrated_db: sqlite3.Connection) -> None:
     assert icons["Transport"] == "car"
     assert icons["Personal Care"] == "scissors"
     assert icons["Loan Repayment"] == "rotate-ccw"
-    # Not in the design fixture — chosen here.
+    # Not in the design fixture — chosen here, from what _icons.html vendors.
     assert icons["Internal Transfer"] == "arrow-left-right"
-    assert icons["External Transfer"] == "arrow-up-right"
-    assert icons["FX Diff"] == "coins"
+    assert icons["External Transfer"] == "banknote"
+    assert icons["FX Diff"] == "percent"
+
+
+def test_every_seeded_icon_is_one_the_macro_can_draw(
+    migrated_db: sqlite3.Connection,
+) -> None:
+    """``_icons.html`` renders an unknown name as nothing, silently.
+
+    That is the right call mid-triage — a hole beats a crash — but it means
+    a typo here shows up as a blank square nobody traces back to a
+    migration. The macro's name list is a pinned cross-session contract,
+    so pin the other side of it too.
+    """
+    macro = (
+        Path(__file__).resolve().parents[1]
+        / "finances"
+        / "web"
+        / "templates"
+        / "_icons.html"
+    ).read_text(encoding="utf-8")
+    available = set(re.findall(r'^\s*"([a-z0-9-]+)":', macro, flags=re.MULTILINE))
+    assert available, "could not parse the ICONS map out of _icons.html"
+
+    seeded = {
+        r["icon"]
+        for r in migrated_db.execute("SELECT DISTINCT icon FROM categories")
+        if r["icon"]
+    }
+    assert seeded <= available, f"no such Lucide icon vendored: {sorted(seeded - available)}"
 
 
 def test_clothing_rows_fold_into_purchases(tmp_path: Path) -> None:
