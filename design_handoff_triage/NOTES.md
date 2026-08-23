@@ -106,15 +106,25 @@ The cheap parts of J are in: `role="dialog"`, `aria-modal`, an
 `aria-label` on the dialog and on every icon-only control, meaningful
 checkbox labels, and focus moving into the dialog on open.
 
-### Still true from Wave 1.1: a rate the resolver should not have used
+### FIXED 2026-08-23 — a rate the resolver should not have used
 
-`rates.resolve`'s tiers are hard-coded to `quote = "VES"` and are not
-checked against the transaction's own currency, so a COP row is priced
+`rates.resolve`'s tiers are hard-coded to `quote = "VES"` and were not
+checked against the transaction's own currency, so a COP row was priced
 with a bolívar rate. Found while seeding a genuinely unpriceable row for
 D5 (the only way to reach `amount_usd IS NULL` today is an empty `rates`
-table). Out of scope here — it is a resolver change and would want an
-ADR — but it is a real defect and it is why the D5 fixtures seed no rates
-at all.
+table), and carried through Waves 1.1–2 as a known defect out of scope.
+
+Fixed in `57b7558` (`fix(rates): GREEN — the fallback ladder is scoped to
+its own quote currency`), with the reasoning recorded as **ADR-021 §2.5**.
+`LADDER_QUOTE_CURRENCIES` is derived from `_FALLBACK_TIERS` and
+`_tiers_for()` narrows the tiers each branch walks, so the scope is the
+tier table rather than a second `"VES"` literal. A non-native row outside
+it — `user_rate` included — resolves unpriceable and lands in the queue as
+a bucket-2 rate item. Zero live rows change: the ledger holds only
+VES/USDT/USDC/USD.
+
+The D5 fixtures can still seed no rates at all; that path is unchanged and
+is now one of two ways to reach `amount_usd IS NULL`.
 
 ---
 

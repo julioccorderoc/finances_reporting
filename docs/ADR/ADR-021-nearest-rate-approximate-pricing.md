@@ -1,6 +1,7 @@
 # ADR-021: Every Tier Expires, and an Expired Chain Prices From the Nearest Rate
 
 **Date:** 2026-08-21
+**Amended:** 2026-08-23 — §2.5 scopes the ladder to its own quote currency
 **Status:** Accepted
 **Amends:** [ADR-005](./ADR-005-rate-resolution-priority.md) — bounds tier 4, adds a terminal branch before `needs_review`
 **Amends:** [ADR-016](./ADR-016-p2p-median-max-age.md) — extends its cap to the tiers it left out
@@ -142,6 +143,38 @@ alternative — a second literal set in `rates.py` — is the thing
 * `sheets_sync` needs no new column: it already exports `rate_source`, and the
   suffix is the provenance.
 
+### 2.5 Scope: the ladder is a *bolívar* ladder (amendment 2026-08-23)
+
+Every tier in §2.2 quotes in VES — `USDT/VES` twice, `USD/VES` once. Branches
+1–5 therefore apply to **a row denominated in VES, and no other**. A non-native
+row in any other currency resolves to branch 6, unpriceable: no rate, no
+`amount_usd`, `needs_review` set. That is the same state an empty rates table
+produces, and the triage surface already renders it (criterion D5).
+
+§1.4 named the resolver currency-blind and §2.3 fixed the half of it that was
+live — the native-USD guard protecting the 142 USDT rows. The other half stayed
+open: nothing compared a tier's *quote* currency against `txn.currency`, so a
+COP row was divided by a bolívar rate and reported as a confident dollar figure.
+Inert on the live ledger (VES/USDT/USDC/USD only), and found while seeding a
+genuinely unpriceable row for D5.
+
+`user_rate` is inside the scope, not above it. Per ADR-015 it is *quote units
+per dollar*, and the quote unit the ledger means by it is the bolívar; on a
+currency the chain has no tier for, the number's unit is unverified. Branch 1 is
+consulted only after the currency has a tier — the same reasoning that put the
+native-USD guard above it.
+
+The guard is structural. `LADDER_QUOTE_CURRENCIES` is derived from
+`_FALLBACK_TIERS`, and `_tiers_for(currency)` narrows the list the in-window and
+nearest branches walk. A guard spelled `== "VES"` would be a second copy of the
+tier table, which is the defect class §2.1 and ADR-016 §2.1 both exist to close.
+
+**Adding a currency means adding tiers, never borrowing one.** A new currency
+needs its own rate pairs in `rates` and its own entries in `_FALLBACK_TIERS`
+(with caps in `_TIER_MAX_AGE_DAYS`). Until it has them the ledger says "cannot
+price this" — which is the honest answer, and a triage item, rather than a
+plausible number nobody can trace.
+
 ## 3. Consequences
 
 **Inert on the live ledger.** Measured 2026-08-21 against `finances.db`
@@ -172,6 +205,12 @@ the deviation is logged in `design_handoff_triage/NOTES.md`.
 directions for one `(base, quote, source)`. It is deliberately not a second
 chain: it answers "what is the closest row" for one tier, and the ordering
 across tiers stays in `resolve()`.
+
+**The currency scope moves no live number either.** The ledger holds four
+currencies — VES, USDT, USDC, USD. Three are native-USD and short-circuit above
+the ladder; the fourth *is* the ladder's quote currency. So §2.5 changes the
+resolution of exactly zero live rows. What it changes is what happens the first
+time a fifth currency arrives: a triage item instead of a plausible number.
 
 **What this does not do.** It does not backfill missing rates, and it does not
 make an approximation trustworthy. `bcv_nearest` is still barred from net worth
