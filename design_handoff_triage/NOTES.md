@@ -6,6 +6,101 @@ a place the shipped code deliberately does something other than what
 
 ---
 
+## Wave 3 — accessibility, cleanup, and the criteria walk
+
+Built 2026-08-23. Three new deviations, and the report they came out of is
+`ACCEPTANCE-REPORT.md`.
+
+### Two text tokens darkened to reach AA — and they land on the same grey
+
+**Deviation.** Criterion J7 wants every body text token to clear 4.5:1
+against its own background at its own size. Measured in a browser against
+each element's real fill, two failed:
+
+| Token | Was | Canvas | Raised | Sunken | Now | Canvas | Raised | Sunken |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `--text-tertiary` | `#6d6d69` | 4.39 | 4.76 | 4.08 | `#666662` | 4.90 | 5.31 | 4.53 |
+| `--text-placeholder` | `#9a9a95` | 2.39 | 2.59 | 2.22 | `#666662` | 4.90 | 5.31 | 4.53 |
+
+`--text-placeholder` was not decoration: it carried the raw bank string under
+every cleaned merchant name, the account detail (`· Provincial`), the chip
+shortcut numbers, the `1–8` hint and the picker's disclosure note. All of it
+is information, so none of it is WCAG-exempt.
+
+They land on the **same** value, which flattens a two-step ramp into one.
+That is forced, not chosen: 4.5:1 is a floor, so at 10.5–13px there is exactly
+one lightest legible grey and any two tiers that must both clear it converge
+on it. `#666662` is that grey — the lightest warm neutral clearing 4.5:1 on
+all three paper surfaces, including `--surface-sunken`, which is what a
+*selected* row is. The hierarchy those two tiers used to carry is now size and
+weight, which was already doing most of the work.
+
+The **ink ramp is untouched**: `--ink-400` and `--ink-500` still hold their
+drawn values, so anything using them as a rule, an icon or a fill is
+unchanged. Only the two semantic text tokens moved. No other page reads
+either one (app.css references six custom properties, and these are not among
+them).
+
+**Left failing, deliberately:** the primary button's label, `#f5f5f3` on the
+`#e5231b` fill, at 4.19:1. Darkening the text makes it worse. White reaches
+4.58:1 but SIGNAL bans harsh white and `--text-inverse` is shared with the ink
+toast; `#f5f5f3` on `#c51a13` reaches 5.45:1 but that changes the resting
+fill. Both are fill decisions, and this wave was told not to change fills.
+Owner's call — recorded as the one ❌ in the report.
+
+### The rise keyframes are `triage-rise` / `toast-rise`, not `bodega-rise`
+
+Criterion I9 names `bodega-rise`. That is the prototype's design-system
+prefix; this repo's system is SIGNAL, and signal.css already renamed the
+`bodega`/`thyme`/`ochre`/`clay` families on the way in. The motion is
+byte-identical to `design/tokens/base.css:121` — 6px up, opacity 0→1 — under
+two local names: `triage-rise` in triage.css (modal, sheet, selection bar) and
+`toast-rise` in app.css.
+
+The toast's copy is deliberate rather than shared. The toast shows on every
+page and app.css is the sheet that survives if triage.css is ever dropped; a
+component that ships everywhere must not depend on a stylesheet that exists
+for one screen.
+
+### I8's "at most once per view" is looser than the prototype
+
+Criterion I8 says Doto appears "at most once per view (the empty-state
+headline)". On the empty queue two Doto elements are on screen at once: the
+page header's answer (`Nothing needs you`, 34px) and the empty headline
+(`Queue empty.`, 26px). That is exactly what the prototype renders —
+`Chrome.jsx:200` sets `--font-display` on the `PageHeader` answer and
+`TriageScreen.jsx:189` on the empty headline. The parenthetical is the loose
+half of the criterion, not a description of the design. Both are ≥22px,
+neither is in a row or a sentence, and A8 requires the header to keep saying
+`Nothing needs you` at zero.
+
+### Two console defects the L walk turned up, both now fixed
+
+Neither is a design deviation; recorded because both were invisible to every
+server-side test.
+
+* `hx-disabled-elt="find button[type=submit]"` on the save form matched
+  nothing — `find` searches inside the form and the design puts the primary
+  button in the footer, associated by `form=` id. htmx logged *"returned no
+  matches!"* on every save and the double-submit guard was never armed. Now
+  `[data-modal-primary]`. A Wave 2 test asserted the broken literal and was
+  green; it now asserts the working one.
+* No icon was declared, so every browser probed `/favicon.ico` and 404'd on
+  every page load. `static/favicon.svg` — ink paper, one red rule, 32px —
+  linked from `base.html`. Served from `/static` like everything else, so it
+  works offline and needs no route.
+
+### `confirm_pair` now rebuilds the realized cost basis (H5)
+
+Not a deviation — a hole. `apply_edit` has rebuilt the materialised
+`binance_p2p_realized` tier since ADR-013's 2026-07-26 amendment;
+`confirm_pair` never joined that bargain, so the tier was only as fresh as
+the last ingest happened to leave it. Verified end to end on the scratch DB:
+a VES row three days downstream of a confirmed sell went from `bcv 784.66`
+to `binance_p2p_realized_carry 240`.
+
+---
+
 ## Wave 2 — the surface (queue, modal run, sheets, writes)
 
 Built 2026-08-23. Everything below is a place the shipped screen does
@@ -98,13 +193,14 @@ The design's footer is Park, the legend, and the primary. Closing is esc,
 the scrim, or the header's `x` — all three are wired. The old modal's
 Cancel button has no place in the new footer and was not smuggled back in.
 
-### Not built, deliberately
+### Not built, deliberately — DONE in Wave 3
 
 The J group (focus trap, `aria-live` announcements, an AA audit of the
-10.5px chip) and the L cleanup of app.css's old triage block are Wave 3.
-The cheap parts of J are in: `role="dialog"`, `aria-modal`, an
+10.5px chip) and the L cleanup of app.css's old triage block were Wave 3.
+The cheap parts of J shipped here: `role="dialog"`, `aria-modal`, an
 `aria-label` on the dialog and on every icon-only control, meaningful
-checkbox labels, and focus moving into the dialog on open.
+checkbox labels, and focus moving into the dialog on open. Everything
+else landed 2026-08-23 — see §Wave 3 above and `ACCEPTANCE-REPORT.md`.
 
 ### FIXED 2026-08-23 — a rate the resolver should not have used
 
