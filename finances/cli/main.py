@@ -1197,6 +1197,14 @@ def serve_cmd(
         help="Restart the server when finances/** changes. Defaults ON for "
         "the 127.0.0.1 bind; unavailable on LAN binds.",
     ),
+    db_path: Path | None = typer.Option(
+        None,
+        "--db-path",
+        envvar="FINANCES_WEB_DB_PATH",
+        help="Serve a different SQLite file. Defaults to the real ledger. "
+        "Exists so a scratch copy (or a test) can run the whole process "
+        "tree without opening finances.db.",
+    ),
 ) -> None:
     """Run the local web viewer (EPIC-022)."""
     import os
@@ -1220,6 +1228,7 @@ def serve_cmd(
             host=host,
             port=port,
             token=token,
+            **({"db_path": db_path} if db_path is not None else {}),
         )
     except ValueError as exc:
         typer.echo(str(exc), err=True)

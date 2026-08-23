@@ -48,6 +48,15 @@ WATCHED_TEMPLATE = (
 assert WATCHED_TEMPLATE.exists(), WATCHED_TEMPLATE
 
 
+def _fingerprint(path: Path) -> tuple[bool, int, int]:
+    """(exists, size, mtime_ns) — enough to catch a WAL header rewrite."""
+    try:
+        stat = path.stat()
+    except FileNotFoundError:
+        return (False, 0, 0)
+    return (True, stat.st_size, stat.st_mtime_ns)
+
+
 def _free_port() -> int:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -89,13 +98,25 @@ def _touch_and_wait(
     )
 
 
-def test_watch_restart_socket_survives_then_stop() -> None:
+def test_watch_restart_socket_survives_then_stop(tmp_path: Path) -> None:
     port = _free_port()
-    # No DB fixture: serve_cmd builds its own WebSettings from the CLI flags
-    # and exports THOSE, so a FINANCES_WEB_DB_PATH set here would just be
-    # overwritten. db_path is not a CLI option, so `finances serve` always
-    # opens config.DB_PATH. This test only touches /health and /shutdown,
-    # neither of which reads the ledger.
+    # --db-path, and a path that is DELIBERATELY not migrated.
+    #
+    # This test spawns the real process tree, so nothing the suite patches
+    # applies to it: for a long time it opened config.DB_PATH — the owner's
+    # actual ledger — which bumped its mtime on every run and materialised a
+    # 4096-byte stub in a fresh worktree. tests/conftest.py fails the session
+    # on that now, and this is the flag that gives it somewhere else to go.
+    #
+    # Leaving the file unmigrated matters: on the way out the supervisor runs
+    # _regen_report_on_shutdown, which writes config.REPORT_HTML_PATH — the
+    # repo's real report.html — no matter which DB it read. Against an empty
+    # file the export raises "no such table: accounts", the warn-only handler
+    # swallows it, and report.html is left alone. The startup refresh fails
+    # the same way, which also keeps this test off the network.
+    scratch_db = tmp_path / "serve-smoke.db"
+    ledger_before = _fingerprint(REPO_ROOT / "finances.db")
+    report_before = _fingerprint(REPO_ROOT / "report.html")
     proc = subprocess.Popen(
         [
             "uv",
@@ -105,6 +126,8 @@ def test_watch_restart_socket_survives_then_stop() -> None:
             "--port",
             str(port),
             "--no-open",
+            "--db-path",
+            str(scratch_db),
         ],
         cwd=REPO_ROOT,
         stdout=subprocess.PIPE,
@@ -162,6 +185,15 @@ def test_watch_restart_socket_survives_then_stop() -> None:
             "the supervisor outlived POST /shutdown"
         )
         assert _health(port) is None, "the port is still answering after stop"
+
+        # The whole tree ran against the scratch file, start to finish.
+        assert _fingerprint(REPO_ROOT / "finances.db") == ledger_before, (
+            "the spawned server opened the real ledger"
+        )
+        assert _fingerprint(REPO_ROOT / "report.html") == report_before, (
+            "the shutdown regen rewrote the repo's report.html from the "
+            "scratch DB"
+        )
     finally:
         if proc.poll() is None:
             proc.kill()
