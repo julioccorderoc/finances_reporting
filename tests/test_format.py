@@ -20,7 +20,9 @@ from finances.format import (
     fmt_date_short,
     fmt_money,
     fmt_month,
+    fmt_native,
     fmt_number,
+    fmt_usd,
 )
 
 EM_DASH = "—"  # em dash "—" (the None placeholder)
@@ -219,3 +221,55 @@ def test_short_date_accepts_an_iso_string() -> None:
 
 def test_short_date_none_em_dash() -> None:
     assert fmt_date_short(None) == EM_DASH
+
+
+# ---------------------------------------------------------------------------
+# fmt_usd / fmt_native — the SIGNAL money pair (triage redesign)
+# ---------------------------------------------------------------------------
+
+
+def test_usd_negative_uses_a_true_minus_before_the_symbol() -> None:
+    assert fmt_usd(Decimal("-1200")) == "−$1,200.00"
+
+
+def test_usd_positive_is_bare_unless_signed_is_asked_for() -> None:
+    assert fmt_usd(Decimal("18.40")) == "$18.40"
+    assert fmt_usd(Decimal("18.40"), signed=True) == "+$18.40"
+
+
+def test_usd_zero_never_carries_a_sign() -> None:
+    assert fmt_usd(Decimal("0"), signed=True) == "$0.00"
+
+
+def test_usd_none_em_dash() -> None:
+    assert fmt_usd(None) == EM_DASH
+
+
+def test_native_ves_uses_a_non_breaking_space() -> None:
+    assert fmt_native(Decimal("-45231.10"), "VES") == "−Bs. 45,231.10"
+
+
+def test_native_usdt_puts_the_ticker_after_the_figure() -> None:
+    assert fmt_native(Decimal("277.90"), "USDT") == "277.90 USDT"
+
+
+def test_native_usd_is_the_dollar_form() -> None:
+    assert fmt_native(Decimal("-12.50"), "USD") == "−$12.50"
+
+
+def test_native_signed_marks_a_credit_with_a_plus() -> None:
+    assert fmt_native(Decimal("96.40"), "USDT", signed=True) == "+96.40 USDT"
+    assert fmt_native(Decimal("36500"), "VES", signed=True) == "+Bs. 36,500.00"
+
+
+def test_native_none_em_dash() -> None:
+    assert fmt_native(None, "VES") == EM_DASH
+
+
+def test_the_signal_pair_never_emits_an_ascii_hyphen() -> None:
+    """D11 — the design's minus is U+2212. fmt_money keeps the ASCII form
+    that the older surfaces and the CSV/CLI exports already render.
+    """
+    assert "-" not in fmt_usd(Decimal("-1"))
+    assert "-" not in fmt_native(Decimal("-1"), "VES")
+    assert fmt_money(Decimal("-1")).startswith("-")

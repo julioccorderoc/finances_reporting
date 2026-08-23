@@ -282,6 +282,206 @@ def seeded_web_db(web_db: sqlite3.Connection) -> sqlite3.Connection:
     return web_db
 
 
+# ---------------------------------------------------------------------------
+# Triage redesign (Wave 2) — a ledger that carries every state the surface
+# has to render. The queue screen and the modal run are asserted against
+# this rather than against live data: the live ledger's deepest rate carry
+# is six days, so *Priced roughly* is empty there and the automatic pair
+# matcher only proposes inside ±1 day / ±2%, so no live proposal is ever
+# refusable (design_handoff_triage/NOTES.md, Wave 1.1).
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def triage_web_db(web_db: sqlite3.Connection) -> sqlite3.Connection:
+    """Every triage state at once, on fixed dates.
+
+    * ``cat-only`` — uncategorised, priced in-window (bucket 0).
+    * ``both`` — uncategorised AND priced from a nearest rate, so it is
+      one item with two badges in bucket 0 (criterion A2).
+    * ``rough`` — categorised, priced approximately (bucket 2).
+    * ``parked`` — uncategorised and out of the queue.
+    * a rule-backed guess (``traki`` → Purchases) and a learned one (the
+      same bank string filed three times).
+    * a same-day, exact-amount deposit + sell, which the automatic
+      matcher proposes as a pair (bucket 1).
+    * a second deposit + sell seven days apart, which the matcher will
+      not propose (±1 day) and the manual pair path refuses outright,
+      so the modal's danger banner has something real to render (H3).
+    """
+    bank = accounts_repo.insert(
+        web_db,
+        Account(
+            name="Provincial",
+            kind=AccountKind.BANK,
+            currency="VES",
+            institution="Provincial",
+        ),
+    )
+    funding = accounts_repo.insert(
+        web_db,
+        Account(
+            name="Binance Funding",
+            kind=AccountKind.CRYPTO_FUNDING,
+            currency="USDT",
+            institution="Binance",
+        ),
+    )
+    groceries = categories_repo.get_by_name(
+        web_db, TransactionKind.EXPENSE, "Groceries"
+    )
+    assert groceries is not None
+
+    # One rate island, far from every transaction below except the first
+    # two, so the nearest-rate branch (ADR-021) is what prices the rest.
+    for as_of, source, base, rate in (
+        (date(2026, 6, 27), "binance_p2p_median", "USDT", Decimal("155.00")),
+        (date(2026, 7, 1), "binance_p2p_median", "USDT", Decimal("160.00")),
+        (date(2026, 7, 1), "bcv", "USD", Decimal("144.60")),
+    ):
+        rates_repo.upsert(
+            web_db,
+            Rate(
+                as_of_date=as_of,
+                base=base,
+                quote="VES",
+                rate=rate,
+                source=source,
+            ),
+        )
+
+    def _bank_row(**kwargs) -> Transaction:
+        base = {
+            "account_id": bank.id,
+            "kind": TransactionKind.EXPENSE,
+            "currency": "VES",
+            "source": "provincial",
+        }
+        return Transaction(**{**base, **kwargs})
+
+    transactions_repo.insert(
+        web_db,
+        _bank_row(
+            occurred_at=datetime(2026, 7, 3, tzinfo=UTC),
+            amount=Decimal("-16000.00"),
+            description="LUNCHERIA MILY GOURMET",
+            source_ref="triage-cat-only",
+        ),
+    )
+    transactions_repo.insert(
+        web_db,
+        _bank_row(
+            occurred_at=datetime(2026, 3, 2, tzinfo=UTC),
+            amount=Decimal("-24000.00"),
+            description="COMPRA POS 3311 TRAKI",
+            source_ref="triage-both",
+        ),
+    )
+    transactions_repo.insert(
+        web_db,
+        _bank_row(
+            occurred_at=datetime(2026, 3, 4, tzinfo=UTC),
+            amount=Decimal("-8000.00"),
+            description="CAR.DRV0013196230",
+            category_id=groceries.id,
+            source_ref="triage-rough",
+        ),
+    )
+    # History behind the learned guess: the same bank string, filed the
+    # same way three times, is what makes the queue offer it (G7).
+    for n in range(3):
+        transactions_repo.insert(
+            web_db,
+            _bank_row(
+                occurred_at=datetime(2026, 6, 28 + n, tzinfo=UTC),
+                amount=Decimal("-12000.00"),
+                description="LUNCHERIA MILY GOURMET",
+                category_id=groceries.id,
+                source_ref=f"triage-history-{n}",
+            ),
+        )
+
+    # A rule the engine will match, so the other guess cites a regex.
+    purchases = categories_repo.get_by_name(
+        web_db, TransactionKind.EXPENSE, "Purchases"
+    )
+    assert purchases is not None
+    web_db.execute(
+        "INSERT INTO category_rules (pattern, category_id, source, priority) "
+        "VALUES (?, ?, ?, ?)",
+        ("traki", purchases.id, "provincial", 10),
+    )
+
+    transactions_repo.insert(
+        web_db,
+        _bank_row(
+            occurred_at=datetime(2024, 11, 3, tzinfo=UTC),
+            amount=Decimal("-6400.00"),
+            description="PAGO MOVIL 04141234567",
+            source_ref="triage-parked",
+            parked=True,
+        ),
+    )
+
+    # The proposable pair: same day, and the sell's own rate values it at
+    # exactly the deposit, so BankAnchoredP2pPairing offers it.
+    transactions_repo.insert(
+        web_db,
+        _bank_row(
+            occurred_at=datetime(2026, 7, 2, tzinfo=UTC),
+            kind=TransactionKind.INCOME,
+            amount=Decimal("32000.00"),
+            description="ABONO P2P",
+            source_ref="triage-pair-deposit",
+        ),
+    )
+    transactions_repo.insert(
+        web_db,
+        Transaction(
+            account_id=funding.id,
+            occurred_at=datetime(2026, 7, 2, tzinfo=UTC),
+            kind=TransactionKind.EXPENSE,
+            amount=Decimal("-200.00"),
+            currency="USDT",
+            description="P2P sell",
+            user_rate=Decimal("160.00"),
+            source="binance",
+            source_ref="triage-pair-sell",
+        ),
+    )
+
+    # The refusable pair: seven days apart, so the matcher never proposes
+    # it (its window is one day) and confirm_pair raises on it. Reachable
+    # only through the pair modal's own URL — which is exactly where the
+    # design's disabled button and danger banner live.
+    transactions_repo.insert(
+        web_db,
+        _bank_row(
+            occurred_at=datetime(2026, 1, 10, tzinfo=UTC),
+            kind=TransactionKind.INCOME,
+            amount=Decimal("50000.00"),
+            description="ABONO P2P LEGACY",
+            source_ref="triage-refused-deposit",
+        ),
+    )
+    transactions_repo.insert(
+        web_db,
+        Transaction(
+            account_id=funding.id,
+            occurred_at=datetime(2026, 1, 17, tzinfo=UTC),
+            kind=TransactionKind.EXPENSE,
+            amount=Decimal("-200.00"),
+            currency="USDT",
+            description="P2P sell legacy",
+            user_rate=Decimal("230.00"),
+            source="binance",
+            source_ref="triage-refused-sell",
+        ),
+    )
+
+    return web_db
+
+
 # Re-export the seeded date helpers so tests can build precise filter ranges.
 
 
