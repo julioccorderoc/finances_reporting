@@ -51,6 +51,7 @@ import pytest
 import responses
 from polyfactory.factories.pydantic_factory import ModelFactory
 
+from finances import config as _config
 from finances.db.connection import get_connection
 from finances.db.migrate import MIGRATIONS_DIR, apply_migrations
 from finances.domain.models import (
@@ -405,3 +406,101 @@ __all__ = [
 
 # Silence unused-import warnings for symbols consumed only via __all__.
 _ = (Any,)
+
+
+# ---------------------------------------------------------------------------
+# Live-DB guard.
+#
+# The suite must never open the real ``finances.config.DB_PATH``. A bare
+# ``sqlite3.connect`` on a missing path CREATES it (a 4096-byte stub in a fresh
+# worktree) and the WAL pragmas rewrite the header of an existing one, so a
+# single stray connect silently mutates Julio's ledger file. We wrap
+# ``sqlite3.connect`` for the whole session and fail loudly instead.
+#
+# Installed from ``pytest_configure`` so it also covers module-import side
+# effects during collection.
+# ---------------------------------------------------------------------------
+
+_REAL_SQLITE_CONNECT = sqlite3.connect
+
+# Resolved once, at conftest import, from the package layout — NOT read back
+# from ``config.DB_PATH`` at call time. Plenty of CLI tests legitimately
+# monkeypatch ``config.DB_PATH`` to a tmp file; the thing that must stay
+# untouched is the real ledger next to the ``finances`` package.
+_LIVE_DB_PATH = (_config.PROJECT_ROOT / "finances.db").resolve()
+
+
+def _connect_target_path(database: object, uri: bool) -> Path | None:
+    """Best-effort filesystem path for a ``sqlite3.connect`` first argument."""
+    if isinstance(database, Path):
+        return database
+    if not isinstance(database, str):
+        return None  # bytes/int handles: not something we can compare
+    text = database
+    if text == ":memory:" or not text:
+        return None
+    if uri or text.startswith("file:"):
+        from urllib.parse import unquote, urlsplit
+
+        split = urlsplit(text)
+        text = unquote(split.path)
+        if not text:
+            return None
+    return Path(text)
+
+
+def _guarded_sqlite_connect(database: Any = ":memory:", *args: Any, **kwargs: Any):
+    target = _connect_target_path(database, bool(kwargs.get("uri", False)))
+    if target is not None:
+        try:
+            same = target.expanduser().resolve() == _LIVE_DB_PATH
+        except OSError:  # pragma: no cover - unresolvable path is not the live DB
+            same = False
+        if same:
+            raise AssertionError(
+                "test opened the live database at "
+                f"{_LIVE_DB_PATH} (via sqlite3.connect({database!r})). "
+                "Tests must use tmp_path / the db_path fixture / "
+                "FINANCES_WEB_DB_PATH — never the real finances.db."
+            )
+    return _REAL_SQLITE_CONNECT(database, *args, **kwargs)
+
+
+def pytest_configure(config: pytest.Config) -> None:  # noqa: ARG001
+    sqlite3.connect = _guarded_sqlite_connect
+
+
+def pytest_unconfigure(config: pytest.Config) -> None:  # noqa: ARG001
+    sqlite3.connect = _REAL_SQLITE_CONNECT
+
+
+def _live_db_fingerprint() -> tuple[bool, int, int] | None:
+    """(exists, size, mtime_ns) for the real ledger — cheap and total."""
+    try:
+        stat = _LIVE_DB_PATH.stat()
+    except FileNotFoundError:
+        return (False, 0, 0)
+    return (True, stat.st_size, stat.st_mtime_ns)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _live_db_is_never_touched() -> Iterator[None]:
+    """Second half of the live-DB guard, for what the wrapper cannot see.
+
+    ``_guarded_sqlite_connect`` only covers *this* interpreter. Tests that
+    shell out — ``finances serve`` under its reload supervisor is the one
+    that did — open the ledger in a child process where nothing is patched.
+    So we also fingerprint the file around the whole session: a WAL header
+    rewrite bumps mtime even when no row changes, and on a fresh worktree
+    the connect materialises a 4096-byte stub from nothing.
+    """
+    before = _live_db_fingerprint()
+    yield
+    after = _live_db_fingerprint()
+    assert after == before, (
+        f"the live database at {_LIVE_DB_PATH} changed during the test "
+        f"session ({before} -> {after}). Something opened it — most likely a "
+        "test that shells out to a `finances` CLI command without pointing "
+        "it at a tmp DB. (If you were running `finances serve` in another "
+        "window against this same checkout, that is the other explanation.)"
+    )
