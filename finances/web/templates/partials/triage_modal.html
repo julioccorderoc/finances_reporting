@@ -41,7 +41,7 @@
      x-init="adopt()"
      @click.self="close()"
      @keydown.window="onKey($event)">
-  <div class="tmodal" role="dialog" aria-modal="true" aria-label="Resolve this row">
+  <div class="tmodal" role="dialog" aria-modal="true" aria-label="Resolve this row" tabindex="-1">
 
     <header class="tmodal-header">
       <span class="tmodal-position">{{ index + 1 }} OF {{ total }}</span>

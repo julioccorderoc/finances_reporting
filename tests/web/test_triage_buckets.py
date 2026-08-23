@@ -154,35 +154,32 @@ def test_header_renders_counts_inside_the_swapped_region(
     html = client.get("/triage").text
 
     queue_region = html.split('id="triage-queue"', 1)[1]
+    # The group heads that have rows, and the header's own answer. The
+    # empty group renders nothing at all (A7), so its absence here is the
+    # contract rather than a gap.
     assert "Needs a category" in queue_region
-    assert "Proposed pairs" in queue_region
     assert "Priced roughly" in queue_region
-    assert "Parked" in queue_region
+    assert "Proposed pairs" not in queue_region
+    assert "rows need you" in queue_region
+    assert "category" in queue_region
+    assert "approximate rates" in queue_region
 
 
 # ---------------------------------------------------------------------------
-# _render_queue_partial must not hardcode type_filter=None (Task 4 §3).
+# The queue partial after a list write.
 # ---------------------------------------------------------------------------
 
 
-def test_a_queue_render_under_an_active_chip_stays_filtered(
+def test_a_list_write_answers_with_the_whole_live_queue(
     web_db: sqlite3.Connection, web_client_factory
 ) -> None:
-    """A queue partial rendered under the "Rates" chip must stay filtered.
+    """The redesign has no filter chips, so there is no filter to carry.
 
-    Before the fix, ``_render_queue_partial`` hardcoded
-    ``type_filter=None``, so every save/park/unpark/pair-confirm always
-    swapped an unfiltered queue into ``#triage-queue`` regardless of the
-    filter chip the user had active (and which ``hx-push-url`` had
-    already written into the address bar).
-
-    This used to POST to the edit endpoint. Since ADR-012 Amendment
-    2026-07-26 that endpoint answers with the next item's MODAL, so the
-    assertion below would have been satisfied by whatever text the modal
-    happened to contain — green for the wrong reason. It now exercises
-    ``unpark``, the one mutating triage route still returning a queue.
-    The modal-advance half of the filter contract is covered by
-    tests/web/test_triage_modal_advance.py.
+    This used to pin ``_render_queue_partial`` against a hardcoded
+    ``type_filter=None`` swapping an unfiltered queue over a filtered
+    one. Rows are grouped by what is wrong with them now and the run
+    walks every group, so the honest replacement is: a write from the
+    list answers with every live row, and only the resolved one is gone.
     """
     account = accounts_repo.insert(
         web_db, Account(name="Provincial", kind=AccountKind.BANK, currency="VES")
@@ -215,19 +212,11 @@ def test_a_queue_render_under_an_active_chip_stays_filtered(
 
     client: TestClient = web_client_factory()
 
-    # Unpark id 2 while the Rates chip is "active", exactly like the
-    # queue partial carries ?type_filter=... forward into its own action
-    # URLs once rendered from a filtered queue.
-    transactions_repo.update(web_db, id=2, parked=True)
-    resp = client.post(
-        "/_partial/triage/2/unpark",
-        params={"type_filter": "rate"},
-    )
+    resp = client.post("/_partial/triage/bulk-park", data={"ids": "2"})
+
     assert resp.status_code == 200, resp.text
     # It really is the queue partial, not some other fragment.
-    assert "data-triage-queue" in resp.text
-
-    # id 1 is still a RATE item and must survive the filter.
+    assert "data-triage-row" in resp.text
     assert "RATE-A-MARKER" in resp.text
-    # id 3 is CATEGORY-typed; the filtered queue must exclude it.
-    assert "CAT-ONLY-MARKER" not in resp.text
+    assert "CAT-ONLY-MARKER" in resp.text
+    assert "RATE-B-MARKER" not in resp.text

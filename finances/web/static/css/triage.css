@@ -716,6 +716,12 @@
   gap: var(--space-5);
 }
 
+/* The decision column is already a flex column with the right gap; the
+ * form must not introduce a second box between it and its blocks. */
+.triage-modal-form {
+  display: contents;
+}
+
 .tmodal-footer {
   display: flex;
   align-items: center;

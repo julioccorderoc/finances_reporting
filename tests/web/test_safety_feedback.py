@@ -192,7 +192,11 @@ def test_triage_edit_hx_trigger_carries_toast_and_queue_dirty(
     payload = json.loads(resp.headers["HX-Trigger"])
     assert "closeModal" not in payload
     assert payload["queueDirty"] == {"typeFilter": None}
-    assert payload["toast"] == {"level": "success", "message": "Saved"}
+    # Since the triage redesign the copy is specific, never "Saved" (I10).
+    assert payload["toast"] == {
+        "level": "success",
+        "message": "Rate set to 36.50.",
+    }
 
 
 def test_pair_confirm_hx_trigger_carries_toast_json(
@@ -205,7 +209,7 @@ def test_pair_confirm_hx_trigger_carries_toast_json(
     assert resp.status_code == 200, resp.text
     payload = json.loads(resp.headers["HX-Trigger"])
     assert payload["queueDirty"] == {"typeFilter": None}
-    assert payload["toast"] == {"level": "success", "message": "Pair confirmed"}
+    assert payload["toast"] == {"level": "success", "message": "Paired."}
 
 
 # ---------------------------------------------------------------------------
@@ -326,16 +330,22 @@ def test_modal_category_control_is_the_shared_picker(
 def test_triage_modal_no_hardcoded_set_sentinels(
     seeded_web_db: sqlite3.Connection, web_client_factory
 ) -> None:
+    """The dirty-tracked sentinels survived the redesign.
+
+    Their default is still "false" and Alpine still flips them only when
+    the owner actually touches the matching control — the triage dialog
+    just derives them from the row's draft rather than from a per-field
+    flag. ``prov-needs-review`` is used because the redesigned dialog
+    opens queue entries, and a fully-resolved row is not one.
+    """
     client = web_client_factory()
-    txn_id = _txn_id(seeded_web_db, "prov-1")
+    txn_id = _txn_id(seeded_web_db, "prov-needs-review")
     body = client.get(f"/_partial/triage/{txn_id}/modal").text
 
     assert 'name="set_category" value="true"' not in body
     assert 'name="set_user_rate" value="true"' not in body
-    # ...replaced by the picker's untouched-default sentinel (WP4) and
-    # WP2's rate dirty-tracking, which the picker leaves in place.
     assert 'name="set_category" value="false"' in body
-    assert "rateDirty" in body
+    assert 'name="set_user_rate" value="false"' in body
 
 
 def test_triage_edit_untouched_fields_do_not_wipe(
@@ -368,19 +378,26 @@ def test_triage_edit_untouched_fields_do_not_wipe(
     assert after.user_rate == before.user_rate
 
 
-def test_triage_modal_has_remove_category_control_when_categorized(
+def test_the_triage_dialog_does_not_offer_to_remove_a_category(
     seeded_web_db: sqlite3.Connection, web_client_factory
 ) -> None:
+    """Un-categorising is the transactions modal's job, not triage's.
+
+    The redesigned dialog opens rows that are MISSING a category; a
+    control for taking one away has nothing to act on there, and the
+    /transactions modal still carries it for the rows that do.
+    """
     client = web_client_factory()
-    txn_id = _txn_id(seeded_web_db, "prov-1")  # categorized (Groceries)
+    txn_id = _txn_id(seeded_web_db, "prov-needs-review")
     body = client.get(f"/_partial/triage/{txn_id}/modal").text
-    assert "remove category" in body
+
+    assert "remove category" not in body
 
 
 def test_triage_modal_category_control_is_the_shared_picker(
     seeded_web_db: sqlite3.Connection, web_client_factory
 ) -> None:
     client = web_client_factory()
-    txn_id = _txn_id(seeded_web_db, "prov-1")
+    txn_id = _txn_id(seeded_web_db, "prov-needs-review")
     body = client.get(f"/_partial/triage/{txn_id}/modal").text
     assert "data-category-picker" in body

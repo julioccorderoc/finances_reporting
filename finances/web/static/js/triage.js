@@ -265,6 +265,12 @@
         /* The list highlights whichever row the run is on, including the
          * ones it advanced into rather than opened by hand. */
         this.openId = this.itemId;
+        /* Advancing INTO a dialog replaces the element that had focus, so
+         * it has to claim focus itself or the keyboard is left on
+         * <body>. The full focus trap is Wave 3 (J2); this is the half
+         * that makes the run usable. */
+        var dialog = this.$el.querySelector('[role="dialog"]');
+        if (dialog) dialog.focus();
       },
 
       draftHere: function () {

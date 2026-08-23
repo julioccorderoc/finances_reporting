@@ -39,12 +39,19 @@ def test_edit_modal_has_scoped_keydown_handler(
 def test_triage_modal_has_keydown_handler_and_park_key(
     seeded_web_db: sqlite3.Connection, web_client_factory
 ) -> None:
+    """The redesigned dialog binds one handler, on itself.
+
+    ``onKey`` lives in triage.js rather than inline, and the
+    typing guard moved with it — Alpine removes the listener when the
+    dialog is swapped out, which is what keeps forty rows from leaving
+    forty listeners behind (C7).
+    """
     client = web_client_factory()
     txn_id = _txn_id(seeded_web_db, "prov-needs-review")
 
     body = client.get(f"/_partial/triage/{txn_id}/modal").text
 
     assert "@keydown.window=" in body
-    assert "isTyping($event)" in body
+    assert "onKey($event)" in body
     assert "data-park-btn" in body
-    assert 'tabindex="-1"' in body
+    assert "data-chip" in body

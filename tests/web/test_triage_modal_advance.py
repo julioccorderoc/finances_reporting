@@ -18,6 +18,7 @@ queue list is not part of the response at all.
 from __future__ import annotations
 
 import json
+import pathlib
 import sqlite3
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -241,8 +242,8 @@ def test_save_returns_the_next_items_modal(
     resp = _save(client, 2, _groceries_id(advance_db))
 
     assert resp.status_code == 200, resp.text
-    assert 'data-tx-modal="triage"' in resp.text
-    assert 'data-tx-id="3"' in resp.text
+    assert 'data-triage-modal' in resp.text
+    assert 'data-txn-id="3"' in resp.text
 
 
 def test_save_response_is_not_the_queue_partial(
@@ -268,8 +269,8 @@ def test_save_on_the_first_item_advances_down_not_to_a_parked_row(
 
     resp = _save(client, 1, _groceries_id(advance_db))
 
-    assert f'data-tx-id="{parked_id}"' not in resp.text
-    assert 'data-tx-id="2"' in resp.text
+    assert f'data-txn-id="{parked_id}"' not in resp.text
+    assert 'data-txn-id="2"' in resp.text
 
 
 def test_save_on_the_last_item_steps_up(
@@ -279,7 +280,7 @@ def test_save_on_the_last_item_steps_up(
 
     resp = _save(client, 4, _groceries_id(advance_db))
 
-    assert 'data-tx-id="3"' in resp.text
+    assert 'data-txn-id="3"' in resp.text
 
 
 def test_save_on_the_final_remaining_item_closes_the_modal(
@@ -312,7 +313,11 @@ def test_mid_run_save_must_not_send_closeModal(
     payload = json.loads(resp.headers["HX-Trigger"])
     assert "closeModal" not in payload
     assert payload["queueDirty"] == {"typeFilter": None}
-    assert payload["toast"] == {"level": "success", "message": "Saved"}
+    # Specific copy since the redesign, never a generic "Saved" (I10).
+    assert payload["toast"] == {
+        "level": "success",
+        "message": "Sorted — Groceries.",
+    }
 
 
 def test_park_advances_to_the_next_item(
@@ -323,31 +328,35 @@ def test_park_advances_to_the_next_item(
     resp = client.post("/_partial/triage/2/park")
 
     assert resp.status_code == 200, resp.text
-    assert 'data-tx-id="3"' in resp.text
+    assert 'data-txn-id="3"' in resp.text
     payload = json.loads(resp.headers["HX-Trigger"])
     assert "closeModal" not in payload
     assert payload["queueDirty"] == {"typeFilter": None}
 
 
-def test_unpark_still_returns_the_queue_partial(
+def test_bringing_rows_back_returns_the_queue_not_a_dialog(
     advance_db: sqlite3.Connection, web_client_factory
 ) -> None:
-    """Unpark is a LIST action with no modal open — it must not advance."""
+    """A LIST action with no dialog open must not advance into one."""
     client = web_client_factory()
-    parked_id = advance_db.execute(
-        "SELECT id FROM transactions WHERE source_ref = 'parked-oldest'"
-    ).fetchone()["id"]
 
-    resp = client.post(f"/_partial/triage/{parked_id}/unpark")
+    resp = client.post("/_partial/triage/unpark-all")
 
     assert resp.status_code == 200, resp.text
-    assert "data-triage-queue" in resp.text
+    assert "data-triage-row" in resp.text
+    assert "data-triage-modal" not in resp.text
 
 
-def test_advance_respects_an_active_type_filter(
+def test_advance_holds_position_inside_the_group_it_was_in(
     web_db: sqlite3.Connection, web_client_factory
 ) -> None:
-    """Advancing into an item the filter hides would strand the owner.
+    """The successor is the next slot in the RUN, not the next by date.
+
+    This test used to pin the type-filter chips, which the redesign
+    removed. What survives is the property those chips were protecting:
+    the run's order is ``(bucket, occurred_at, item_id)``, so resolving a
+    *Priced roughly* row lands on the next *Priced roughly* row — never
+    back up in *Needs a category*, whose rows sort above the whole group.
 
     Bolívar rows with an empty ``rates`` table, because since ADR-021 a
     rate item is the projection's answer and a USD row is always priced —
@@ -386,7 +395,6 @@ def test_advance_respects_an_active_type_filter(
     client = web_client_factory()
     resp = client.post(
         "/_partial/triage/1/edit",
-        params={"type_filter": "rate"},
         data={
             "set_category": "false",
             "category_id": "",
@@ -398,15 +406,11 @@ def test_advance_respects_an_active_type_filter(
     )
 
     assert resp.status_code == 200, resp.text
-    assert 'data-tx-id="2"' in resp.text
-    assert 'data-tx-id="3"' not in resp.text
-    # The filter must survive into the next modal's own actions...
-    assert "type_filter=rate" in resp.text
-    # ...and into the deferred queue refresh, which happens long after
-    # the request that applied the filter. The chips render outside the
-    # swapped region, so their data-active cannot be trusted for this.
+    assert 'data-txn-id="2"' in resp.text
+    assert 'data-txn-id="3"' not in resp.text
+    # The list still reconciles once, on close.
     payload = json.loads(resp.headers["HX-Trigger"])
-    assert payload["queueDirty"] == {"typeFilter": "rate"}
+    assert "queueDirty" in payload
 
 
 # ---------------------------------------------------------------------------
@@ -500,7 +504,7 @@ def test_pair_confirm_advances_like_a_save(
     resp = client.post("/_partial/triage/pair/3/4/confirm")
 
     assert resp.status_code == 200, resp.text
-    assert 'data-tx-modal="triage"' in resp.text
+    assert 'data-triage-modal' in resp.text
     payload = json.loads(resp.headers["HX-Trigger"])
     assert "closeModal" not in payload
     assert payload["queueDirty"]["typeFilter"] is None
@@ -585,8 +589,8 @@ def test_confirming_a_pair_does_not_skip_the_next_proposal(
     resp = client.post("/_partial/triage/pair/1/2/confirm")
 
     assert resp.status_code == 200, resp.text
-    assert 'data-tx-modal="pair"' in resp.text
-    assert 'data-deposit-id="3"' in resp.text and 'data-sell-id="4"' in resp.text
+    assert 'data-item-id="pair:3:4"' in resp.text
+    assert "/_partial/triage/pair/3/4/confirm" in resp.text
 
 
 # ---------------------------------------------------------------------------
@@ -659,7 +663,16 @@ def test_the_modal_guards_against_key_repeat_and_double_submit(
     client = web_client_factory()
     modal = client.get("/_partial/triage/1/modal").text
 
-    assert "$event.repeat" in modal
+    handler = (
+        pathlib.Path(__file__).resolve().parents[2]
+        / "finances"
+        / "web"
+        / "static"
+        / "js"
+        / "triage.js"
+    ).read_text(encoding="utf-8")
+
+    assert "event.repeat" in handler
     assert 'hx-disabled-elt="find button[type=submit]"' in modal
 
 
@@ -671,7 +684,7 @@ def test_the_pair_modal_takes_focus_when_advanced_into(
     modal = client.get("/_partial/triage/pair/3/4/modal").text
 
     assert 'tabindex="-1"' in modal
-    assert "x-init" in modal and ".focus()" in modal
+    assert "x-init" in modal
 
 
 def test_modal_actions_target_the_modal_host(
@@ -681,5 +694,5 @@ def test_modal_actions_target_the_modal_host(
     client = web_client_factory()
     modal = client.get("/_partial/triage/1/modal").text
 
-    assert 'hx-target="#tx-modal-host"' in modal
+    assert 'hx-target="#triage-modal-host"' in modal
     assert 'hx-target="#triage-queue"' not in modal

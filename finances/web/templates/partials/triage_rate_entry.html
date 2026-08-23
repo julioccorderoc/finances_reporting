@@ -68,14 +68,17 @@
           <span class="trate-hint-label">
             {{ candidate.label }}{% if candidate.age_days %}, {{ candidate.age_days | abs }} day{{ '' if (candidate.age_days | abs) == 1 else 's' }} {{ 'later' if candidate.age_days < 0 else 'earlier' }}{% else %}, same day{% endif %}
           </span>
+          {# Why this one is a guess too. ``is_approximate`` is the wider
+             fact than ``is_expired``: a rate published AFTER the row is
+             hindsight, and hindsight is outside a backward-looking
+             window just as staleness is. #}
           <span class="trate-hint-note">
-            {%- if candidate.is_expired -%}
+            {%- if candidate.is_approximate -%}
               Outside the 14-day window
-            {%- elif candidate.is_reference_only -%}
-              Official floor — reference only
             {%- else -%}
               Inside the window this row could have used
             {%- endif -%}
+            {%- if candidate.is_reference_only %} · official floor, reference only{% endif -%}
           </span>
         </span>
         <span class="trate-hint-usd">{{ candidate.amount_usd | fmt_usd }}</span>

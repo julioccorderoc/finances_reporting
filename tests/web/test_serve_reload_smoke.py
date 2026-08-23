@@ -30,11 +30,22 @@ import pytest
 pytestmark = pytest.mark.integration
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-# Touched to trigger a restart. Nothing reads it during this test, and a
-# bare touch changes no content, so the working tree stays clean.
+# Touched to trigger a restart. Nothing fetches it during this test (the
+# parked sheet is only rendered when it opens), and a bare touch changes no
+# content, so the working tree stays clean.
+#
+# It must point at a template that EXISTS: ``Path.touch()`` creates a
+# missing file, and this test quietly resurrected ``triage_empty.html`` as
+# an empty orphan on every run for a while after the redesign deleted it.
 WATCHED_TEMPLATE = (
-    REPO_ROOT / "finances" / "web" / "templates" / "partials" / "triage_empty.html"
+    REPO_ROOT
+    / "finances"
+    / "web"
+    / "templates"
+    / "partials"
+    / "triage_sheet_parked.html"
 )
+assert WATCHED_TEMPLATE.exists(), WATCHED_TEMPLATE
 
 
 def _free_port() -> int:

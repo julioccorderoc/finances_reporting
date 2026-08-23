@@ -240,7 +240,11 @@ def test_triage_modal_renders_notes_textarea(
     assert resp.status_code == 200
     assert 'name="notes"' in resp.text
     assert 'name="set_notes"' in resp.text
-    assert _NOTES_DIRTY_BINDING in resp.text
+    # The redesigned dialog keeps the note in the row's draft rather than
+    # in a per-field flag, so the sentinel is derived from the draft
+    # itself. Untouched still means "false", which is the contract.
+    assert 'name="set_notes" value="false"' in resp.text
+    assert "noteValue()" in resp.text
 
 
 def test_edit_form_post_saves_notes(

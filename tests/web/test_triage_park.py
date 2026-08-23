@@ -80,16 +80,80 @@ def test_park_survives_a_server_restart(
     assert "txn:1" not in item_ids
 
 
-def test_unpark_returns_the_item_to_the_queue(
+def test_bring_back_all_returns_every_parked_row(
+    park_db: sqlite3.Connection, web_client_factory
+) -> None:
+    """F9 — the parked sheet's one way out.
+
+    The redesign dropped the per-row unpark: the sheet offers *Bring back
+    all N* and nothing else, and an endpoint no surface calls is worse
+    than one capability fewer. Order needs no restoring — the queue sorts
+    itself by ``(bucket, occurred_at, item_id)``, so rows come back
+    oldest-first by construction.
+    """
+    client: TestClient = web_client_factory()
+    client.post("/_partial/triage/1/park")
+    client.post("/_partial/triage/2/park")
+
+    response = client.post("/_partial/triage/unpark-all")
+
+    assert response.status_code == 200
+    assert transactions_repo.get_by_id(park_db, 1).parked is False
+    assert transactions_repo.get_by_id(park_db, 2).parked is False
+    assert "2 rows back in the queue" in response.headers["HX-Trigger"]
+    assert "txn:1" in client.get("/api/triage").text
+
+
+def test_the_single_row_unpark_endpoint_is_gone(
     park_db: sqlite3.Connection, web_client_factory
 ) -> None:
     client: TestClient = web_client_factory()
-    client.post("/_partial/triage/1/park")
 
-    client.post("/_partial/triage/1/unpark")
+    assert client.post("/_partial/triage/1/unpark").status_code == 404
 
-    assert transactions_repo.get_by_id(park_db, 1).parked is False
-    assert "txn:1" in client.get("/api/triage").text
+
+def test_the_cutoff_parks_every_uncategorised_row_before_a_date(
+    park_db: sqlite3.Connection, web_client_factory
+) -> None:
+    """F3 — one call, through domain.triage_admin.park_before."""
+    client: TestClient = web_client_factory()
+
+    response = client.post(
+        "/_partial/triage/park-before", data={"before": "2030-01-01"}
+    )
+
+    assert response.status_code == 200
+    assert "Parking everything uncategorised before" in response.headers[
+        "HX-Trigger"
+    ]
+    assert transactions_repo.get_by_id(park_db, 1).parked is True
+
+
+def test_a_bad_cutoff_is_refused_rather_than_guessed(
+    park_db: sqlite3.Connection, web_client_factory
+) -> None:
+    client: TestClient = web_client_factory()
+
+    assert (
+        client.post(
+            "/_partial/triage/park-before", data={"before": "not-a-date"}
+        ).status_code
+        == 422
+    )
+
+
+def test_selected_rows_park_in_one_call(
+    park_db: sqlite3.Connection, web_client_factory
+) -> None:
+    """F2 — the selection bar's Park, with a count in the toast."""
+    client: TestClient = web_client_factory()
+
+    response = client.post("/_partial/triage/bulk-park", data={"ids": "1,2"})
+
+    assert response.status_code == 200
+    assert "2 rows parked." in response.headers["HX-Trigger"]
+    assert transactions_repo.get_by_id(park_db, 1).parked is True
+    assert transactions_repo.get_by_id(park_db, 2).parked is True
 
 
 def test_park_does_not_alter_needs_review(
@@ -146,7 +210,7 @@ def test_parked_items_are_collected_separately(
     assert queue.parked_count == 1
 
 
-def test_parked_group_renders_with_an_unpark_action(
+def test_the_parked_strip_appears_with_a_way_into_the_sheet(
     park_db: sqlite3.Connection, web_client_factory
 ) -> None:
     client: TestClient = web_client_factory()
@@ -154,13 +218,14 @@ def test_parked_group_renders_with_an_unpark_action(
 
     html = client.get("/triage").text
 
-    assert "data-parked-group" in html
-    assert "/_partial/triage/1/unpark" in html
+    assert "data-parked-strip" in html
+    assert "parked row, out of the queue" in html
+    assert "/_partial/triage/parked" in html
 
 
-def test_no_parked_group_when_nothing_is_parked(
+def test_no_parked_strip_when_nothing_is_parked(
     park_db: sqlite3.Connection, web_client_factory
 ) -> None:
     client: TestClient = web_client_factory()
 
-    assert "data-parked-group" not in client.get("/triage").text
+    assert "data-parked-strip" not in client.get("/triage").text

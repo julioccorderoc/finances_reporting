@@ -299,7 +299,7 @@ def test_every_template_file_is_reachable(env: Environment) -> None:
 # Macro libraries are pulled in with {% import %}, which binds a namespace
 # rather than splicing a context — they are reachable, just not by the
 # include/extends edges the walk above follows.
-_MACRO_ONLY = {"_macros.html", "_icons.html"}
+_MACRO_ONLY = {"_macros.html", "_icons.html", "_triage.html"}
 
 
 def test_the_analyzer_sees_the_real_template_tree(env: Environment) -> None:
@@ -308,6 +308,4 @@ def test_the_analyzer_sees_the_real_template_tree(env: Environment) -> None:
 
     assert len(sites) >= 15
     assert any(site.template.startswith("partials/") for site in sites)
-    assert "prev_url" in _requires(
-        "partials/modal_transaction_triage.html", env
-    )
+    assert "prev_url" in _requires("partials/triage_modal.html", env)

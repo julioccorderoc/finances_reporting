@@ -438,8 +438,8 @@ def test_triage_page_renders(
     assert resp.status_code == 200, resp.text
     body = resp.text
     assert "Triage" in body
-    # At least one card-row.
-    assert "data-card-row" in body or "data-pair-row" in body
+    # At least one queue row, in the redesigned grid.
+    assert "data-triage-row" in body
 
 
 def test_api_triage_returns_json_queue(
@@ -546,9 +546,12 @@ def test_triage_modal_endpoint_renders_save_and_next_button(
     assert resp.status_code == 200, resp.text
     body = resp.text
 
-    assert "Save" in body and "next" in body.lower()
+    # The primary label is situational since the redesign; Park and the
+    # keyboard legend are always there, and Cancel became the close
+    # control in the header (esc and the scrim do the same job).
+    assert "and next" in body or "Save and finish" in body
     assert "Park" in body
-    assert "Cancel" in body
+    assert 'aria-label="Close"' in body
 
 
 def test_triage_modal_form_post_returns_the_next_modal(
@@ -573,8 +576,8 @@ def test_triage_modal_form_post_returns_the_next_modal(
         },
     )
     assert resp.status_code == 200, resp.text
-    assert "tx-modal-overlay" in resp.text
-    assert "data-triage-queue" not in resp.text
+    assert "data-triage-modal" in resp.text
+    assert "data-triage-row" not in resp.text
 
 
 def test_triage_modal_save_triggers_queue_dirty_header(
@@ -614,11 +617,11 @@ def test_triage_pair_modal_renders_two_cards_and_confidence(
     assert resp.status_code == 200, resp.text
     body = resp.text
 
-    # Both descriptions present.
+    # Both legs present, with the arithmetic under them.
     assert "ABONO P2P sell" in body
     assert "P2P sell USDT" in body
-    # Confidence indicator (numeric/string).
-    assert "confidence" in body.lower() or "Confidence" in body
+    assert "confident" in body
+    assert "Pair them" in body
 
 
 def test_triage_pair_confirm_creates_transfer(
