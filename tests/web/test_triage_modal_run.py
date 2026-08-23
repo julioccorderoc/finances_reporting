@@ -7,6 +7,7 @@ hand and reported separately.
 
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 from collections.abc import Callable
@@ -14,6 +15,8 @@ from collections.abc import Callable
 from starlette.testclient import TestClient
 
 import pytest
+
+from decimal import Decimal
 
 from finances.db.repos import accounts as accounts_repo
 from finances.db.repos import transactions as transactions_repo
@@ -54,6 +57,15 @@ def unpriceable_modal_db(web_db: sqlite3.Connection) -> sqlite3.Connection:
         ),
     )
     return web_db
+
+
+def _toast(response) -> str:
+    """The toast copy out of the HX-Trigger header.
+
+    The header is JSON, so an em dash arrives as ``\\u2014`` — comparing
+    against the raw header string would fail on copy that is correct.
+    """
+    return json.loads(response.headers["HX-Trigger"])["toast"]["message"]
 
 
 def _modal(client: TestClient, txn_id: int) -> str:
@@ -378,7 +390,7 @@ def test_saving_a_rate_writes_user_rate_and_leaves_priced_roughly(
     txn = transactions_repo.get_by_id(triage_web_db, 3)
     assert txn is not None
     assert txn.user_rate is not None
-    assert str(txn.user_rate) == "150.00"
+    assert txn.user_rate == Decimal("150.00")
 
     with web_client_factory() as client:
         queue = client.get("/_partial/triage/queue").text
@@ -401,7 +413,7 @@ def test_the_rate_toast_names_the_rate_that_was_set(
             },
         )
 
-    assert "Rate set to 152.40." in response.headers["HX-Trigger"]
+    assert _toast(response) == "Rate set to 152.40."
 
 
 def test_the_sort_toast_names_the_category(
@@ -427,7 +439,7 @@ def test_the_sort_toast_names_the_category(
             },
         )
 
-    assert "Sorted — Groceries." in response.headers["HX-Trigger"]
+    assert _toast(response) == "Sorted — Groceries."
     assert "triageResolved" in response.headers["HX-Trigger"]
 
 
@@ -444,9 +456,7 @@ def test_parking_from_the_modal_advances_and_says_what_parking_means(
         response = client.post("/_partial/triage/1/park")
 
     assert response.status_code == 200
-    assert "Parked. It keeps its money, and stops asking." in response.headers[
-        "HX-Trigger"
-    ]
+    assert _toast(response) == "Parked. It keeps its money, and stops asking."
     # The body IS the next entry's dialog, not the list.
     assert 'role="dialog"' in response.text
 
@@ -525,7 +535,7 @@ def test_confirming_writes_one_transfer_id_across_both_legs(
         response = client.post("/_partial/triage/pair/8/9/confirm")
 
     assert response.status_code == 200
-    assert "Paired." in response.headers["HX-Trigger"]
+    assert _toast(response) == "Paired."
 
     deposit = transactions_repo.get_by_id(triage_web_db, 8)
     sell = transactions_repo.get_by_id(triage_web_db, 9)
@@ -542,10 +552,7 @@ def test_not_a_pair_dismisses_the_proposal_for_the_run(
     with web_client_factory() as client:
         response = client.post("/_partial/triage/pair/8/9/refuse")
         assert response.status_code == 200
-        assert (
-            "Left unpaired — the legs stay separate rows."
-            in response.headers["HX-Trigger"]
-        )
+        assert _toast(response) == "Left unpaired — the legs stay separate rows."
 
         queue = client.get("/_partial/triage/queue").text
         assert "Proposed pairs" not in queue

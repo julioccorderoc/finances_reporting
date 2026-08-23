@@ -22,7 +22,7 @@ from fastapi.responses import HTMLResponse
 from finances.db.repos import accounts as accounts_repo
 from finances.db.repos import categories as categories_repo
 from finances.db.repos import saved_views as saved_views_repo
-from finances.web.deps import get_conn
+from finances.web.deps import dismissed_pairs, get_conn
 from finances.web.settings import ENV_RELOAD_CHILD
 from finances.web.routers._monthly_filter_dep import monthly_filter_from_query
 from finances.web.routers._tx_filter_dep import filter_from_query
@@ -207,7 +207,7 @@ def triage_page(
     this screen — a number rendered out here is written once, by this
     request, and is stale from the first save onward.
     """
-    screen = build_screen(conn)
+    screen = build_screen(conn, dismissed=dismissed_pairs(request))
     templates = request.app.state.templates
     return templates.TemplateResponse(
         request,

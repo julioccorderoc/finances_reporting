@@ -1,0 +1,88 @@
+{# PairView — two rows that look like one movement of money.
+
+   Confirming writes ONE transfer_id across both legs through
+   ``create_transfer`` (H2): the pair then sums to zero, leaves income and
+   expense, and stays in every balance.
+
+   Inputs:
+     item  TriageItem with a pair_proposal
+
+   The refusal is not a warning the owner can click through. Over five
+   days apart or ten percent of drift and the button is disabled, with the
+   reason stated before the click rather than raised after it (H3) — the
+   same ``assess_pair`` verdict the write path raises on.
+#}
+{% from "_icons.html" import icon %}
+
+{% set proposal = item.pair_proposal %}
+{% set deposit = proposal.deposit %}
+{% set sell = proposal.sell %}
+
+<div class="tpair" data-pair-view>
+  <div class="tpair-legs">
+    {% for leg in (deposit, sell) %}
+      <div class="tpair-leg">
+        <span class="tpair-leg-icon">{{ icon("landmark" if loop.first else "wallet", 16) }}</span>
+        <span class="tpair-leg-text">
+          <span class="tpair-leg-account">{{ leg.account_name }}</span>
+          <span class="tpair-leg-raw">{{ leg.description }} · {{ leg.occurred_at | fmt_date_short }}</span>
+        </span>
+        <span class="tpair-leg-amount">{{ leg.amount_native | fmt_native(leg.currency, signed=True) }}</span>
+      </div>
+    {% endfor %}
+  </div>
+
+  <div class="tpair-meta">
+    <span class="tpair-meta-item">
+      {{ icon("git-compare-arrows", 13) }}{{ (proposal.confidence * 100) | round | int }}% confident
+    </span>
+    <span>
+      {%- if proposal.days_apart == 0 -%}Same day
+      {%- else -%}{{ proposal.days_apart }} day{{ '' if proposal.days_apart == 1 else 's' }} apart
+      {%- endif -%}
+    </span>
+    <span>
+      {%- if proposal.drift_pct is none -%}Nothing to score the amounts against
+      {%- elif proposal.drift_pct == 0 -%}Exact amounts
+      {%- else -%}{{ proposal.drift_pct | fmt_number(1) }}% rate drift
+      {%- endif -%}
+    </span>
+    {% if proposal.implied_rate is not none %}
+      <span class="tpair-meta-implied">implies {{ proposal.implied_rate | fmt_number }} Bs./$</span>
+    {% endif %}
+  </div>
+
+  {% if proposal.refused %}
+  <div class="tbanner tbanner-danger" data-pair-refused>
+    <span class="tbanner-icon">{{ icon("triangle-alert", 16) }}</span>
+    <div class="tbanner-body">
+      <strong class="tbanner-title">This one cannot be confirmed</strong>
+      <div class="tbanner-text">
+        {{ proposal.days_apart }} day{{ '' if proposal.days_apart == 1 else 's' }} apart{% if proposal.drift_pct is not none %} and {{ proposal.drift_pct | fmt_number(1) }}% of drift{% endif %}.
+        Confirming is refused above five days or ten percent.
+      </div>
+    </div>
+  </div>
+  {% else %}
+  <span class="tpair-note">Confirming this makes it your cost basis for every VES row in the next 14 days.</span>
+  {% endif %}
+
+  <div class="tpair-actions">
+    <button type="button"
+            class="tbtn tbtn-primary"
+            data-pair-confirm
+            {% if proposal.refused %}disabled{% else %}
+            hx-post="/_partial/triage/pair/{{ deposit.id }}/{{ sell.id }}/confirm"
+            hx-target="#triage-modal-host"
+            hx-swap="innerHTML"
+            {% endif %}
+    >{{ icon("link", 16) }}Pair them</button>
+    <button type="button"
+            class="tbtn tbtn-ghost"
+            data-pair-refuse
+            hx-post="/_partial/triage/pair/{{ deposit.id }}/{{ sell.id }}/refuse"
+            hx-target="#triage-modal-host"
+            hx-swap="innerHTML"
+    >Not a pair</button>
+  </div>
+</div>

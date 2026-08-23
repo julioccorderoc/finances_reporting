@@ -37,7 +37,7 @@ make that true.
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import Container, Sequence
 from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
@@ -687,6 +687,7 @@ def build_queue(
     conn: sqlite3.Connection,
     *,
     type_filter: TriageType | None = None,
+    dismissed: Container[str] = (),
 ) -> TriageQueue:
     """Assemble the unified triage queue.
 
@@ -710,7 +711,18 @@ def build_queue(
     """
     txn_items = _collect_txn_items(conn)
     pair_items = _collect_pair_items(conn)
-    all_items = txn_items + pair_items
+    # ``dismissed`` is what "Not a pair" leaves behind. The strategy is a
+    # pure function of the ledger and would propose the same two rows on
+    # the very next build, so a refusal that wrote nothing would be a
+    # button that does nothing; the write path is deliberately not the
+    # answer either, since declining a GUESS is not a fact about the
+    # money. It is dropped before the counts so the header, the group and
+    # the run all agree it is gone.
+    all_items = [
+        item
+        for item in txn_items + pair_items
+        if item.item_id not in dismissed
+    ]
     # Difficulty first, then chronology, then a mandatory id tiebreak.
     # ADR-012 Amendment 2026-07-21. The item_id component is load-bearing:
     # 204 of 243 live items share a timestamp (Provincial CSV has no time

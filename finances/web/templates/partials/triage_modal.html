@@ -1,0 +1,189 @@
+{# The modal run — one entry, full attention, the queue still behind it.
+
+   A sitting is one opening and one closing: save, park and pair-confirm
+   all answer with the NEXT entry's dialog, swapped into
+   #triage-modal-host in place. The list behind reconciles once, on close
+   (ADR-012 Amendment 2026-07-26).
+
+   Inputs:
+     item       TriageItem
+     index      0-based position in the run
+     total      size of the run
+     prev_url   str | None — disabled arrow, never a missing one
+     next_url   str | None
+     picker     PickerPayload
+     day_rates  list[DayRate] — the nearest candidate per tier
+     card       TransactionCard for the facts column
+
+   Geometry is in triage.css: 880px wide, height min(680px, 100% − 24px),
+   fixed on purpose. Paging through the queue must not move the frame by a
+   pixel (B3).
+#}
+{% from "_icons.html" import icon %}
+{% from "_triage.html" import money, issues, guess_title %}
+
+{% set needs_cat = item.needs.cat %}
+{% set needs_rate = item.needs.rate and item.txn_card is not none %}
+{% set is_pair = item.needs.pair %}
+
+<div class="tover"
+     data-triage-modal
+     data-item-id="{{ item.item_id }}"
+     {% if item.txn_card is not none %}data-txn-id="{{ card.id }}"{% endif %}
+     data-needs-cat="{{ 'true' if needs_cat else 'false' }}"
+     data-needs-rate="{{ 'true' if needs_rate else 'false' }}"
+     data-needs-pair="{{ 'true' if is_pair else 'false' }}"
+     data-amount-native="{{ card.amount_native }}"
+     data-currency="{{ card.currency }}"
+     data-current-usd="{{ card.amount_usd if card.amount_usd is not none else '' }}"
+     data-initial-cat="{{ txn.category_id if txn is not none and txn.category_id is not none else '' }}"
+     x-data="triageModal()"
+     x-init="adopt()"
+     @click.self="close()"
+     @keydown.window="onKey($event)">
+  <div class="tmodal" role="dialog" aria-modal="true" aria-label="Resolve this row">
+
+    <header class="tmodal-header">
+      <span class="tmodal-position">{{ index + 1 }} OF {{ total }}</span>
+      <span class="tmodal-progress">
+        <span class="tmodal-progress-fill" style="width: {{ ((index + 1) * 100 // total) if total else 0 }}%"></span>
+      </span>
+      <span class="tmodal-spacer"></span>
+      <button type="button"
+              class="ticon"
+              data-nav-prev
+              aria-label="Previous row"
+              {% if prev_url %}hx-get="{{ prev_url }}" hx-target="#triage-modal-host" hx-swap="innerHTML"{% else %}disabled{% endif %}
+      >{{ icon("chevron-left", 14) }}</button>
+      <button type="button"
+              class="ticon"
+              data-nav-next
+              aria-label="Next row"
+              {% if next_url %}hx-get="{{ next_url }}" hx-target="#triage-modal-host" hx-swap="innerHTML"{% else %}disabled{% endif %}
+      >{{ icon("chevron-right", 14) }}</button>
+      <button type="button" class="ticon" data-modal-close aria-label="Close" @click="close()">{{ icon("x", 14) }}</button>
+    </header>
+
+    <div class="tmodal-body">
+      <div class="tmodal-facts">
+        {{ money(card, size="lg", align="left") }}
+        <div class="tmodal-merchant">
+          <span class="tmodal-merchant-name">{{ item.merchant or card.description }}</span>
+          {%- if item.merchant %}<span class="tmodal-merchant-raw">{{ card.description }}</span>{% endif %}
+        </div>
+        <span class="tmodal-when">
+          {{ card.occurred_at | fmt_date }} · {{ item.account.name if item.account else card.account_name }}
+          {%- if item.account and item.account.detail %}<span class="tmodal-when-detail"> · {{ item.account.detail }}</span>{% endif %}
+        </span>
+        {{ issues(item.needs) }}
+      </div>
+
+      <div class="tmodal-decision">
+        {% if is_pair %}
+          {% include "partials/triage_pair_view.html" %}
+        {% else %}
+          <form class="triage-modal-form"
+                data-triage-form
+                hx-post="/_partial/triage/{{ card.id }}/edit"
+                hx-target="#triage-modal-host"
+                hx-swap="innerHTML"
+                hx-disabled-elt="find button[type=submit]">
+            {# Dirty-tracked sentinels (the WP2 safety contract): a field
+               the owner never touched writes nothing, so an untouched
+               picker cannot wipe an existing category. #}
+            <input type="hidden" name="set_category" value="false" :value="catId() === null ? 'false' : 'true'">
+            <input type="hidden" name="category_id" value="" :value="catId() === null ? '' : catId()">
+            <input type="hidden" name="set_user_rate" value="false" :value="rateValue() ? 'true' : 'false'">
+            <input type="hidden" name="user_rate" value="" :value="rateValue()">
+            <input type="hidden" name="set_notes" value="false" :value="noteValue() ? 'true' : 'false'">
+            <input type="hidden" name="notes" value="" :value="noteValue()">
+
+            {% if needs_cat %}
+            <div class="tmodal-block" data-block="category">
+              <div class="tmodal-block-head">
+                <span class="teyebrow">WHAT WAS THIS FOR?</span>
+                <span class="tkeys">1–8</span>
+              </div>
+              {% if item.guess %}
+              {# Clicking fills the picker; it does not save. The owner
+                 still presses ↵ — the chip in the list is the one-click
+                 path (G6). #}
+              <button type="button"
+                      class="twhy"
+                      data-why
+                      title="{{ guess_title(item.guess) }}"
+                      @click="setCat({{ item.guess.category_id }}, '{{ item.guess.label }}')">
+                <span class="twhy-icon">{{ icon("file-code" if item.guess.rule_id is not none else "history", 14) }}</span>
+                <span class="twhy-text">
+                  <strong>{{ item.guess.label }}</strong>
+                  {%- if item.guess.rule_id is not none %}
+                    — rule {{ item.guess.rule_id }} matches <span class="twhy-pattern">/{{ item.guess.pattern }}/i</span>
+                  {%- else %}
+                    — you sorted this here {{ item.guess.times }} times
+                  {%- endif %}
+                </span>
+                <span class="twhy-take">USE IT</span>
+              </button>
+              {% endif %}
+              {% with picker_columns = 2, picker_keys = True %}
+                {% include "partials/triage_catpicker.html" %}
+              {% endwith %}
+            </div>
+            {% endif %}
+
+            {% if needs_rate %}
+            <div class="tmodal-block" data-block="rate">
+              <span class="teyebrow">
+                {%- if needs_cat %}AND THE RATE, IF YOU KNOW IT{% else %}THE RATE IS A GUESS — REPLACE IT?{% endif -%}
+              </span>
+              {% include "partials/triage_rate_entry.html" %}
+            </div>
+            {% endif %}
+
+            <span class="tinput tinput-sm">
+              <input type="text"
+                     data-note-field
+                     placeholder="Note — optional"
+                     autocomplete="off"
+                     aria-label="Note"
+                     :value="noteValue()"
+                     @input="setNote($event.target.value)">
+            </span>
+
+            <button type="submit" data-modal-submit hidden></button>
+          </form>
+        {% endif %}
+      </div>
+    </div>
+
+    <footer class="tmodal-footer">
+      <button type="button"
+              class="tbtn tbtn-ghost"
+              data-park-btn
+              {% if item.txn_card is not none %}
+              hx-post="/_partial/triage/{{ card.id }}/park"
+              hx-target="#triage-modal-host"
+              hx-swap="innerHTML"
+              {% else %}disabled{% endif %}
+      >{{ icon("archive", 16) }}Park</button>
+      <span class="tmodal-legend">
+        <kbd>←→</kbd> move · <kbd>↵</kbd> save · <kbd>esc</kbd> close
+      </span>
+      <span class="tmodal-spacer"></span>
+      {% if not is_pair %}
+      <button type="button"
+              class="tbtn tbtn-primary"
+              data-modal-primary
+              :disabled="!ready()"
+              @click="submit()">
+        {{ icon("check", 16) }}
+        {%- if index + 1 < total -%}
+          {% if needs_cat %}Sort and next{% else %}Use this rate and next{% endif %}
+        {%- else -%}
+          Save and finish
+        {%- endif -%}
+      </button>
+      {% endif %}
+    </footer>
+  </div>
+</div>

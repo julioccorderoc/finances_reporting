@@ -21,6 +21,7 @@ existing service or repo.
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Container
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -325,6 +326,7 @@ def build_screen(
     conn: sqlite3.Connection,
     *,
     today: date | None = None,
+    dismissed: Container[str] = (),
 ) -> TriageScreen:
     """Assemble the whole queue screen from one queue build.
 
@@ -335,7 +337,7 @@ def build_screen(
     if today is None:
         today = datetime.now(tz=config.CARACAS_TZ).date()
 
-    queue = build_queue(conn)
+    queue = build_queue(conn, dismissed=dismissed)
     parked_items = tuple(queue.parked_items)
 
     return TriageScreen(

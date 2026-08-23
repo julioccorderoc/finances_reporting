@@ -57,3 +57,20 @@ def get_conn(request: Request) -> Iterator[sqlite3.Connection]:
         yield conn
     finally:
         conn.close()
+
+
+def dismissed_pairs(request: Request) -> set[str]:
+    """Pair proposals the owner said "Not a pair" to, for this run.
+
+    Held on ``app.state`` rather than in the database, because declining
+    a GUESS is not a fact about the money: the two rows are unchanged, and
+    the next statement may well make the same proposal worth another look.
+    A restart forgets it, which is the same lifetime the design gives a
+    sitting.
+    """
+    state = request.app.state
+    dismissed: set[str] | None = getattr(state, "triage_dismissed_pairs", None)
+    if dismissed is None:
+        dismissed = set()
+        state.triage_dismissed_pairs = dismissed
+    return dismissed

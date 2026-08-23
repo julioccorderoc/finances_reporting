@@ -1,0 +1,87 @@
+{# RateEntry — replacing an approximation with the rate you actually got.
+
+   The row already HAS a dollar figure (ADR-021 prices it from the nearest
+   rate rather than refusing). This is where the owner accepts that number
+   or types a better one, so nothing here is phrased as an error.
+
+   Inputs:
+     item       TriageItem — for ``rough``, the tier and how far off it is
+     card       TransactionCard — the rate that produced the figure
+     day_rates  list[DayRate] — one nearest candidate per tier, each with
+                its signed age and the USD it would produce
+
+   Saving writes ``user_rate`` through the same ``apply_edit`` path every
+   other edit uses (D7); the row then prices itself and leaves *Priced
+   roughly*.
+#}
+{% from "_icons.html" import icon %}
+
+<div class="trate">
+  {# D10: the actual rate, its tier, how far off it is, and the row's own
+     date. Never a generic "rate unavailable". #}
+  <div class="tbanner" data-rate-warning>
+    <span class="tbanner-icon">{{ icon("triangle-alert", 16) }}</span>
+    <div class="tbanner-body">
+      <div class="tbanner-text">
+        Priced at <span class="prov-rate">{{ card.rate | fmt_number }}</span>
+        {%- if item.rough %} — {{ item.rough }}{% endif %}.
+        No P2P sell or BCV scrape within 14 days of
+        {{ card.occurred_at | fmt_date }}, so the dollar figure is an
+        approximation.
+      </div>
+    </div>
+  </div>
+
+  <div class="trate-row">
+    <div class="tfield trate-field">
+      <label class="tfield-label" for="rate-you-got">Rate you got</label>
+      <span class="tinput tinput-mono">
+        <input id="rate-you-got"
+               type="text"
+               data-rate-field
+               inputmode="decimal"
+               autocomplete="off"
+               placeholder="{{ card.rate | fmt_number }}"
+               :value="rateValue()"
+               @input="setRate($event.target.value)">
+      </span>
+      <span class="tfield-hint">Bolívares per dollar</span>
+    </div>
+    <div class="trate-preview">
+      <span class="teyebrow" x-text="rateValue() ? 'WOULD BECOME' : 'CURRENTLY'">CURRENTLY</span>
+      <span class="trate-preview-figure" data-rate-preview x-text="previewUsd()">{{ card.amount_usd | fmt_usd(signed=True) }}</span>
+    </div>
+  </div>
+
+  {% if day_rates %}
+  <div class="trate-hints">
+    <span class="teyebrow">OR TAKE ONE OF THESE</span>
+    {% for candidate in day_rates %}
+      {% if candidate.rate is not none %}
+      <button type="button"
+              class="trate-hint"
+              data-rate-hint
+              data-rate-hint-source="{{ candidate.source }}"
+              @click="setRate('{{ candidate.rate }}')">
+        <span class="trate-hint-rate">{{ candidate.rate | fmt_number }}</span>
+        <span class="trate-hint-text">
+          <span class="trate-hint-label">
+            {{ candidate.label }}{% if candidate.age_days %}, {{ candidate.age_days | abs }} day{{ '' if (candidate.age_days | abs) == 1 else 's' }} {{ 'later' if candidate.age_days < 0 else 'earlier' }}{% else %}, same day{% endif %}
+          </span>
+          <span class="trate-hint-note">
+            {%- if candidate.is_expired -%}
+              Outside the 14-day window
+            {%- elif candidate.is_reference_only -%}
+              Official floor — reference only
+            {%- else -%}
+              Inside the window this row could have used
+            {%- endif -%}
+          </span>
+        </span>
+        <span class="trate-hint-usd">{{ candidate.amount_usd | fmt_usd }}</span>
+      </button>
+      {% endif %}
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>

@@ -50,4 +50,27 @@ def park_before(conn: sqlite3.Connection, *, before: datetime) -> int:
     return cursor.rowcount
 
 
-__all__ = ["park_before"]
+SQL_UNPARK_ALL = """
+    UPDATE transactions
+       SET parked = 0, updated_at = CURRENT_TIMESTAMP
+     WHERE parked = 1
+"""
+
+
+def unpark_all(conn: sqlite3.Connection) -> int:
+    """Return every parked row to the queue. Returns how many moved.
+
+    The counterpart to :func:`park_before`, and the whole of the triage
+    sheet's *Bring back all N*. There is no ordering to restore: the queue
+    sorts itself by ``(bucket, occurred_at, item_id)``, so rows come back
+    oldest-first by construction rather than by anything written here.
+
+    Deliberately unscoped, unlike ``park_before``. Parking is a decision
+    about a *period*; un-parking is the owner saying they want the backlog
+    after all, and a filtered version of that would leave rows stranded
+    with no way to name them.
+    """
+    return conn.execute(SQL_UNPARK_ALL).rowcount
+
+
+__all__ = ["park_before", "unpark_all"]

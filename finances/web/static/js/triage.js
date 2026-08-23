@@ -239,6 +239,150 @@
     };
   };
 
+  /* One entry of the run. Its state is READ from and WRITTEN to the page
+   * scope's `drafts`, keyed by item id, so walking away to another entry
+   * and back finds the half-made decision still there (B13) — this
+   * component itself is destroyed and rebuilt on every swap. */
+  window.triageModal = function triageModal() {
+    return {
+      itemId: null,
+      needsCat: false,
+      needsRate: false,
+      needsPair: false,
+      amountNative: null,
+      currency: "",
+      currentUsd: null,
+
+      adopt: function () {
+        var d = this.$el.dataset;
+        this.itemId = d.itemId;
+        this.needsCat = d.needsCat === "true";
+        this.needsRate = d.needsRate === "true";
+        this.needsPair = d.needsPair === "true";
+        this.amountNative = d.amountNative === "" ? null : Number(d.amountNative);
+        this.currency = d.currency || "";
+        this.currentUsd = d.currentUsd === "" ? null : Number(d.currentUsd);
+        /* The list highlights whichever row the run is on, including the
+         * ones it advanced into rather than opened by hand. */
+        this.openId = this.itemId;
+      },
+
+      draftHere: function () {
+        return this.draft(this.itemId);
+      },
+      catId: function () {
+        var v = this.draftHere().cat;
+        return v === undefined ? null : v;
+      },
+      setCat: function (id, label) {
+        this.setDraft(this.itemId, { cat: id, catLabel: label });
+      },
+      /* Shadows the page scope's pair, so the picker inside this dialog
+       * writes into THIS row's draft rather than into the bulk sheet's
+       * pending category. */
+      pickedCategory: function () {
+        return this.catId();
+      },
+      pickCategory: function (id, label) {
+        this.setCat(id, label);
+      },
+      rateValue: function () {
+        return this.draftHere().rate || "";
+      },
+      setRate: function (value) {
+        this.setDraft(this.itemId, { rate: value });
+      },
+      noteValue: function () {
+        return this.draftHere().note || "";
+      },
+      setNote: function (value) {
+        this.setDraft(this.itemId, { note: value });
+      },
+
+      /* "Resolvable": a row that needs a category has one, a row that only
+       * needs a rate has a rate above zero. An approximate rate never
+       * blocks (D6), so a category row is ready without one. */
+      ready: function () {
+        if (this.needsPair) return false;
+        if (this.needsCat) return this.catId() !== null;
+        if (this.needsRate) return Number(this.rateValue()) > 0;
+        return true;
+      },
+      previewUsd: function () {
+        var rate = Number(this.rateValue());
+        if (rate > 0 && this.amountNative !== null) {
+          return usd(this.amountNative / rate, true);
+        }
+        return usd(this.currentUsd, true);
+      },
+
+      submit: function () {
+        if (!this.ready()) return;
+        var button = this.$el.querySelector("[data-modal-submit]");
+        if (button) button.click();
+      },
+      close: function () {
+        this.openId = null;
+        window.dispatchEvent(new CustomEvent("close-modal"));
+      },
+      step: function (which) {
+        /* Click the arrow rather than re-deriving its URL: one place
+         * decides what each arrow points at, and the disabled state at
+         * the ends is honoured for free (B6). */
+        var el = this.$el.querySelector(
+          "[data-nav-" + which + "]:not([disabled])"
+        );
+        if (el) el.click();
+      },
+
+      onKey: function (event) {
+        /* esc closes from anywhere, including from inside a field (C4). */
+        if (event.key === "Escape") {
+          this.close();
+          return;
+        }
+        var target = event.target;
+        var typing =
+          target && /^(input|textarea|select)$/i.test(target.tagName);
+        /* Everything else is swallowed while a field has focus: typing "3"
+         * into the rate box must not also pick a category (C5). */
+        if (typing) return;
+        /* Key repeat would submit each dialog the advance swaps in,
+         * walking the queue and resolving rows nobody saw. */
+        if (event.repeat) return;
+
+        if (event.key === "ArrowLeft") {
+          event.preventDefault();
+          this.step("prev");
+          return;
+        }
+        if (event.key === "ArrowRight") {
+          event.preventDefault();
+          this.step("next");
+          return;
+        }
+        if (event.key === "Enter") {
+          /* Only when resolvable — otherwise nothing happens at all: no
+           * error flash, no submit (C3). */
+          if (this.ready()) {
+            event.preventDefault();
+            this.submit();
+          }
+          return;
+        }
+        if (this.needsCat && event.key >= "1" && event.key <= "8") {
+          var chip = this.$el.querySelector(
+            '[data-chip="' + event.key + '"]'
+          );
+          if (chip) {
+            chip.click();
+            event.preventDefault();
+          }
+        }
+      },
+    };
+  };
+
   window.catPicker = function catPicker() {
     return {
       q: "",
