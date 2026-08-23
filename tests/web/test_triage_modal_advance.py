@@ -673,7 +673,11 @@ def test_the_modal_guards_against_key_repeat_and_double_submit(
     ).read_text(encoding="utf-8")
 
     assert "event.repeat" in handler
-    assert 'hx-disabled-elt="find button[type=submit]"' in modal
+    # Wave 3: `find` searched INSIDE the form, and the primary button is in
+    # the footer, associated by `form=` id. The selector matched nothing, so
+    # htmx logged on every save and this guard was never actually armed.
+    assert 'hx-disabled-elt="[data-modal-primary]"' in modal
+    assert "data-modal-primary" in modal
 
 
 def test_the_pair_modal_takes_focus_when_advanced_into(
