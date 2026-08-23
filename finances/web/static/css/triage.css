@@ -1390,6 +1390,26 @@
   color: var(--text-tertiary);
 }
 
+/* ── Focus (J3) ─────────────────────────────────────────────────────────── */
+
+/* signal.css draws the two-layer ring on a bare `:focus-visible` — one
+ * pseudo-class, specificity (0,1,0). Any component rule of the same
+ * specificity that declares `box-shadow` and is written later wins, and
+ * the ring vanishes with nothing to show for it. Two rules in this file
+ * did exactly that, and only a browser could tell:
+ *
+ *   .tbtn-primary  paints --shadow-accent, so the run button and the
+ *                  dialog's own primary had no keyboard focus at all;
+ *   .tcheck        paints --shadow-xs, which resolves to `none`, so every
+ *                  row checkbox was focusable and invisible.
+ *
+ * Restored here rather than by reordering the sheets: the ring belongs to
+ * the state, and a component that needs a resting shadow should keep it. */
+.tbtn-primary:focus-visible,
+.tcheck:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+
 /* ── Motion ─────────────────────────────────────────────────────────────── */
 
 @keyframes triage-fade {

@@ -246,3 +246,98 @@ def test_every_pickable_category_shows_its_test_on_keyboard_focus(
     for row in rows:
         assert "@focus=\"hoverFrom($el)\"" in row
         assert "@blur=\"hoverClear()\"" in row
+
+
+# ---------------------------------------------------------------------------
+# J3 — the two-layer ring, on every interactive element
+# ---------------------------------------------------------------------------
+
+
+def test_the_focus_ring_is_not_painted_over_by_a_component_shadow() -> None:
+    """signal.css's ``:focus-visible`` is a single-pseudo-class selector.
+
+    Any component rule of equal specificity that declares ``box-shadow``
+    and is written *later* wins, and the ring silently disappears — found
+    in a browser on the primary button (``--shadow-accent``) and on the
+    checkbox (``--shadow-xs``, which resolves to ``none``). Both need the
+    ring restored explicitly; nothing else in triage.css declares a
+    box-shadow on a focusable element.
+    """
+    css = (WEB / "static" / "css" / "triage.css").read_text(encoding="utf-8")
+
+    for selector in (".tbtn-primary:focus-visible", ".tcheck:focus-visible"):
+        assert selector in css, f"{selector} does not restore the focus ring"
+
+    restore = css[css.index(".tbtn-primary:focus-visible") :]
+    restore = restore[: restore.index("}") + 1]
+    assert "var(--focus-ring)" in restore
+
+
+# ---------------------------------------------------------------------------
+# J7 — AA at the sizes the design actually uses
+# ---------------------------------------------------------------------------
+
+
+def _tokens() -> dict[str, str]:
+    """Every ``--name: value`` in signal.css, with one level of var() resolved."""
+    css = (WEB / "static" / "css" / "signal.css").read_text(encoding="utf-8")
+    raw = dict(re.findall(r"(--[\w-]+):\s*([^;]+);", css))
+    out: dict[str, str] = {}
+    for name, value in raw.items():
+        value = value.strip()
+        seen = 0
+        while value.startswith("var(") and seen < 6:
+            inner = value[4:].split(")")[0].split(",")[0].strip()
+            value = raw.get(inner, value).strip()
+            seen += 1
+        out[name] = value
+    return out
+
+
+def _luminance(hex_colour: str) -> float:
+    hex_colour = hex_colour.lstrip("#")
+    channels = [int(hex_colour[i : i + 2], 16) / 255 for i in (0, 2, 4)]
+    linear = [
+        c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in channels
+    ]
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+
+def _contrast(fg: str, bg: str) -> float:
+    a, b = sorted((_luminance(fg), _luminance(bg)), reverse=True)
+    return (a + 0.05) / (b + 0.05)
+
+
+#: Every text token the triage surface sets on a paper background, against
+#: every paper background it can land on. The row that made this necessary:
+#: a selected row is `--surface-sunken`, the darkest of the three.
+_TEXT_TOKENS = (
+    "--text-primary",
+    "--text-secondary",
+    "--text-tertiary",
+    "--text-placeholder",
+    "--text-accent",
+    "--text-signal",
+)
+_SURFACES = ("--surface-canvas", "--surface-raised", "--surface-sunken")
+
+
+@pytest.mark.parametrize("token", _TEXT_TOKENS)
+@pytest.mark.parametrize("surface", _SURFACES)
+def test_every_text_token_meets_aa_on_every_paper_surface(
+    token: str, surface: str
+) -> None:
+    """AA is 4.5:1 — this design has no text large enough for the 3:1 tier.
+
+    The largest thing on the screen is the 26px Doto headline, which is the
+    one exception the ratio clears anyway; everything else is 10.5–19px, so
+    one floor covers the surface.
+    """
+    tokens = _tokens()
+    ratio = _contrast(tokens[token], tokens[surface])
+
+    assert ratio >= 4.5, (
+        f"{token} ({tokens[token]}) on {surface} ({tokens[surface]}) is "
+        f"{ratio:.2f}:1, under AA's 4.5:1 — at 10.5px that is the micro "
+        "labels and the raw bank strings"
+    )
