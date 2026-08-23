@@ -47,7 +47,7 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from finances.db.repos import accounts as accounts_repo
 from finances.db.repos import categories as categories_repo
-from finances.domain import categorization, money
+from finances.domain import categorization, money, realized_rates
 from finances.domain import rates as rates_engine
 from finances.domain import transfers as transfers_domain
 from finances.domain.models import Transaction, TransactionKind
@@ -981,6 +981,24 @@ def confirm_pair(
     transfer_id; otherwise raises ``LookupError`` (404 surface) or
     ``ValueError`` (400 surface).
 
+    Then rebuilds the realized cost basis — criterion H5, and the same
+    bargain ``transactions_write.apply_edit`` step 3 keeps for a rate
+    edit (ADR-013 Amendment 2026-07-26). Confirming the pairing is the
+    owner asserting *these bolívars came from that sell*, so it is the
+    moment the ``binance_p2p_realized`` tier should encode it. The write
+    itself changes no rate — ``SQL_P2P_SELLS`` keys off ``source_ref``
+    and sign, not ``kind``, so promoting both legs leaves the set of
+    fills alone — but nothing guarantees that set was ever
+    *materialised*. The tier is only as fresh as the last ingest,
+    backfill or ``finances rates rebuild-realized``, and a fill that
+    arrived by any other path prices a fortnight of bolívar rows off the
+    market median instead of what those bolívars cost.
+
+    Ordered after the guards, so a refused or already-paired
+    confirmation writes nothing at all. Idempotent and derived wholly
+    from ``transactions`` (~5 ms on the live ledger), so firing it on
+    every confirmation is cheap and always recoverable.
+
     Returns a dict ready for JSON serialization::
 
         {"transfer_id": str, "from_transaction_id": int, "to_transaction_id": int}
@@ -1013,6 +1031,8 @@ def confirm_pair(
         anchor_transaction_id=deposit_id,
         counterpart_transaction_id=sell_id,
     )
+
+    realized_rates.rebuild(conn)
 
     return {
         "transfer_id": pair.transfer_id,
