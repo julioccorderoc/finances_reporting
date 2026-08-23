@@ -343,4 +343,4 @@ def test_the_walk_list_is_the_queue_in_bucket_order(
     """B2 — collapse is a reading convenience; the run walks everything."""
     screen = triage_view.build_screen(screen_db)
 
-    assert screen.walk == list(screen.queue.items)
+    assert list(screen.walk) == list(screen.queue.items)

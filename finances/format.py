@@ -92,6 +92,37 @@ def fmt_date(
     return label
 
 
+def fmt_date_short(
+    value: date | datetime | str | None,
+    today: date | None = None,
+) -> str:
+    """``Jul 7`` — the dense form, with ``24`` appended off the current year.
+
+    The triage queue's date column is 64px of mono and must never wrap
+    (criterion A10). It also carries no weekday and no "Today /
+    Yesterday": Provincial rows have no time component and 204 of 243
+    live rows share a timestamp, so a day label is decoration that
+    happens to look like information (criterion A5).
+
+    Same accepted inputs and same ``today`` injection as :func:`fmt_date`,
+    so the two cannot disagree about which year is the current one.
+    """
+    if value is None:
+        return EM_DASH
+    if isinstance(value, datetime):  # must precede the date check (subclass)
+        d = value.date()
+    elif isinstance(value, date):
+        d = value
+    else:
+        d = date.fromisoformat(str(value)[:10])
+    if today is None:
+        today = datetime.now(tz=config.CARACAS_TZ).date()
+    label = f"{_MONTH_ABBR[d.month - 1]} {d.day}"
+    if d.year != today.year:
+        label = f"{label} {d.year % 100:02d}"
+    return label
+
+
 def fmt_month(value: date | datetime | str | None) -> str:
     """``"2026-07"`` (or a date/datetime) → ``Jul 2026``. ``None`` → em dash."""
     if value is None:
@@ -151,6 +182,7 @@ __all__ = [
     "EM_DASH",
     "clean_merchant",
     "fmt_date",
+    "fmt_date_short",
     "fmt_money",
     "fmt_month",
     "fmt_number",
