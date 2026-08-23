@@ -40,7 +40,9 @@ def _settings(tmp_path: Path, **overrides: object) -> WebSettings:
         "port": 19999,
         "token": "s3cret",
         "db_path": tmp_path / "x.db",
-        "regen_report_on_shutdown": False,
+        # Non-default on purpose: the test below proves no field can quietly
+        # revert across the wire, which a same-as-default value cannot see.
+        "regen_report_on_shutdown": True,
         "refresh_on_start": True,
     }
     base.update(overrides)
@@ -147,6 +149,15 @@ def test_port_round_trips_as_an_int(tmp_path: Path) -> None:
     assert WebSettings.from_env(env).port == 18765
 
 
-def test_regen_defaults_on_so_the_no_reload_path_is_unchanged() -> None:
-    """``--no-reload`` must behave exactly as the viewer always has."""
-    assert WebSettings().regen_report_on_shutdown is True
+def test_regen_defaults_off_because_the_hook_writes_the_real_report() -> None:
+    """The default is opt-in; ``--no-reload`` does not rely on it.
+
+    This used to assert ``True``, in the name of leaving the ``--no-reload``
+    path alone — but that path never reads the default: ``serve_cmd`` sets
+    the flag explicitly on both branches (``not reload``), which is pinned
+    by ``test_no_reload_leaves_regen_with_the_lifespan_hook``. So the default
+    only ever governed a settings object built without thinking about it —
+    a test's, in practice — and the hook writes ``config.REPORT_HTML_PATH``,
+    the owner's real report, whatever database it read.
+    """
+    assert WebSettings().regen_report_on_shutdown is False

@@ -293,6 +293,10 @@ def cli_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     apply_migrations(conn)
     conn.close()
     monkeypatch.setattr(config, "DB_PATH", db_file)
+    # `finances cash add` regenerates the static report when it is done, and
+    # that path is a separate constant from the DB — left alone, these tests
+    # rewrite the repo's real report.html from the fixture ledger.
+    monkeypatch.setattr(config, "REPORT_HTML_PATH", tmp_path / "report.html")
     return db_file
 
 

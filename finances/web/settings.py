@@ -76,12 +76,20 @@ class WebSettings(BaseModel):
             is not ``127.0.0.1``.
         db_path: SQLite database path. Defaults to ``config.DB_PATH``.
         regen_report_on_shutdown: Who rewrites ``report.html`` on teardown.
-            ``True`` (default) is the lifespan hook — today's behaviour and
-            the ``--no-reload`` path. ``False`` hands ownership to the
-            caller: under the reload supervisor the child is SIGTERM'd on
-            every source edit, and a 665-query non-atomic export per edit
-            would truncate ``report.html`` dozens of times an hour while
-            the supervisor blocks on ``join()``.
+            ``True`` is the lifespan hook — the ``--no-reload`` path.
+            ``False`` hands ownership to the caller: under the reload
+            supervisor the child is SIGTERM'd on every source edit, and a
+            665-query non-atomic export per edit would truncate
+            ``report.html`` dozens of times an hour while the supervisor
+            blocks on ``join()``.
+
+            Defaults ``False``, i.e. opt-in, because the hook writes
+            ``config.REPORT_HTML_PATH`` — the repo's real report — whatever
+            database it read. Everything in production says which it wants
+            (``serve_cmd`` sets it on both paths; the reload child rebuilds
+            it from a required env key), so the default only ever governs an
+            app built without thinking about it, and for that case a stale
+            report beats an overwritten one.
         refresh_on_start: Fetch stale rate sources in the background at
             startup. Defaults ``False`` and is opted into by ``finances
             serve`` alone, so building an app in a test or a script never
@@ -94,7 +102,7 @@ class WebSettings(BaseModel):
     port: int = 8765
     token: Optional[str] = None
     db_path: Path = Field(default_factory=lambda: _config.DB_PATH)
-    regen_report_on_shutdown: bool = True
+    regen_report_on_shutdown: bool = False
     refresh_on_start: bool = False
 
     def model_post_init(self, __context: object) -> None:

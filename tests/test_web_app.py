@@ -260,7 +260,13 @@ def test_server_shutdown_regenerates_report(tmp_path, monkeypatch) -> None:
     report = tmp_path / "report.html"
     monkeypatch.setattr(config, "REPORT_HTML_PATH", report)
 
-    app = create_app(WebSettings(host="127.0.0.1", db_path=db_path))
+    app = create_app(
+        WebSettings(
+            host="127.0.0.1",
+            db_path=db_path,
+            regen_report_on_shutdown=True,
+        )
+    )
     assert not report.exists()
 
     # Entering/exiting the TestClient context fires FastAPI startup/shutdown.
