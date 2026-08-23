@@ -429,6 +429,11 @@ _REAL_SQLITE_CONNECT = sqlite3.connect
 # untouched is the real ledger next to the ``finances`` package.
 _LIVE_DB_PATH = (_config.PROJECT_ROOT / "finances.db").resolve()
 
+# Same idea for the other file the repo root owns. ``report.html`` is what the
+# double-click launcher shows when the server is not running, so a test that
+# regenerates it leaves the owner looking at fixture data.
+_LIVE_REPORT_PATH = (_config.PROJECT_ROOT / "report.html").resolve()
+
 
 def _connect_target_path(database: object, uri: bool) -> Path | None:
     """Best-effort filesystem path for a ``sqlite3.connect`` first argument."""
@@ -474,10 +479,10 @@ def pytest_unconfigure(config: pytest.Config) -> None:  # noqa: ARG001
     sqlite3.connect = _REAL_SQLITE_CONNECT
 
 
-def _live_db_fingerprint() -> tuple[bool, int, int] | None:
-    """(exists, size, mtime_ns) for the real ledger — cheap and total."""
+def _fingerprint(path: Path) -> tuple[bool, int, int]:
+    """(exists, size, mtime_ns) — cheap, total, and sees a rewrite in place."""
     try:
-        stat = _LIVE_DB_PATH.stat()
+        stat = path.stat()
     except FileNotFoundError:
         return (False, 0, 0)
     return (True, stat.st_size, stat.st_mtime_ns)
@@ -494,13 +499,34 @@ def _live_db_is_never_touched() -> Iterator[None]:
     rewrite bumps mtime even when no row changes, and on a fresh worktree
     the connect materialises a 4096-byte stub from nothing.
     """
-    before = _live_db_fingerprint()
+    before = _fingerprint(_LIVE_DB_PATH)
     yield
-    after = _live_db_fingerprint()
+    after = _fingerprint(_LIVE_DB_PATH)
     assert after == before, (
         f"the live database at {_LIVE_DB_PATH} changed during the test "
         f"session ({before} -> {after}). Something opened it — most likely a "
         "test that shells out to a `finances` CLI command without pointing "
         "it at a tmp DB. (If you were running `finances serve` in another "
         "window against this same checkout, that is the other explanation.)"
+    )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _live_report_html_is_never_rewritten() -> Iterator[None]:
+    """The repo's ``report.html`` belongs to the owner, not to the suite.
+
+    ``create_app`` regenerates it from the DB on shutdown unless the caller
+    says otherwise, and it always writes ``config.REPORT_HTML_PATH`` — the
+    real one — whatever database it read. Every web test that ran its client
+    as a context manager therefore overwrote the launcher's page with fixture
+    rows.
+    """
+    before = _fingerprint(_LIVE_REPORT_PATH)
+    yield
+    after = _fingerprint(_LIVE_REPORT_PATH)
+    assert after == before, (
+        f"the repo's report.html at {_LIVE_REPORT_PATH} was rewritten during "
+        f"the test session ({before} -> {after}). Something ran the shutdown "
+        "regen (WebSettings.regen_report_on_shutdown) or a CLI export without "
+        "pointing config.REPORT_HTML_PATH at a tmp file."
     )

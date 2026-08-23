@@ -272,6 +272,32 @@ def test_server_shutdown_regenerates_report(tmp_path, monkeypatch) -> None:
     assert report.exists() and report.stat().st_size > 0
 
 
+def test_the_shutdown_regen_is_opt_in(tmp_path, monkeypatch) -> None:
+    """A settings object built without thinking must not write the repo.
+
+    Production always says which it wants — ``serve_cmd`` sets the flag on
+    both paths, and the reload child rebuilds it from a required env key.
+    Tests do not, and while the default was ``True`` every
+    ``with TestClient(create_app(...))`` in this suite rewrote the owner's
+    real ``report.html`` with fixture rows on the way out.
+    """
+    from finances import config
+    from finances.web.app import create_app
+    from finances.web.settings import WebSettings
+
+    db_path = _seed_db_with_txn(tmp_path)
+    report = tmp_path / "report.html"
+    monkeypatch.setattr(config, "REPORT_HTML_PATH", report)
+
+    assert WebSettings().regen_report_on_shutdown is False
+
+    app = create_app(WebSettings(host="127.0.0.1", db_path=db_path))
+    with TestClient(app) as client:
+        assert client.get("/health").status_code == 200
+
+    assert not report.exists()
+
+
 def test_serve_cli_command_validates_lan_token() -> None:
     from finances.cli.main import app as cli_app
 
