@@ -447,6 +447,70 @@ def test_lan_bind_defaults_to_no_reload(uvicorn_recorder) -> None:
     assert "reload" not in call["kwargs"]
 
 
+def test_serve_defaults_to_the_configured_ledger(uvicorn_recorder) -> None:
+    from finances import config
+
+    result = _invoke_serve("--no-reload", "--port", "18765")
+    assert result.exit_code == 0, result.output
+
+    app_object = uvicorn_recorder.calls[0]["args"][0]
+    assert app_object.state.settings.db_path == config.DB_PATH
+
+
+def test_serve_db_path_points_the_whole_process_tree_elsewhere(
+    uvicorn_recorder, tmp_path
+) -> None:
+    """``--db-path`` is what lets a test (or a scratch session) run serve.
+
+    ``db_path`` is a WebSettings field with an env key on the wire already,
+    but the CLI had no way to set it, so ``finances serve`` always opened
+    ``config.DB_PATH`` — which is how the test suite ended up touching the
+    real ledger. All three consumers must see the override: the exported
+    environment (the reload child), the settings object (the app), and the
+    shutdown regen the supervisor runs on its way out.
+    """
+    from finances.web.settings import ENV_DB_PATH
+
+    scratch = tmp_path / "scratch.db"
+
+    result = _invoke_serve("--port", "18765", "--db-path", str(scratch))
+    assert result.exit_code == 0, result.output
+
+    assert uvicorn_recorder.calls[0]["environ"][ENV_DB_PATH] == str(scratch)
+    (regen_settings,) = uvicorn_recorder.regen_calls
+    assert regen_settings.db_path == scratch
+
+
+def test_serve_db_path_reaches_the_no_reload_app(
+    uvicorn_recorder, tmp_path
+) -> None:
+    scratch = tmp_path / "scratch.db"
+
+    result = _invoke_serve(
+        "--no-reload", "--port", "18765", "--db-path", str(scratch)
+    )
+    assert result.exit_code == 0, result.output
+
+    app_object = uvicorn_recorder.calls[0]["args"][0]
+    assert app_object.state.settings.db_path == scratch
+
+
+def test_serve_db_path_can_come_from_the_environment(
+    uvicorn_recorder, tmp_path, monkeypatch
+) -> None:
+    """Same env key the reload child reads, so one name covers both hops."""
+    from finances.web.settings import ENV_DB_PATH
+
+    scratch = tmp_path / "from-env.db"
+    monkeypatch.setenv(ENV_DB_PATH, str(scratch))
+
+    result = _invoke_serve("--no-reload", "--port", "18765")
+    assert result.exit_code == 0, result.output
+
+    app_object = uvicorn_recorder.calls[0]["args"][0]
+    assert app_object.state.settings.db_path == scratch
+
+
 def test_lifespan_skips_regen_when_the_caller_owns_it(
     tmp_path, monkeypatch
 ) -> None:
