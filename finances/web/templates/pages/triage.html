@@ -1,31 +1,56 @@
 {% extends "base.html" %}
 {% block title %}Triage{% endblock %}
+
+{# The queue fills the content area edge to edge: its own header, its own
+   canvas colour, and — critically — its own positioning context. The modal
+   and the sheets are `position: absolute; inset: 0` over THIS element, never
+   `fixed`, so the nav stays visible and unscrolled behind the scrim (B11). #}
+{% block main_class %}triage-main{% endblock %}
+
 {% block content %}
-{% from "_macros.html" import triage_type_badge %}
+{% from "_icons.html" import icon %}
 
-  {# No count here. Anything numeric must live inside #triage-queue — the
-     target of every swap on this screen — or it freezes at page load.
-     The chip row and the counts line moved into partials/triage_queue.html
-     for exactly that reason. #}
-  <header class="mb-4">
-    <h1 class="text-2xl font-semibold">Triage</h1>
-    <p class="mt-1 text-sm text-slate-600">
-      Oldest unresolved issue first. Save advances; Park for later removes an item durably.
-    </p>
-  </header>
+<div class="triage-screen"
+     data-triage-screen
+     x-data="triageScreen()"
+     @triage-resolved.window="done += ($event.detail && $event.detail.count) || 1"
+     @triage-parked.window="clearSelection()"
+     @triage-close-sheet.window="closeSheet()">
 
-  {% if queue.integrity_warnings %}
-  <section class="mb-4 p-3 border border-amber-300 bg-amber-50 rounded text-sm" data-integrity-warnings>
-    <div class="font-semibold text-amber-800 uppercase text-xs tracking-wide">WARNING: integrity</div>
-    <ul class="mt-1 list-disc list-inside text-amber-900">
-      {% for w in queue.integrity_warnings %}
-        <li>{{ w }}</li>
-      {% endfor %}
-    </ul>
-  </section>
-  {% endif %}
-
-  <section id="triage-queue">
+  {# The swap target. Everything numeric on this screen is inside it. #}
+  <div id="triage-queue" class="triage-scroll">
     {% include 'partials/triage_queue.html' %}
-  </section>
+  </div>
+
+  {# The modal run. Inside the screen so the overlay covers the content
+     area and nothing else; outside #triage-queue so a queue refresh
+     cannot tear down an open dialog. #}
+  <div id="triage-modal-host"></div>
+
+  {# Sheets are fetched on open rather than rendered here: the parked
+     count, its sample and the oldest row all move as the sitting goes on,
+     and a sheet baked at page load would show yesterday's numbers. #}
+  <div id="triage-sheet-host"></div>
+
+  <div class="triage-selection"
+       data-selection-bar
+       x-show="selected.length"
+       x-cloak>
+    <span><span class="triage-selection-count" x-text="selected.length"></span> selected</span>
+    <span class="triage-selection-divider"></span>
+    <button type="button"
+            class="triage-selection-action is-filled"
+            data-bulk-sort
+            hx-get="/_partial/triage/bulk-sheet"
+            hx-target="#triage-sheet-host"
+            hx-swap="innerHTML">{{ icon("tag", 14) }}Set a category</button>
+    <button type="button"
+            class="triage-selection-action"
+            data-bulk-park
+            @click="parkSelected()">{{ icon("archive", 14) }}Park</button>
+    <button type="button"
+            class="triage-selection-clear"
+            @click="clearSelection()">Clear</button>
+  </div>
+</div>
 {% endblock %}

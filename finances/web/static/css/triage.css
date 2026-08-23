@@ -1,0 +1,1434 @@
+/* Triage — the component layer for the redesigned queue, modal and sheets.
+ *
+ * Plain CSS on signal.css's tokens. It exists as its own file because the
+ * vendored tailwind.css is a fixed extract with no build step (a class it
+ * lacks renders unstyled while every server test stays green), and app.css
+ * is the old viewer's sheet — mixing the two would make the Wave 3 cleanup
+ * of app.css's old triage block impossible to do safely.
+ *
+ * Every hex, px and duration here comes from
+ * design_handoff_triage/README.md. Nothing was rounded or "improved".
+ */
+
+/* ── The screen ─────────────────────────────────────────────────────────── */
+
+/* The modal and the sheets are `position: absolute; inset: 0` over the app
+ * content — never `fixed` — so the nav stays visible and unscrolled behind
+ * the scrim (criterion B11). That needs a positioned ancestor, and this is
+ * it. */
+.triage-screen {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - 57px);
+  background: var(--surface-canvas);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+}
+
+.triage-scroll {
+  flex: 1;
+  min-height: 0;
+  padding-bottom: var(--space-8);
+}
+
+/* ── Page header ────────────────────────────────────────────────────────── */
+
+.triage-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-6);
+  padding: var(--space-7) var(--space-7) var(--space-5);
+}
+
+.triage-header-text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* The kicker: a red square, then red mono caps. Once per view. */
+.triage-question {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: var(--eyebrow-size);
+  letter-spacing: var(--eyebrow-tracking);
+  font-weight: var(--eyebrow-weight);
+  text-transform: uppercase;
+  color: var(--text-signal);
+}
+.triage-question::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  background: var(--red-500);
+  flex: 0 0 auto;
+}
+
+.triage-answer {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--display-2-size);
+  line-height: 1.05;
+  letter-spacing: var(--display-2-tracking);
+  font-weight: 700;
+}
+
+.triage-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: 2px;
+  flex-wrap: wrap;
+}
+
+.triage-sitting {
+  font-size: var(--caption-size);
+  color: var(--text-tertiary);
+}
+
+.triage-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+}
+
+/* ── Buttons ────────────────────────────────────────────────────────────── */
+
+/* Buttons stay in Inter — mono caps break on "Bring back all 266". */
+.tbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: var(--control-md);
+  padding: 0 13px;
+  font-family: var(--font-sans);
+  font-size: var(--body-size);
+  font-weight: var(--weight-medium);
+  letter-spacing: -0.004em;
+  line-height: 1;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: var(--transition-control);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  border: 1px solid var(--border-default);
+}
+.tbtn:hover:not(:disabled) {
+  background: var(--paper-050);
+  border-color: var(--border-strong);
+}
+.tbtn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.tbtn-sm {
+  height: var(--control-sm);
+  padding: 0 10px;
+  font-size: var(--body-sm-size);
+  gap: 5px;
+  border-radius: var(--radius-sm);
+}
+
+/* The one red fill on the screen: the way forward. */
+.tbtn-primary {
+  background: var(--surface-accent);
+  color: var(--text-inverse);
+  border-color: var(--border-accent);
+  box-shadow: var(--shadow-accent);
+}
+.tbtn-primary:hover:not(:disabled) {
+  background: var(--surface-accent-hover);
+  border-color: var(--surface-accent-hover);
+}
+
+.tbtn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+  border-color: transparent;
+}
+.tbtn-ghost:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+/* A text-only control: the group head's Select all, the picker's
+ * disclosure. Red text is #c51a13, never the brand red. */
+.tlink {
+  background: none;
+  border: none;
+  padding: 2px 0;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: var(--body-sm-size);
+  color: var(--text-accent);
+}
+.tlink:hover {
+  color: var(--red-700);
+}
+
+.ticon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+.ticon:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.ticon:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+/* ── Badges and chips ───────────────────────────────────────────────────── */
+
+.tbadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--radius-xs);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: var(--weight-medium);
+  line-height: 1;
+  white-space: nowrap;
+  background: var(--status-neutral-bg);
+  border: 1px solid var(--status-neutral-border);
+  color: var(--status-neutral-text);
+}
+.tbadge-info {
+  background: var(--status-info-bg);
+  border-color: var(--status-info-border);
+  color: var(--status-info-text);
+}
+.tbadge-warning {
+  background: var(--status-warning-bg);
+  border-color: var(--status-warning-border);
+  color: var(--status-warning-text);
+}
+.tbadge-dot::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: 0 0 auto;
+}
+
+/* ── Banner ─────────────────────────────────────────────────────────────── */
+
+.tbanner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--status-warning-bg);
+  border: 1px solid var(--status-warning-border);
+}
+.tbanner-icon {
+  margin-top: 1px;
+  flex: 0 0 auto;
+  color: var(--status-warning-text);
+}
+.tbanner-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.tbanner-title {
+  font-size: var(--body-size);
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
+  letter-spacing: -0.004em;
+}
+.tbanner-text {
+  font-size: var(--body-sm-size);
+  line-height: var(--body-line);
+  color: var(--text-secondary);
+}
+.tbanner-danger {
+  background: var(--red-050);
+  border-color: var(--red-200);
+}
+
+.triage-banner-slot {
+  padding: 0 var(--space-7) var(--space-2);
+}
+
+/* ── Group head ─────────────────────────────────────────────────────────── */
+
+.triage-group,
+.triage-group-rows {
+  display: block;
+}
+
+.triage-group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 18px var(--space-7) 8px;
+}
+.triage-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  font-family: var(--font-sans);
+  color: var(--text-primary);
+}
+.triage-group-chevron {
+  color: var(--ink-400);
+  display: inline-flex;
+}
+.triage-group-label {
+  font-size: var(--title-3-size);
+  font-weight: 600;
+  letter-spacing: -0.006em;
+}
+.triage-group-count {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
+.triage-group-hint {
+  font-size: var(--caption-size);
+  color: var(--text-tertiary);
+}
+.triage-group-spacer {
+  flex: 1;
+}
+
+/* ── Row ────────────────────────────────────────────────────────────────── */
+
+.triage-row {
+  border-top: 1px solid var(--border-subtle);
+  background: transparent;
+  transition: background-color var(--dur-fast) var(--ease-standard);
+}
+/* Selection is grey. A red row in a ledger reads as an error. */
+.triage-row.is-selected {
+  background: var(--surface-selected);
+}
+.triage-row.is-open {
+  background: var(--paper-050);
+}
+
+.triage-row-grid {
+  display: grid;
+  grid-template-columns: 26px 64px minmax(0, 1fr) 138px 138px 186px 26px;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 44px;
+  padding: 0 var(--space-7);
+}
+
+.triage-row-date {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.triage-row-open {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  padding: 6px 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-sans);
+}
+.triage-row-name {
+  font-size: var(--body-sm-size);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.triage-row-raw {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-placeholder);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.triage-row-account {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.triage-row-account-detail {
+  color: var(--text-placeholder);
+}
+
+.triage-row-verdict,
+.triage-row-money {
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* ── Checkbox ───────────────────────────────────────────────────────────── */
+
+.tcheck {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-xs);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-default);
+  box-shadow: var(--shadow-xs);
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  margin: 0;
+  transition: var(--transition-control);
+}
+.tcheck:checked {
+  background: var(--surface-accent);
+  border-color: var(--border-accent);
+  /* An inline SVG tick, so the control needs no extra element. */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");
+  background-size: 12px 12px;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+/* ── Accept-the-guess chip ──────────────────────────────────────────────── */
+
+/* Dashed, because it is a proposal rather than a fact. */
+.triage-guess {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 2px 8px 3px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: 1px dashed var(--border-default);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  white-space: nowrap;
+  transition: var(--transition-control);
+}
+.triage-guess:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.triage-guess-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.triage-issues {
+  display: inline-flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+/* ── Money block ────────────────────────────────────────────────────────── */
+
+.tmoney {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: flex-end;
+  min-width: 0;
+}
+.tmoney-left {
+  align-items: flex-start;
+}
+
+.tmoney-usd {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+.tmoney-lg .tmoney-usd {
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: -0.03em;
+}
+
+.tmoney-unpriced {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--red-700);
+  white-space: nowrap;
+}
+.tmoney-lg .tmoney-unpriced {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 17px;
+}
+
+.tmoney-native-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  min-width: 0;
+}
+.tmoney-left .tmoney-native-line {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+.tmoney-native {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+.tmoney-lg .tmoney-native {
+  font-size: 12px;
+}
+
+/* ── Provenance chip ────────────────────────────────────────────────────── */
+
+.prov {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px 2px;
+  border-radius: var(--radius-sm);
+  font-size: 10.5px;
+  white-space: nowrap;
+  cursor: help;
+}
+.prov-trusted {
+  background: var(--ink-050);
+  border: 1px solid var(--ink-100);
+  color: var(--ink-800);
+}
+.prov-quiet {
+  background: var(--paper-100);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-tertiary);
+}
+.prov-warn {
+  background: var(--red-050);
+  border: 1px solid var(--red-200);
+  color: var(--red-700);
+}
+.prov-rate {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+
+/* ── Parked strip ───────────────────────────────────────────────────────── */
+
+.triage-parked-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-6) var(--space-7) 0;
+  padding: var(--space-4) var(--space-5);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+.triage-parked-icon {
+  color: var(--ink-400);
+  display: inline-flex;
+}
+.triage-parked-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.triage-parked-line {
+  font-size: var(--body-size);
+}
+.triage-parked-note {
+  font-size: var(--caption-size);
+  color: var(--text-tertiary);
+}
+
+/* ── Empty state ────────────────────────────────────────────────────────── */
+
+.triage-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-8) var(--space-7);
+  text-align: center;
+}
+/* The one Doto line on the screen, and the only one over 22px. */
+.triage-empty-headline {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--display-3-size);
+  font-weight: 500;
+}
+.triage-empty-body {
+  margin: 0;
+  max-width: 420px;
+  font-size: var(--body-size);
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+/* ── Overlay, modal and sheets ──────────────────────────────────────────── */
+
+.tover {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  background: var(--scrim);
+  backdrop-filter: var(--blur-overlay);
+  -webkit-backdrop-filter: var(--blur-overlay);
+  animation: triage-fade var(--dur-fast) var(--ease-standard);
+}
+
+/* The height is fixed on purpose: paging through 34 entries must not move
+ * the frame by a pixel (criterion B3). */
+.tmodal {
+  width: 100%;
+  max-width: 880px;
+  height: min(680px, calc(100% - 24px));
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-raised);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+  animation: triage-rise var(--dur-base) var(--ease-lift);
+}
+
+.tmodal-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-4) var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.tmodal-position {
+  font-family: var(--font-mono);
+  font-size: var(--eyebrow-size);
+  line-height: var(--eyebrow-line);
+  letter-spacing: var(--eyebrow-tracking);
+  font-weight: var(--eyebrow-weight);
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+.tmodal-progress {
+  flex: 0 1 140px;
+  min-width: 64px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--paper-200);
+  overflow: hidden;
+}
+.tmodal-progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--ink-900);
+  transition: width var(--dur-fast) var(--ease-standard);
+}
+.tmodal-spacer {
+  flex: 1;
+}
+
+/* Both columns scroll independently; the dialog itself never scrolls. */
+.tmodal-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: grid;
+  gap: 0;
+  grid-template-columns: minmax(0, 0.78fr) minmax(0, 1.22fr);
+}
+.tmodal-facts,
+.tmodal-decision {
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: var(--space-5);
+}
+.tmodal-facts {
+  border-right: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.tmodal-decision {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.tmodal-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+  background: var(--paper-050);
+}
+.tmodal-legend {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.tmodal-legend kbd {
+  font-family: var(--font-mono);
+  font-size: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+.tmodal-merchant {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.tmodal-merchant-name {
+  font-size: var(--title-2-size);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tmodal-merchant-raw {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-placeholder);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tmodal-when {
+  font-size: var(--body-sm-size);
+  color: var(--text-tertiary);
+}
+.tmodal-when-detail {
+  color: var(--text-placeholder);
+}
+
+.tmodal-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.tmodal-block-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.teyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--eyebrow-size);
+  line-height: var(--eyebrow-line);
+  letter-spacing: var(--eyebrow-tracking);
+  font-weight: var(--eyebrow-weight);
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.tkeys {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-placeholder);
+}
+
+/* ── Sheets ─────────────────────────────────────────────────────────────── */
+
+.tsheet {
+  width: 100%;
+  max-width: 560px;
+  height: min(520px, calc(100% - 48px));
+  max-height: calc(100% - 48px);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-raised);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+  animation: triage-rise var(--dur-base) var(--ease-lift);
+}
+.tsheet-header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-5) var(--space-3);
+}
+.tsheet-header-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.tsheet-title {
+  margin: 0;
+  font-size: var(--title-2-size);
+  line-height: var(--title-2-line);
+  letter-spacing: var(--title-2-tracking);
+  font-weight: var(--weight-semibold);
+}
+.tsheet-description {
+  margin: 0;
+  font-size: var(--body-size);
+  line-height: var(--body-line);
+  color: var(--text-tertiary);
+}
+.tsheet-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 var(--space-5) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.tsheet-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-5);
+  border-top: 1px solid var(--border-subtle);
+  background: var(--paper-050);
+}
+
+/* ── Fields ─────────────────────────────────────────────────────────────── */
+
+.tfield {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.tfield-label {
+  font-size: var(--body-sm-size);
+  font-weight: var(--weight-medium);
+  color: var(--text-primary);
+  letter-spacing: -0.004em;
+}
+.tfield-hint {
+  font-size: var(--caption-size);
+  line-height: var(--caption-line);
+  color: var(--text-tertiary);
+}
+.tinput {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: var(--control-md);
+  padding: 0 10px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-xs);
+  transition: var(--transition-control);
+}
+.tinput-sm {
+  height: var(--control-sm);
+}
+.tinput:focus-within {
+  border-color: var(--red-500);
+  box-shadow: var(--focus-ring-flush);
+}
+.tinput input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: var(--font-sans);
+  font-size: var(--body-size);
+  color: var(--text-primary);
+  padding: 0;
+}
+.tinput-mono input {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.tinput-icon {
+  color: var(--text-tertiary);
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+/* ── Category picker ────────────────────────────────────────────────────── */
+
+.catpicker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.catpicker-chips {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+.catpicker-chips-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.catchip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 9px;
+  text-align: left;
+  min-height: 38px;
+  cursor: pointer;
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-default);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--body-sm-size);
+  font-weight: 400;
+  transition: var(--transition-control);
+}
+.catchip.is-on {
+  background: var(--surface-selected);
+  border-color: var(--border-default);
+  font-weight: 600;
+}
+.catchip-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--text-tertiary);
+}
+.catchip.is-on .catchip-icon,
+.catchip.is-on .catchip-key {
+  color: var(--text-primary);
+}
+.catchip-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.catchip-key {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-placeholder);
+}
+
+.catpicker-disclosure {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.catpicker-disclosure-note {
+  font-size: 11px;
+  color: var(--text-placeholder);
+}
+
+.catpicker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 268px;
+  overflow-y: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 4px;
+  background: var(--paper-050);
+}
+.catrow {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 7px 9px;
+  text-align: left;
+  width: 100%;
+  cursor: pointer;
+  border-radius: var(--radius-md);
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+}
+.catrow.is-on {
+  background: var(--surface-selected);
+  border-color: var(--border-default);
+}
+.catrow-icon {
+  display: inline-flex;
+  margin-top: 2px;
+  flex: 0 0 auto;
+  color: var(--text-tertiary);
+}
+.catrow-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.catrow-label {
+  font-size: var(--body-sm-size);
+  font-weight: 500;
+}
+.catrow-test {
+  font-size: var(--caption-size);
+  line-height: 1.4;
+  color: var(--text-tertiary);
+  text-wrap: pretty;
+}
+.catrow-kind {
+  font-size: 10.5px;
+  color: var(--text-placeholder);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-top: 3px;
+}
+.catgroup-eyebrow {
+  padding: 6px 8px 2px;
+}
+.catpicker-nomatch {
+  padding: 10px 8px;
+  font-size: var(--body-sm-size);
+  color: var(--text-tertiary);
+}
+
+/* The height is reserved so hovering a chip cannot shift the layout (E6). */
+.catpicker-test {
+  display: flex;
+  gap: 7px;
+  padding: 7px 9px;
+  min-height: 44px;
+  border-radius: var(--radius-md);
+  background: transparent;
+  border: 1px solid transparent;
+}
+.catpicker-test.is-showing {
+  background: var(--paper-100);
+  border-color: var(--border-subtle);
+}
+.catpicker-test-icon {
+  margin-top: 2px;
+  flex: 0 0 auto;
+  color: var(--ink-400);
+}
+.catpicker-test-text {
+  font-size: var(--caption-size);
+  line-height: 1.45;
+  color: var(--text-secondary);
+  text-wrap: pretty;
+}
+
+/* ── Why (the guess block inside the modal) ─────────────────────────────── */
+
+.twhy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+  border-radius: var(--radius-md);
+  background: var(--paper-200);
+  border: 1px dashed var(--border-default);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+}
+.twhy-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--ink-500);
+}
+.twhy-text {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--body-sm-size);
+  line-height: 1.45;
+}
+.twhy-text strong {
+  color: var(--text-primary);
+}
+.twhy-pattern {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+.twhy-take {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-signal);
+}
+
+/* ── Rate entry ─────────────────────────────────────────────────────────── */
+
+.trate {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.trate-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-4);
+}
+.trate-field {
+  flex: 0 0 176px;
+}
+.trate-preview {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 2px;
+}
+.trate-preview-figure {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 20px;
+  font-weight: 500;
+  letter-spacing: -0.03em;
+}
+.trate-hints {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.trate-hint {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 8px 10px;
+  cursor: pointer;
+  text-align: left;
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-default);
+  font-family: var(--font-sans);
+  color: var(--text-primary);
+  transition: var(--transition-control);
+}
+.trate-hint:hover {
+  background: var(--paper-050);
+  border-color: var(--border-strong);
+}
+.trate-hint-rate {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+  min-width: 62px;
+}
+.trate-hint-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.trate-hint-label {
+  font-size: var(--body-sm-size);
+}
+.trate-hint-note {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.trate-hint-usd {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+/* ── Pair view ──────────────────────────────────────────────────────────── */
+
+.tpair {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.tpair-legs {
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--surface-raised);
+}
+.tpair-leg {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 10px 12px;
+}
+.tpair-leg + .tpair-leg {
+  border-top: 1px solid var(--border-subtle);
+}
+.tpair-leg-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--ink-400);
+}
+.tpair-leg-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.tpair-leg-account {
+  font-size: var(--body-sm-size);
+  font-weight: 500;
+}
+.tpair-leg-raw {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-placeholder);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tpair-leg-amount {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+.tpair-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--caption-size);
+  color: var(--text-tertiary);
+}
+.tpair-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.tpair-meta-implied {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.tpair-note {
+  font-size: var(--body-sm-size);
+  line-height: 1.5;
+  color: var(--text-secondary);
+  text-wrap: pretty;
+}
+.tpair-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+/* ── Selection bar ──────────────────────────────────────────────────────── */
+
+.triage-selection {
+  position: absolute;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 8px 10px 8px var(--space-4);
+  background: var(--surface-inverse);
+  color: var(--text-inverse);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-pop);
+  animation: triage-rise var(--dur-fast) var(--ease-lift);
+  font-size: var(--body-sm-size);
+}
+.triage-selection-count {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.triage-selection-divider {
+  width: 1px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.18);
+}
+.triage-selection-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: none;
+  color: var(--text-inverse);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: var(--body-sm-size);
+}
+.triage-selection-action.is-filled {
+  background: rgba(255, 255, 255, 0.12);
+}
+.triage-selection-clear {
+  padding: 5px 8px;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: var(--body-sm-size);
+}
+
+/* ── Parked sheet sample rows ───────────────────────────────────────────── */
+
+.tsample {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.tsample-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 8px 10px;
+}
+.tsample-row + .tsample-row {
+  border-top: 1px solid var(--border-subtle);
+}
+.tsample-date {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  flex: 0 0 62px;
+}
+.tsample-raw {
+  font-family: var(--font-mono);
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text-placeholder);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tsample-amount {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+
+/* ── Motion ─────────────────────────────────────────────────────────────── */
+
+@keyframes triage-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes triage-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* The selection bar is already centred by a transform, so it needs its own
+ * keyframes or the rise would cancel the centring. */
+@keyframes triage-rise-centred {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+.triage-selection {
+  animation-name: triage-rise-centred;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tover,
+  .tmodal,
+  .tsheet,
+  .triage-selection {
+    animation-duration: 1ms;
+  }
+}
+
+/* ── Degrading below the design's 1440 ──────────────────────────────────── */
+
+/* L3: sane down to 1200px. The account and verdict columns are the first
+ * to go, because the date, the name and the money are the row. */
+@media (max-width: 1180px) {
+  .triage-row-grid {
+    grid-template-columns: 26px 64px minmax(0, 1fr) 120px 160px 26px;
+  }
+  .triage-row-account {
+    display: none;
+  }
+}

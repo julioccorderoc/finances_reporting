@@ -32,6 +32,12 @@
     <link rel="stylesheet" href="/static/css/fonts.css">
     <link rel="stylesheet" href="/static/css/signal.css">
 
+    <!-- Triage component layer (Wave 2). Loads after signal.css because it
+         reads its tokens; scoped to .triage-* / .t* classes, so it is inert
+         on every other page. -->
+    <link rel="stylesheet" href="/static/css/triage.css">
+    <script src="/static/js/triage.js"></script>
+
     {# Identity of the server process that rendered this page. Read from
        request.app.state rather than a context key on purpose: Starlette
        injects `request` into every template context, so no TemplateResponse
@@ -122,7 +128,10 @@
     }"
     @close-modal.window="
       modalDismissed = true;
-      document.getElementById('tx-modal-host').replaceChildren();
+      ['tx-modal-host', 'triage-modal-host'].forEach(id => {
+        const host = document.getElementById(id);
+        if (host) host.replaceChildren();
+      });
       refreshQueue();
     "
     {# A modal-open request means the owner wants a dialog again. #}
@@ -139,7 +148,7 @@
        afterRequest — so this branch has to finish the job itself, or the
        write's queueDirty and toast are silently dropped. #}
     @htmx:before-swap.window="
-      if (modalDismissed && $event.detail.target && $event.detail.target.id === 'tx-modal-host') {
+      if (modalDismissed && $event.detail.target && ['tx-modal-host', 'triage-modal-host'].includes($event.detail.target.id)) {
         $event.detail.shouldSwap = false;
         const t = triggersFrom($event.detail.xhr);
         armQueueRefresh(t);
@@ -158,6 +167,11 @@
         armQueueRefresh(t);
         if (t.names.includes('closeModal')) {
           window.dispatchEvent(new CustomEvent('close-modal'));
+        }
+        {# The sitting counter is client state — the server knows how many
+           rows a write resolved, but not when the sitting began. #}
+        if (t.names.includes('triageResolved')) {
+          window.dispatchEvent(new CustomEvent('triage-resolved', { detail: t.payload.triageResolved }));
         }
         showToast(t);
       }
@@ -234,7 +248,8 @@
       </span>
     </div>
 
-    <main class="max-w-6xl mx-auto px-4 py-6">
+    {# Pages that own their whole content area (triage) override this. #}
+    <main class="{% block main_class %}max-w-6xl mx-auto px-4 py-6{% endblock %}">
       {% block content %}{% endblock %}
     </main>
 
@@ -265,7 +280,7 @@
         };
         toasts.push(t);
         if (t.level === 'success') {
-          setTimeout(() => { toasts = toasts.filter(x => x.id !== t.id) }, 4000);
+          setTimeout(() => { toasts = toasts.filter(x => x.id !== t.id) }, 2600);
         }
       "
     >

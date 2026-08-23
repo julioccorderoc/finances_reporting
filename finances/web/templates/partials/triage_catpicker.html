@@ -1,0 +1,109 @@
+{# CatPicker — eight usage-ranked chips, search over the rest, and the test
+   that settles the edge visible at the moment of choosing.
+
+   Inputs:
+     picker          PickerPayload (services/categories_view.py)
+     picker_columns  2 in the modal, 4 in the bulk sheet
+     picker_keys     False in the sheet, where 1-8 are not shortcuts
+
+   The enclosing Alpine scope owns the selection and must expose:
+     pickedCategory()        -> category id or null
+     pickCategory(id, label) -> record the choice
+
+   so the modal can keep its per-row draft and the bulk sheet its single
+   pending category without this partial knowing which it is in.
+
+   Every sentence under a category comes from
+   docs/architecture/category-definitions.md via
+   ``domain.category_definitions`` (K7) — never retyped here. Search
+   matches the label AND that sentence (E4).
+#}
+{% from "_icons.html" import icon %}
+
+<div class="catpicker" data-category-picker x-data="catPicker()">
+  <span class="tinput tinput-sm">
+    <span class="tinput-icon">{{ icon("search", 15) }}</span>
+    <input type="search"
+           data-picker-search
+           x-model="q"
+           @keydown.enter.prevent
+           autocomplete="off"
+           aria-label="Search categories"
+           placeholder="Search {{ picker.pickable_count }} categories">
+  </span>
+
+  <div class="catpicker-chips {% if picker_columns == 4 %}catpicker-chips-4{% endif %}"
+       data-picker-chips
+       x-show="q.trim() === '' && !showAll">
+    {% for chip in picker.chips %}
+      <button type="button"
+              class="catchip"
+              data-chip="{{ chip.number }}"
+              data-cat-id="{{ chip.category.id }}"
+              data-label="{{ chip.category.label }}"
+              data-test="{{ chip.category.test }}"
+              :class="pickedCategory() === {{ chip.category.id }} ? 'is-on' : ''"
+              @mouseenter="hoverFrom($el)"
+              @mouseleave="hoverClear()"
+              @focus="hoverFrom($el)"
+              @blur="hoverClear()"
+              @click="pickCategory({{ chip.category.id }}, $el.dataset.label)">
+        <span class="catchip-icon">{{ icon(chip.category.icon or "tag", 15) }}</span>
+        <span class="catchip-label">{{ chip.category.label }}</span>
+        {% if picker_keys %}<span class="catchip-key">{{ chip.number }}</span>{% endif %}
+      </button>
+    {% endfor %}
+  </div>
+
+  <div class="catpicker-disclosure" x-show="q.trim() === '' && !showAll">
+    <button type="button" class="tlink" data-picker-more @click="showAll = true">
+      {{ icon("chevron-down", 14) }}The other {{ picker.other_count }}
+    </button>
+    <span class="catpicker-disclosure-note">Top eight by your last 12 months</span>
+  </div>
+
+  <div class="catpicker-list" data-picker-list x-show="q.trim() !== '' || showAll" x-cloak>
+    {% for group in picker.groups %}
+      {% if group.categories %}
+        <span class="teyebrow catgroup-eyebrow" x-show="q.trim() === ''">{{ group.label }}</span>
+        {% for category in group.categories %}
+          <button type="button"
+                  class="catrow"
+                  data-picker-item="{{ category.id }}"
+                  data-cat-id="{{ category.id }}"
+                  data-label="{{ category.label }}"
+                  data-test="{{ category.test }}"
+                  data-search="{{ (category.label ~ ' ' ~ category.test) | lower }}"
+                  x-show="matches($el.dataset.search)"
+                  :class="pickedCategory() === {{ category.id }} ? 'is-on' : ''"
+                  @mouseenter="hoverFrom($el)"
+                  @mouseleave="hoverClear()"
+                  @click="pickCategory({{ category.id }}, $el.dataset.label)">
+            <span class="catrow-icon">{{ icon(category.icon or "tag", 15) }}</span>
+            <span class="catrow-text">
+              <span class="catrow-label">{{ category.label }}</span>
+              <span class="catrow-test">{{ category.test }}</span>
+            </span>
+            <span class="catrow-kind">{{ group.label }}</span>
+          </button>
+        {% endfor %}
+      {% endif %}
+    {% endfor %}
+    {# E8: point at the tests, because that is what the search also reads. #}
+    <span class="catpicker-nomatch" x-show="noMatch()" x-cloak>
+      Nothing matches “<span x-text="q"></span>”. All {{ picker.pickable_count }}
+      are here — try the test rather than the name.
+    </span>
+  </div>
+
+  {# E5/E6: the test of whatever is hovered or chosen, in a strip whose
+     44px are reserved so hovering a chip cannot shift the layout. #}
+  <div class="catpicker-test" data-picker-test :class="shownTest() ? 'is-showing' : ''">
+    <template x-if="shownTest()">
+      <span class="catpicker-test-icon">{{ icon("scale", 13) }}</span>
+    </template>
+    <span class="catpicker-test-text" x-show="shownTest()" x-cloak>
+      <strong x-text="shownLabel()"></strong> — <span x-text="shownTest()"></span>
+    </span>
+  </div>
+</div>

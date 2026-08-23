@@ -26,13 +26,23 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from finances.format import fmt_date, fmt_money, fmt_month, fmt_number
+from finances.format import (
+    fmt_date,
+    fmt_date_short,
+    fmt_money,
+    fmt_month,
+    fmt_native,
+    fmt_number,
+    fmt_usd,
+)
 from finances.web.auth import BearerTokenMiddleware
 from finances.web.errors import install_exception_handlers
 from finances.web.routers import api as api_router
 from finances.web.routers import pages as pages_router
 from finances.web.routers import partials as partials_router
 from finances.web.settings import WebSettings
+from finances.web.services.triage_view import prov_chip
+from finances.web.urls import modal_url_for
 
 WEB_PACKAGE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = WEB_PACKAGE_DIR / "static"
@@ -139,6 +149,22 @@ def create_app(settings: WebSettings) -> FastAPI:
             "fmt_money": fmt_money,
             "fmt_date": fmt_date,
             "fmt_month": fmt_month,
+            # Triage redesign (Wave 2). fmt_usd/fmt_native render SIGNAL's
+            # money pair — U+2212, sign before symbol, an explicit "+" on a
+            # credit — and fmt_date_short the queue's 64px date column.
+            "fmt_date_short": fmt_date_short,
+            "fmt_native": fmt_native,
+            "fmt_usd": fmt_usd,
+        }
+    )
+    # Globals rather than filters: both take keyword arguments and read
+    # more like the components they stand for. ``prov_chip`` is the one
+    # place that decides how a rate tier is drawn (D2/D3); ``modal_url_for``
+    # is how a row knows which dialog opens it.
+    app.state.templates.env.globals.update(
+        {
+            "prov_chip": prov_chip,
+            "modal_url_for": modal_url_for,
         }
     )
 

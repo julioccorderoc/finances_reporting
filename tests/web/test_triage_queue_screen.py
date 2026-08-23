@@ -321,7 +321,7 @@ def test_a_priced_row_shows_usd_over_its_native_amount(
     row = _row_html(_page(web_client_factory), "txn:1")
 
     assert "−$100.00" in row
-    assert "−Bs. 16,000.00" in row
+    assert "−Bs.\u00a016,000.00" in row
 
 
 def test_a_credit_is_ink_with_a_plus_never_a_colour(
@@ -355,7 +355,9 @@ def test_a_native_usd_row_carries_no_chip_at_all(
     row = _row_html(_page(web_client_factory), "txn:9")
 
     assert "data-prov=" not in row
-    assert "native" not in row
+    assert "prov-" not in row
+    # The old viewer stamped a "native" badge on these rows. It is gone.
+    assert ">native<" not in row
 
 
 def test_an_approximate_row_is_marked_and_toned_as_a_warning(
@@ -420,7 +422,7 @@ def test_a_row_that_cannot_be_priced_says_unpriced_in_the_list(
     row = _row_html(_page(web_client_factory), "txn:1")
 
     assert "Unpriced" in row
-    assert "−Bs. 9,000.00" in row
+    assert "−Bs.\u00a09,000.00" in row
     assert "data-prov=" not in row
 
 
@@ -518,12 +520,14 @@ def test_the_bulk_sheet_says_what_it_leaves_alone(
     web_client_factory: Callable[[], TestClient],
 ) -> None:
     """G4 — already-categorised rows in the selection are not touched."""
-    body = _page(web_client_factory)
+    with web_client_factory() as client:
+        body = client.get("/_partial/triage/bulk-sheet").text
 
     assert (
         "Rows in the selection that already have a category are left alone."
         in body
     )
+    assert "data-picker-chips" in body
 
 
 def test_the_parked_sheet_carries_a_real_calendar_picker(
@@ -531,7 +535,8 @@ def test_the_parked_sheet_carries_a_real_calendar_picker(
     web_client_factory: Callable[[], TestClient],
 ) -> None:
     """F4 — never a dropdown of days, never free text."""
-    body = _page(web_client_factory)
+    with web_client_factory() as client:
+        body = client.get("/_partial/triage/parked").text
 
     assert 'type="date"' in body
     assert "Park uncategorised rows before" in body
@@ -543,7 +548,8 @@ def test_the_parked_sheet_shows_a_sample_and_the_note(
     triage_web_db: sqlite3.Connection,
     web_client_factory: Callable[[], TestClient],
 ) -> None:
-    body = _page(web_client_factory)
+    with web_client_factory() as client:
+        body = client.get("/_partial/triage/parked").text
 
     assert "A FEW OF THEM" in body
     assert "PAGO MOVIL 04141234567" in body

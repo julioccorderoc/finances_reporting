@@ -41,12 +41,14 @@ from finances.web.routers._tx_filter_dep import filter_from_query
 from finances.web.services.category_stats import top_categories
 from finances.web.services.dashboard import build_sync_status
 from finances.web.services import uploads as uploads_svc
+from finances.web.services.categories_view import picker_payload
 from finances.web.services.pairing import find_pair_candidates
 from finances.web.services.transactions_query import _project_card
 from finances.web.services.transactions_write import (
     TransactionEditRequest,
     apply_edit,
 )
+from finances.web.services.triage_view import build_screen
 from finances.web.services.triage import (
     TriageItem,
     TriageType,
@@ -582,6 +584,13 @@ def transactions_edit_partial(
 
 
 def _parse_triage_type_partial(value: str | None) -> TriageType | None:
+    """Kept for the advance path's internal signature only.
+
+    The redesigned queue has no filter chips: rows are grouped by what is
+    wrong with them, and the run walks every group. The parameter survives
+    on the write endpoints because ``next_item_after`` needs both queues
+    built the same way, and an unfiltered queue is still a queue.
+    """
     if value in (None, "", "all"):
         return None
     try:
@@ -590,48 +599,67 @@ def _parse_triage_type_partial(value: str | None) -> TriageType | None:
         return None
 
 
-def _render_queue_partial(
-    request: Request,
-    conn: sqlite3.Connection,
-    *,
-    type_filter: TriageType | None = None,
-):
-    """Render only the inner queue list (pairs with hx-target=#triage-queue).
+def _render_queue_partial(request: Request, conn: sqlite3.Connection):
+    """Render the queue screen's body — the target of every swap here.
 
-    ``type_filter`` must be threaded through by the caller — it must NOT be
-    hardcoded to ``None`` here. The filter-chip UI and the URL (via
-    ``hx-push-url``) may already reflect an active type filter; a
-    hardcoded ``None`` would silently swap in the unfiltered queue,
-    contradicting both. ``active_filter`` is passed to the template so
-    nested card/modal partials can carry the same filter forward on their
-    own save/park/confirm actions (Task 4 §3).
-
-    Since ADR-012 Amendment 2026-07-26 the callers are the filter chips,
-    ``unpark``, and the deferred ``queueDirty`` refresh fired when the
-    modal closes. Save/park/pair-confirm no longer render the queue at
-    all — they answer with the next item's modal.
+    The page header, the counts, the integrity banner, the three groups,
+    the parked strip and the empty state are all inside it. A count
+    rendered in the page shell is written once, by the full page load, and
+    is stale from the first save onward.
     """
-    queue = build_queue(conn, type_filter=type_filter)
     templates = request.app.state.templates
     return templates.TemplateResponse(
         request,
         "partials/triage_queue.html",
-        {
-            "queue": queue,
-            "active_filter": type_filter.value if type_filter is not None else None,
-        },
+        {"screen": build_screen(conn)},
     )
 
 
 @router.get("/triage/queue", include_in_schema=False)
 def triage_queue_partial(
     request: Request,
-    type_filter: str | None = Query(default=None),
     conn: sqlite3.Connection = Depends(get_conn),
 ):
-    """Return the queue partial — used by filter chips + post-save refresh."""
-    parsed = _parse_triage_type_partial(type_filter)
-    return _render_queue_partial(request, conn, type_filter=parsed)
+    """The queue, re-read. Called on modal close, and after a list write."""
+    return _render_queue_partial(request, conn)
+
+
+@router.get("/triage/parked", include_in_schema=False)
+def triage_parked_sheet_partial(
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """The parked sheet, built when it opens rather than at page load.
+
+    Its count, its sample and the oldest row it names all move as the
+    sitting goes on; a sheet baked into the page shell would show the
+    numbers from whenever the page was opened.
+    """
+    templates = request.app.state.templates
+    return templates.TemplateResponse(
+        request,
+        "partials/triage_sheet_parked.html",
+        {"screen": build_screen(conn)},
+    )
+
+
+@router.get("/triage/bulk-sheet", include_in_schema=False)
+def triage_bulk_sheet_partial(
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """The bulk sort sheet: the picker at four columns, number keys off.
+
+    Which rows it will touch is decided in the browser, from the
+    selection and each row's ``data-needs-category`` — the selection only
+    ever lives there (G4).
+    """
+    templates = request.app.state.templates
+    return templates.TemplateResponse(
+        request,
+        "partials/triage_sheet_bulk.html",
+        {"picker": picker_payload(conn)},
+    )
 
 
 def _modal_url_for(item: TriageItem, type_filter: str | None) -> str:
@@ -1085,9 +1113,8 @@ def triage_unpark_partial(
     Unlike park, this is triggered from the list itself with no modal
     open, so it stays a queue swap.
     """
-    parsed = _parse_triage_type_partial(type_filter)
     _set_parked(conn, txn_id, parked=False)
-    return _render_queue_partial(request, conn, type_filter=parsed)
+    return _render_queue_partial(request, conn)
 
 
 # ---------------------------------------------------------------------------

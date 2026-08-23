@@ -65,6 +65,79 @@ def fmt_money(
     return f"{symbol}{number}"
 
 
+#: The typographic minus (U+2212), not the hyphen a keyboard produces. It
+#: is the width of a plus and sits on the digit baseline, which is why the
+#: design specifies it for every figure on the triage surface (D11).
+MINUS = "−"
+
+#: ``Bs.`` and its amount are one token and must not break across a line.
+NBSP = " "
+
+#: Currencies whose ticker follows the figure instead of leading it.
+_SUFFIX_CURRENCIES = ("USDT", "USDC")
+
+
+def _signed(number: str, *, signed: bool) -> tuple[str, str]:
+    """Split ``fmt_number`` output into (sign glyph, digits)."""
+    if number.startswith("-"):
+        return MINUS, number[1:]
+    if signed and any(ch in "123456789" for ch in number):
+        return "+", number
+    return "", number
+
+
+def fmt_usd(
+    value: Decimal | float | int | None,
+    *,
+    signed: bool = False,
+    places: int = 2,
+) -> str:
+    """``−$1,200.00`` / ``+$18.40`` — the SIGNAL dollar figure.
+
+    Three differences from :func:`fmt_money`, all of them design
+    decisions rather than taste (README §"Money", criteria D11 and I2):
+
+    * the minus is U+2212, not an ASCII hyphen;
+    * ``signed=True`` prefixes a credit with ``+``, because positive
+      money is rendered in ink and needs the sign to read as a credit —
+      colouring it green (or red) is what this system refuses to do;
+    * zero is never signed.
+
+    ``fmt_money`` keeps the ASCII form: the transactions, monthly and
+    accounts pages, the static report, the CSV export and the CLI all
+    render through it, and none of them is being redesigned here.
+    """
+    if value is None:
+        return EM_DASH
+    sign, digits = _signed(fmt_number(value, places), signed=signed)
+    return f"{sign}${digits}"
+
+
+def fmt_native(
+    value: Decimal | float | int | None,
+    currency: str,
+    *,
+    signed: bool = False,
+    places: int = 2,
+) -> str:
+    """The amount as the account holds it: ``Bs. 45,231.10``, ``277.90 USDT``.
+
+    The second line of the money block, under the consolidated dollar
+    figure. Bolívares lead with ``Bs.`` and a non-breaking space; USDT
+    and USDC trail their ticker; everything else is a dollar figure.
+    """
+    if value is None:
+        return EM_DASH
+    ticker = (currency or "").upper()
+    if ticker in _SUFFIX_CURRENCIES:
+        sign, digits = _signed(fmt_number(value, places), signed=signed)
+        return f"{sign}{digits}{NBSP}{ticker}"
+    if ticker == "VES":
+        sign, digits = _signed(fmt_number(value, places), signed=signed)
+        return f"{sign}Bs.{NBSP}{digits}"
+    return fmt_usd(value, signed=signed, places=places)
+
+
 def fmt_date(
     value: date | datetime | str | None,
     today: date | None = None,
@@ -180,10 +253,14 @@ def clean_merchant(raw: str | None) -> str | None:
 
 __all__ = [
     "EM_DASH",
+    "MINUS",
+    "NBSP",
     "clean_merchant",
     "fmt_date",
     "fmt_date_short",
     "fmt_money",
     "fmt_month",
+    "fmt_native",
     "fmt_number",
+    "fmt_usd",
 ]

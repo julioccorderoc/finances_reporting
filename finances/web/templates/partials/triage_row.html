@@ -1,0 +1,87 @@
+{# One queue row.
+
+   Inputs:
+     item   TriageItem (services/triage.py)
+     group  TriageGroup — used only to suppress the Category badge inside
+            *Needs a category*, where it repeats the heading.
+
+   Grid: 26px 64px minmax(0,1fr) 138px 138px 186px 26px, 12px gap, 44px
+   min-height, 32px horizontal padding, hairline between rows (A10). Long
+   strings ellipsise; nothing wraps and nothing reflows the grid.
+
+   A pair row has no transaction of its own, so it renders the deposit leg
+   — the bank side, which is the one the owner recognises.
+#}
+{% from "_triage.html" import money, issues, guess_title %}
+{% from "_icons.html" import icon %}
+
+{% set card = item.txn_card if item.txn_card is not none else item.pair_proposal.deposit %}
+{% set modal_url = modal_url_for(item) %}
+
+<div class="triage-row"
+     data-triage-row
+     data-item-id="{{ item.item_id }}"
+     data-modal-url="{{ modal_url }}"
+     data-needs-category="{{ 'true' if item.needs.cat else 'false' }}"
+     {% if item.txn_card is not none %}data-txn-id="{{ card.id }}"{% endif %}
+     :class="rowClasses('{{ item.item_id }}')">
+  <div class="triage-row-grid">
+    <input type="checkbox"
+           class="tcheck"
+           data-row-select
+           value="{{ item.item_id }}"
+           aria-label="Select {{ card.description }}"
+           :checked="isSelected('{{ item.item_id }}')"
+           @change="toggleRow('{{ item.item_id }}')">
+
+    <span class="triage-row-date">{{ card.occurred_at | fmt_date_short }}</span>
+
+    <button type="button"
+            class="triage-row-open"
+            hx-get="{{ modal_url }}"
+            hx-target="#triage-modal-host"
+            hx-swap="innerHTML"
+            @click="openId = '{{ item.item_id }}'">
+      <span class="triage-row-name">{{ item.merchant or card.description }}</span>
+      {%- if item.merchant %}
+      <span class="triage-row-raw">{{ card.description }}</span>
+      {%- endif %}
+    </button>
+
+    <span class="triage-row-account">
+      {{ item.account.name if item.account else card.account_name }}
+      {%- if item.account and item.account.detail %}<span class="triage-row-account-detail"> · {{ item.account.detail }}</span>{% endif %}
+    </span>
+
+    <span class="triage-row-verdict">
+      {%- if item.needs.cat and item.guess %}
+      {# G6: one click resolves the row, no modal. The category is the
+         server's own guess, echoed back so the write is explicit. #}
+      <button type="button"
+              class="triage-guess"
+              data-accept-guess
+              data-category-id="{{ item.guess.category_id }}"
+              title="{{ guess_title(item.guess) }}"
+              hx-post="/_partial/triage/{{ card.id }}/accept-guess"
+              hx-vals='{"category_id": {{ item.guess.category_id }}}'
+              hx-target="#triage-queue"
+              hx-swap="innerHTML">
+        {{ icon("check", 11) }}<span class="triage-guess-label">{{ item.guess.label }}</span>
+      </button>
+      {%- else %}
+      {{ issues(item.needs, hide_category=(group.bucket == 0)) }}
+      {%- endif %}
+    </span>
+
+    <span class="triage-row-money">{{ money(card, size="sm") }}</span>
+
+    <button type="button"
+            class="ticon"
+            aria-label="Open this row"
+            hx-get="{{ modal_url }}"
+            hx-target="#triage-modal-host"
+            hx-swap="innerHTML"
+            @click="openId = '{{ item.item_id }}'">{{ icon("maximize-2", 14) }}</button>
+  </div>
+</div>
+<!-- /triage-row -->

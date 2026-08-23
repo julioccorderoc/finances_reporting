@@ -1,0 +1,49 @@
+{# Bulk sort sheet — one category onto the rows in the selection that
+   actually need one.
+
+   Fin.Sheet at size md (560 × 520, fixed height, body scrolls). The
+   picker runs at four columns with the number keys off: 1-8 are the
+   modal's shortcuts, and this sheet is not the modal.
+
+   The count in the title and the button is the BULK TARGET count, not the
+   selection size: rows in the selection that already have a category are
+   left alone, and the description says so (G4). It is computed in the
+   browser from ``data-needs-category`` on each row, because the selection
+   itself only ever lives there.
+
+   Inputs:
+     picker  PickerPayload
+#}
+{% from "_icons.html" import icon %}
+
+<div class="tover"
+     data-triage-sheet="bulk"
+     @click.self="closeSheet()"
+     @keydown.escape.window="closeSheet()">
+  <div class="tsheet" role="dialog" aria-modal="true" aria-label="Sort rows at once">
+    <header class="tsheet-header">
+      <div class="tsheet-header-text">
+        <h2 class="tsheet-title">Sort <span x-text="bulkTargets().length"></span> rows at once</h2>
+        <p class="tsheet-description">Rows in the selection that already have a category are left alone.</p>
+      </div>
+      <button type="button" class="ticon" aria-label="Close" @click="closeSheet()">{{ icon("x", 14) }}</button>
+    </header>
+
+    <div class="tsheet-body">
+      {% with picker_columns = 4, picker_keys = False %}
+        {% include "partials/triage_catpicker.html" %}
+      {% endwith %}
+    </div>
+
+    <footer class="tsheet-footer">
+      <button type="button" class="tbtn tbtn-ghost" @click="closeSheet()">Cancel</button>
+      <button type="button"
+              class="tbtn tbtn-primary"
+              data-bulk-apply
+              :disabled="bulkCat === null"
+              @click="applyBulkCategory()">
+        {{ icon("check", 16) }}Sort <span x-text="bulkTargets().length"></span> rows
+      </button>
+    </footer>
+  </div>
+</div>

@@ -27,6 +27,8 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict
 
 from finances import config
+from finances.domain import money
+from finances.domain import rates as rates_engine
 from finances.domain import transfers as transfers_domain
 from finances.format import fmt_date_short, fmt_number
 from finances.web.services.categories_view import PickerPayload, picker_payload
@@ -82,6 +84,97 @@ GROUPS: tuple[TriageGroup, ...] = (
         collapsed=True,
     ),
 )
+
+
+class ProvChip(BaseModel):
+    """The provenance chip beside a native amount (criteria D2, D3, D4).
+
+    The chip is the whole point of showing a bolívar figure at all: a
+    BCV-priced row and a realized-rate row are not the same claim, and
+    the design refuses to let them look alike.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    source: str
+    """The full ``rate_source``, suffixes and all — it is the chip's
+    ``data-prov`` attribute, so a test can read the tier off the DOM."""
+    label: str
+    tone: str
+    """``trusted`` / ``quiet`` / ``warn`` — the three treatments in the
+    README's table, and the CSS class suffix."""
+    approximate: bool
+    warn_icon: bool
+    """``triangle-alert`` on a BCV fallback. An approximate figure wears
+    the ``≈`` instead: two marks would say the same thing twice."""
+
+    @property
+    def tone_class(self) -> str:
+        """``prov-warn``. Built here, not interpolated in the template.
+
+        A class name half-written in Jinja is invisible to the stylesheet
+        guard (tests/web/test_template_css_classes.py), which is the one
+        thing standing between a typo'd class and an unstyled element that
+        every server-side test calls fine."""
+        return f"prov-{self.tone}"
+
+
+#: Short tier labels, keyed by the base source (suffixes stripped).
+_CHIP_LABELS: dict[str, str] = {
+    rates_engine.USER_RATE_SOURCE: "yours",
+    rates_engine.REALIZED_SOURCE: "realized",
+    rates_engine.BINANCE_P2P_SOURCE: "median",
+    rates_engine.BCV_SOURCE: "BCV",
+}
+
+#: Which treatment each tier gets. BCV is a warning because it is the
+#: official floor rather than a price anyone traded at (ADR-005).
+_CHIP_TONES: dict[str, str] = {
+    rates_engine.USER_RATE_SOURCE: "trusted",
+    rates_engine.REALIZED_SOURCE: "trusted",
+    rates_engine.BINANCE_P2P_SOURCE: "quiet",
+    rates_engine.BCV_SOURCE: "warn",
+}
+
+#: Tiers that explain nothing and therefore render no chip: a dollar
+#: priced at one dollar (D3), and a row that has no dollar figure at all
+#: — the money block already says ``Unpriced`` in words (D5).
+_CHIPLESS_SOURCES = frozenset(
+    {
+        money.NATIVE_USD_SOURCE,
+        rates_engine.NEEDS_REVIEW_SOURCE,
+    }
+)
+
+
+def prov_chip(
+    source: str,
+    *,
+    is_bcv_fallback: bool,
+    approximate: bool,
+) -> ProvChip | None:
+    """Build the chip for one row's rate source, or ``None`` for no chip.
+
+    Every input is carried per-row by the payload (K3); nothing here
+    infers provenance, it only decides how the tier is drawn.
+    """
+    if source in _CHIPLESS_SOURCES:
+        return None
+    base = source.removesuffix(rates_engine.CARRY_SUFFIX).removesuffix(
+        rates_engine.NEAREST_SUFFIX
+    )
+    tone = _CHIP_TONES.get(base, "quiet")
+    if approximate:
+        # An approximation is a warning whatever tier produced it: the
+        # figure is outside every window the chain would accept.
+        tone = "warn"
+    return ProvChip(
+        source=source,
+        label=_CHIP_LABELS.get(base, base),
+        tone=tone,
+        approximate=approximate,
+        warn_icon=is_bcv_fallback and not approximate,
+    )
 
 
 class IntegrityBanner(BaseModel):
@@ -266,8 +359,10 @@ __all__ = [
     "PARKED_NOTE",
     "PARKED_SAMPLE_SIZE",
     "IntegrityBanner",
+    "ProvChip",
     "ParkedPanel",
     "TriageGroup",
     "TriageScreen",
     "build_screen",
+    "prov_chip",
 ]

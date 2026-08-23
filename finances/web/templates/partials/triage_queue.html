@@ -1,102 +1,148 @@
-{# Triage queue list — included from /triage and served standalone via
-   GET /_partial/triage/queue for HTMX swaps (filter chip, post-save
-   refresh).
+{# The queue screen's body — everything that must stay truthful across a
+   swap, and nothing that must survive one.
+
+   Served standalone from GET /_partial/triage/queue and included by
+   pages/triage.html. #triage-queue is the target of every swap on this
+   screen, so the page header, the counts, the banner, the groups, the
+   parked strip and the empty state all live INSIDE it. A count rendered
+   in the page shell is written once, by the full page load, and is stale
+   from the first save onward.
+
+   What deliberately stays OUTSIDE, in the page shell: the modal host, the
+   selection bar and the sheet host. Selection survives a swap because it
+   lives in the page's Alpine scope, and an open sheet must not be torn
+   down by a queue refresh happening behind it.
 
    Inputs:
-     queue          TriageQueue (services/triage.py)
-     active_filter  str | None — the currently-applied type_filter, so
-                    save/park/unpark actions triggered from inside this
-                    partial can carry it forward (Task 4 §3).
-
-   The filter chips and every count live INSIDE this partial (not the page
-   shell) so they stay truthful across every htmx swap that targets
-   #triage-queue — chip click, unpark, and the deferred queueDirty refresh
-   fired when a triage run ends. A count rendered in the shell is written
-   once, by the full page load, and is stale from the first save onward.
-
-   The per-type counts come from queue.counts and the "All" count from
-   queue.total, both computed on the UNFILTERED item set, so the chips
-   agree with each other while a type-filter chip is active. Only the
-   "Showing N of M" line reflects what is actually on screen.
-
-   data-active is display-only. The filter for the deferred refresh
-   travels in the queueDirty payload from the server; nothing reads it
-   back off the DOM (ADR-012 Amendment 2026-07-26 §3).
+     screen  TriageScreen (services/triage_view.py)
 #}
-<nav class="flex flex-wrap gap-2 mb-4 text-sm" data-triage-filter>
-  {% set chip_def = [
-      ("all", "All", queue.total),
-      ("rate", "Rates", queue.counts.get('rate', 0)),
-      ("category", "Categories", queue.counts.get('category', 0)),
-      ("pair", "Pairs", queue.counts.get('pair', 0)),
-  ] %}
-  {% for value, label, n in chip_def %}
-    {% set is_active = (active_filter == value) or (active_filter is none and value == 'all') %}
-    {# Stable id: the chip that fires the swap is inside the swapped
-       region, so htmx destroys it mid-click. htmx restores focus to the
-       element carrying the same id, which keeps keyboard use working. #}
-    <button
-      type="button"
-      id="triage-chip-{{ value }}"
-      class="px-3 py-1 border rounded
-             {% if is_active %}bg-slate-900 text-white border-slate-900{% else %}bg-white text-slate-700 border-slate-300 hover:bg-slate-50{% endif %}"
-      data-filter-chip="{{ value }}"
-      data-active="{{ 'true' if is_active else 'false' }}"
-      hx-get="/_partial/triage/queue{% if value != 'all' %}?type_filter={{ value }}{% endif %}"
-      hx-target="#triage-queue"
-      hx-push-url="true"
-      hx-swap="innerHTML"
-    >
-      {{ label }} ({{ n }})
-    </button>
-  {% endfor %}
-</nav>
-<div class="flex flex-wrap gap-x-4 gap-y-1 mb-3 text-sm text-slate-600" data-triage-bucket-header>
-  {% if active_filter %}
-    <span>Showing {{ queue.items | length }} of {{ queue.total }} items</span>
-  {% else %}
-    <span>{{ queue.total }} items</span>
-  {% endif %}
-  {# Bucket order since the triage redesign: 0 category, 1 pairs, 2 priced
-     roughly. The counts come from the payload's own named fields so the
-     header cannot drift from the buckets it labels. #}
-  <span>Needs a category &middot; {{ queue.category_count }}</span>
-  <span>Proposed pairs &middot; {{ queue.pair_count }}</span>
-  <span>Priced roughly &middot; {{ queue.approximate_count }}</span>
-  <span>Parked &middot; {{ queue.parked_count }}</span>
-</div>
-<div class="cards" data-triage-queue>
-  {% if queue.parked_items %}
-    <details data-parked-group class="parked-group mb-4">
-      <summary class="parked-group-summary">Parked &middot; {{ queue.parked_count }}</summary>
-      <div class="cards mt-2">
-        {% for item in queue.parked_items %}
-          {% include "partials/triage_card_txn.html" %}
-          <div class="parked-row-actions">
-            <button
-              type="button"
-              class="text-xs text-blue-700 hover:underline"
-              data-unpark-btn
-              hx-post="/_partial/triage/{{ item.txn_card.id }}/unpark{% if active_filter %}?type_filter={{ active_filter }}{% endif %}"
-              hx-target="#triage-queue"
-              hx-swap="innerHTML"
-            >
-              Unpark
-            </button>
-          </div>
-        {% endfor %}
-      </div>
-    </details>
-  {% endif %}
-  {% if queue.items %}
-    {% for item in queue.items %}
-      {% if item.type.value == 'pair' %}
-        {% include "partials/triage_card_pair.html" %}
-      {% else %}
-        {% include "partials/triage_card_txn.html" %}
+{% from "_icons.html" import icon %}
+
+<header class="triage-header">
+  <div class="triage-header-text">
+    <span class="triage-question">What still needs you?</span>
+    <h1 class="triage-answer">
+      {%- if screen.queue.blocking_count -%}
+        {{ screen.queue.blocking_count }} rows need you
+      {%- else -%}
+        Nothing needs you
+      {%- endif -%}
+    </h1>
+    <div class="triage-meta">
+      {% if screen.queue.category_count %}
+        <span class="tbadge">{{ screen.queue.category_count }} category</span>
       {% endif %}
-    {% endfor %}
-  {% else %}
-    {% include "partials/triage_empty.html" %}
-  {% endif %}
+      {% if screen.queue.pair_count %}
+        <span class="tbadge tbadge-info">{{ screen.queue.pair_count }} pairs</span>
+      {% endif %}
+      {% if screen.queue.approximate_count %}
+        <span class="tbadge tbadge-warning tbadge-dot">{{ screen.queue.approximate_count }} approximate rates</span>
+      {% endif %}
+      {# Live, never baked: this counts what THIS sitting resolved, and a
+         server render has no idea when the sitting started. #}
+      <span class="triage-sitting" data-sitting-done>· <span x-text="done"></span> done in this sitting</span>
+    </div>
+  </div>
+
+  <div class="triage-actions">
+    {% if screen.walk %}
+      <button type="button"
+              class="tbtn tbtn-sm tbtn-primary"
+              data-sort-all
+              title="{% if screen.queue.approximate_count %}{{ screen.queue.blocking_count }} that need you, then {{ screen.queue.approximate_count }} with approximate rates{% else %}{{ screen.queue.blocking_count }} in one run{% endif %}"
+              hx-get="{{ modal_url_for(screen.walk[0]) }}"
+              hx-target="#triage-modal-host"
+              hx-swap="innerHTML"
+              @click="openId = '{{ screen.walk[0].item_id }}'">
+        {{ icon("play", 14) }}Sort all {{ screen.walk | length }}
+      </button>
+    {% endif %}
+    {% if screen.parked.count %}
+      <button type="button"
+              class="tbtn tbtn-sm"
+              data-open-parked
+              hx-get="/_partial/triage/parked"
+              hx-target="#triage-sheet-host"
+              hx-swap="innerHTML">
+        {{ icon("archive", 14) }}Parked {{ screen.parked.count }}
+      </button>
+    {% endif %}
+  </div>
+</header>
+
+{% if screen.banner %}
+<div class="triage-banner-slot">
+  <div class="tbanner" role="status" data-integrity-warnings>
+    <span class="tbanner-icon">{{ icon("triangle-alert", 16) }}</span>
+    <div class="tbanner-body">
+      <strong class="tbanner-title">{{ screen.banner.title }}</strong>
+      <div class="tbanner-text">{{ screen.banner.body }}</div>
+    </div>
+  </div>
 </div>
+{% endif %}
+
+{% for group in screen.groups %}
+  <div class="triage-group"
+       data-group="{{ group.bucket }}"
+       data-collapsed="{{ 'true' if group.collapsed else 'false' }}"
+       :data-collapsed="isCollapsed({{ group.bucket }}) ? 'true' : 'false'">
+    <div class="triage-group-head">
+      <button type="button"
+              class="triage-group-toggle"
+              @click="toggleGroup({{ group.bucket }})"
+              :aria-expanded="isCollapsed({{ group.bucket }}) ? 'false' : 'true'">
+        <span class="triage-group-chevron" x-show="!isCollapsed({{ group.bucket }})">{{ icon("chevron-down", 15) }}</span>
+        <span class="triage-group-chevron" x-show="isCollapsed({{ group.bucket }})" x-cloak>{{ icon("chevron-right", 15) }}</span>
+        <span class="triage-group-label">{{ group.label }}</span>
+        <span class="triage-group-count">{{ group.items | length }}</span>
+      </button>
+      <span class="triage-group-hint">{{ group.hint }}</span>
+      <span class="triage-group-spacer"></span>
+      {# The ids ride in a data attribute rather than through ``tojson``:
+         tojson emits double quotes, which terminate the attribute and
+         truncate the expression, and every server-side test stays green
+         while the browser throws. #}
+      <button type="button"
+              class="tlink"
+              data-group-select
+              data-group-ids="{{ group.items | map(attribute='item_id') | join(',') }}"
+              x-show="!isCollapsed({{ group.bucket }})"
+              @click="toggleGroupSelection($el.dataset.groupIds.split(','))"
+              x-text="groupAllSelected($el.dataset.groupIds.split(',')) ? 'Clear these' : 'Select all {{ group.items | length }}'"
+      >Select all {{ group.items | length }}</button>
+    </div>
+    <div class="triage-group-rows" x-show="!isCollapsed({{ group.bucket }})">
+      {% for item in group.items %}
+        {% include "partials/triage_row.html" %}
+      {% endfor %}
+    </div>
+  </div>
+{% endfor %}
+
+{% if not screen.walk %}
+<div class="triage-empty" data-triage-empty>
+  {{ icon("check-check", 28) }}
+  <h2 class="triage-empty-headline">Queue empty.</h2>
+  <p class="triage-empty-body"><span x-text="done"></span> rows sorted in this sitting. The next Provincial statement will start the next one.</p>
+</div>
+{% endif %}
+
+{% if screen.parked.count %}
+<div class="triage-parked-strip" data-parked-strip>
+  <span class="triage-parked-icon">{{ icon("archive", 17) }}</span>
+  <span class="triage-parked-body">
+    <span class="triage-parked-line">
+      <span class="triage-group-count">{{ screen.parked.count }}</span>
+      parked row{{ '' if screen.parked.count == 1 else 's' }}, out of the queue
+    </span>
+    <span class="triage-parked-note">{{ screen.parked.note }}</span>
+  </span>
+  <button type="button"
+          class="tbtn tbtn-sm tbtn-ghost"
+          data-open-parked
+          hx-get="/_partial/triage/parked"
+          hx-target="#triage-sheet-host"
+          hx-swap="innerHTML">Look at them</button>
+</div>
+{% endif %}

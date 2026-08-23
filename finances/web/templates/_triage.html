@@ -1,0 +1,106 @@
+{# Shared parts of the triage surface: the money pair, the provenance chip,
+   the issue badges and the merchant block.
+
+   These are the design's `Money`, `Prov`, `Issues` and `Merchant`
+   components (design_handoff_triage/README.md §"Shared components"),
+   rendered server-side. Every figure goes through finances.format so the
+   list, the modal and the sheets cannot disagree about a number.
+
+   Import-safe: no macro here reads the parent template's context.
+#}
+
+{% from "_icons.html" import icon %}
+
+
+{# --- Money ------------------------------------------------------------- #}
+
+{%- macro money(card, size="sm", align="right") -%}
+{#- The consolidated USD figure, with the native amount under it.
+
+    ``card`` is a TransactionCard. The provenance chip is decided by
+    ``prov_chip`` (a template global over services/triage_view), never by
+    the template: a native-USD row explains nothing, and a row with no
+    dollar figure already says so in words. -#}
+{%- set chip = prov_chip(card.rate_source, is_bcv_fallback=card.is_bcv_fallback, approximate=card.approximate) -%}
+<span class="tmoney {% if align == 'left' %}tmoney-left{% endif %} {% if size == 'lg' %}tmoney-lg{% endif %}">
+  {%- if card.amount_usd is not none -%}
+    <span class="tmoney-usd">{{ card.amount_usd | fmt_usd(signed=True) }}</span>
+  {%- elif size == "lg" -%}
+    <span class="tmoney-unpriced">{{ icon("circle-slash", 17) }}Can't be priced</span>
+  {%- else -%}
+    <span class="tmoney-unpriced">Unpriced</span>
+  {%- endif -%}
+  <span class="tmoney-native-line">
+    <span class="tmoney-native">{{ card.amount_native | fmt_native(card.currency) }}</span>
+    {%- if chip %}{{ prov(chip, card.rate, show_rate=(size != "sm")) }}{% endif -%}
+  </span>
+</span>
+{%- endmacro -%}
+
+
+{# --- Prov -------------------------------------------------------------- #}
+
+{%- macro prov(chip, rate, show_rate=True) -%}
+{#- Where the number came from. A BCV-priced row and a realized-rate row
+    are not the same claim, so they do not share a treatment (D2). -#}
+<span class="prov {{ chip.tone_class }}"
+      data-prov="{{ chip.source }}"
+      title="{{ prov_title(chip, rate) }}">
+  {%- if chip.warn_icon %}{{ icon("triangle-alert", 10) }}{% endif -%}
+  {%- if chip.approximate %}≈{% endif %}{{ chip.label }}
+  {%- if show_rate and rate is not none %} <span class="prov-rate">{{ rate | fmt_number }}</span>{% endif -%}
+</span>
+{%- endmacro -%}
+
+
+{%- macro prov_title(chip, rate) -%}
+{#- The chip's tooltip. It carries the explanation the 10.5px label
+    cannot: which tier, and whether the figure is an approximation. -#}
+{%- if chip.approximate -%}
+Approximate — the nearest {{ chip.label }} rate, outside the 14-day window
+{%- elif chip.source.startswith("bcv") -%}
+BCV — the official floor, used because no P2P rate was in range
+{%- elif chip.source.startswith("binance_p2p_realized") -%}
+Your own cost basis from a P2P sell within 14 days
+{%- elif chip.source.startswith("binance_p2p_median") -%}
+14-day median of Binance P2P sells
+{%- elif chip.source == "user_rate" -%}
+The rate you typed for this row
+{%- else -%}
+{{ chip.label }}
+{%- endif -%}
+{%- if rate is not none %} · {{ rate | fmt_number }}{% endif -%}
+{%- endmacro -%}
+
+
+{# --- Issues ------------------------------------------------------------ #}
+
+{%- macro issues(needs, hide_category=False) -%}
+{#- What is wrong with this row. One row can carry two badges (A2); the
+    Category badge is suppressed inside *Needs a category*, where it would
+    only repeat the heading. -#}
+<span class="triage-issues">
+  {%- if needs.cat and not hide_category -%}
+    <span class="tbadge" data-issue="category">Category</span>
+  {%- endif -%}
+  {%- if needs.rate -%}
+    <span class="tbadge tbadge-warning tbadge-dot" data-issue="rate">Rate</span>
+  {%- endif -%}
+  {%- if needs.pair -%}
+    <span class="tbadge tbadge-info" data-issue="pair">Pair</span>
+  {%- endif -%}
+</span>
+{%- endmacro -%}
+
+
+{# --- Guess ------------------------------------------------------------- #}
+
+{%- macro guess_title(guess) -%}
+{#- G7: a guess cites its rule id and regex, or how many times this exact
+    bank string was filed there. Nothing else is evidence. -#}
+{%- if guess.rule_id is not none -%}
+Rule {{ guess.rule_id }} · /{{ guess.pattern }}/i
+{%- else -%}
+You sorted this here {{ guess.times }} times
+{%- endif -%}
+{%- endmacro -%}

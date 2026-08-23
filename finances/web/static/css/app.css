@@ -689,18 +689,30 @@
   pointer-events: none;         /* host never blocks clicks... */
 }
 
+/* SIGNAL's inverse surface (triage redesign): one ink rectangle, radius 4,
+ * 13px text. Success and error share it — a toast is a receipt, not a
+ * status light, and a second hue would be the only one on the screen. The
+ * error variant keeps a red hairline so a failure is not silent. */
 .toast {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   max-width: 22rem;
-  padding: 0.625rem 1rem;
-  border-radius: 0.5rem;
-  font-size: 0.875rem;
-  color: #ffffff;
-  box-shadow: 0 8px 24px -8px rgba(15, 23, 42, 0.4);
+  padding: 10px 14px;
+  border-radius: var(--radius-md, 4px);
+  font-size: 13px;
+  color: var(--text-inverse, #f5f5f3);
+  background: var(--surface-inverse, #131312);
+  box-shadow: var(--shadow-pop, 0 24px 48px -24px rgba(19, 19, 18, 0.34));
   pointer-events: auto;         /* ...but toasts themselves do */
 }
 
-.toast-success { background: #0f766e; }  /* teal-700 */
-.toast-error   { background: #be123c; }  /* rose-700 */
+.toast-success { background: var(--surface-inverse, #131312); }
+.toast-error {
+  background: var(--surface-inverse, #131312);
+  box-shadow: var(--shadow-pop, 0 24px 48px -24px rgba(19, 19, 18, 0.34)),
+    inset 0 0 0 1px var(--red-500, #e5231b);
+}
 
 /* Error toasts persist (a 4 s error is invisible mid-typing), so they need
  * a way out. Success toasts still fade and hide this. */

@@ -1,0 +1,86 @@
+{# The parked sheet: the durable "not now", and the two ways out of it.
+
+   Fin.Sheet geometry at size md — 560 × 520, fixed height, body scrolls.
+   Fetched on open (GET /_partial/triage/parked) so the count, the sample
+   and the oldest row are the ones that are true right now.
+
+   Inputs:
+     screen  TriageScreen
+#}
+{% from "_icons.html" import icon %}
+{% from "_triage.html" import money %}
+
+<div class="tover"
+     data-triage-sheet="parked"
+     @click.self="closeSheet()"
+     @keydown.escape.window="closeSheet()"
+     x-data="{ cutoff: '{{ screen.parked.cutoff.isoformat() }}' }">
+  <div class="tsheet" role="dialog" aria-modal="true" aria-label="Parked rows">
+    <header class="tsheet-header">
+      <div class="tsheet-header-text">
+        <h2 class="tsheet-title">{{ screen.parked.count }} parked row{{ '' if screen.parked.count == 1 else 's' }}</h2>
+        <p class="tsheet-description">Out of the queue, still in every balance and every report.</p>
+      </div>
+      <button type="button" class="ticon" aria-label="Close" @click="closeSheet()">{{ icon("x", 14) }}</button>
+    </header>
+
+    <div class="tsheet-body">
+      <div class="tfield">
+        <label class="tfield-label" for="park-cutoff">Park uncategorised rows before</label>
+        {# A real calendar picker, never a dropdown of days and never free
+           text (F4). Pre-filled with the current cutoff. #}
+        <span class="tinput">
+          <input id="park-cutoff"
+                 type="date"
+                 name="before"
+                 data-park-cutoff
+                 value="{{ screen.parked.cutoff.isoformat() }}"
+                 x-model="cutoff">
+        </span>
+        <span class="tfield-hint">
+          {%- if screen.parked.oldest -%}
+            The oldest one is {{ screen.parked.oldest | fmt_date }}
+          {%- else -%}
+            Nothing uncategorised is left to park
+          {%- endif -%}
+        </span>
+      </div>
+
+      {% if screen.parked.sample %}
+      <div class="tfield">
+        <span class="teyebrow">A FEW OF THEM</span>
+        <div class="tsample">
+          {% for item in screen.parked.sample %}
+            {% set card = item.txn_card %}
+            <div class="tsample-row">
+              <span class="tsample-date">{{ card.occurred_at | fmt_date_short }}</span>
+              <span class="tsample-raw" title="{{ card.description }}">{{ card.description }}</span>
+              <span class="tsample-amount">{{ card.amount_native | fmt_native(card.currency) }}</span>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
+      <span class="tfield-hint">Their money still counts everywhere. Re-importing a statement will not push them back into the queue, and every badge they were carrying is still on them when you come back.</span>
+    </div>
+
+    <footer class="tsheet-footer">
+      <button type="button"
+              class="tbtn tbtn-ghost"
+              data-unpark-all
+              hx-post="/_partial/triage/unpark-all"
+              hx-target="#triage-queue"
+              hx-swap="innerHTML"
+              @click="closeSheet()">{{ icon("undo-2", 16) }}Bring back all {{ screen.parked.count }}</button>
+      <button type="button"
+              class="tbtn tbtn-primary"
+              data-park-before
+              hx-post="/_partial/triage/park-before"
+              hx-include="[data-park-cutoff]"
+              hx-target="#triage-queue"
+              hx-swap="innerHTML"
+              @click="closeSheet()">Done</button>
+    </footer>
+  </div>
+</div>

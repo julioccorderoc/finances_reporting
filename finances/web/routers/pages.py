@@ -49,10 +49,7 @@ from finances.web.services.transactions_query import (
     TransactionsFilter,
     query_transactions,
 )
-from finances.web.services.triage import (
-    TriageType,
-    build_queue,
-)
+from finances.web.services.triage_view import build_screen
 
 router = APIRouter()
 
@@ -109,15 +106,6 @@ def shutdown_server() -> HTMLResponse:
     """
     threading.Timer(_SHUTDOWN_DELAY_SECONDS, lambda: _terminate()).start()
     return HTMLResponse(_GOODBYE_HTML)
-
-
-def _parse_triage_type(value: str | None) -> TriageType | None:
-    if value in (None, "", "all"):
-        return None
-    try:
-        return TriageType(value)
-    except ValueError:
-        return None
 
 
 @router.get("/", include_in_schema=False)
@@ -209,21 +197,22 @@ def accounts_page(
 @router.get("/triage", include_in_schema=False)
 def triage_page(
     request: Request,
-    type_filter: str | None = Query(default=None),
     conn: sqlite3.Connection = Depends(get_conn),
 ):
-    """Render the /triage page (unified queue + filter chips)."""
-    parsed = _parse_triage_type(type_filter)
-    queue = build_queue(conn, type_filter=parsed)
+    """Render /triage — the queue screen, and the shell the run lives in.
+
+    The page shell is deliberately thin: the modal host, the sheet host
+    and the selection bar, and nothing numeric. Every count lives inside
+    ``partials/triage_queue.html``, which is the target of every swap on
+    this screen — a number rendered out here is written once, by this
+    request, and is stale from the first save onward.
+    """
+    screen = build_screen(conn)
     templates = request.app.state.templates
     return templates.TemplateResponse(
         request,
         "pages/triage.html",
-        {
-            "title": "Triage",
-            "queue": queue,
-            "active_filter": parsed.value if parsed is not None else None,
-        },
+        {"title": "Triage", "screen": screen},
     )
 
 
