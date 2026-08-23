@@ -15,7 +15,13 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
-from finances.format import fmt_date, fmt_money, fmt_month, fmt_number
+from finances.format import (
+    fmt_date,
+    fmt_date_short,
+    fmt_money,
+    fmt_month,
+    fmt_number,
+)
 
 EM_DASH = "—"  # em dash "—" (the None placeholder)
 
@@ -179,3 +185,37 @@ def test_month_from_datetime() -> None:
 
 def test_month_none_em_dash() -> None:
     assert fmt_month(None) == EM_DASH
+
+
+# ---------------------------------------------------------------------------
+# fmt_date_short — the triage queue's 64px date column
+# ---------------------------------------------------------------------------
+
+
+def test_short_date_is_month_and_day() -> None:
+    assert fmt_date_short(date(2026, 7, 7), today=date(2026, 7, 20)) == "Jul 7"
+
+
+def test_short_date_never_carries_a_weekday() -> None:
+    """Bank rows have no time component and 204 of 243 live rows share a
+    timestamp, so a weekday carries no signal in the dense list."""
+    label = fmt_date_short(date(2026, 7, 7), today=date(2026, 7, 20))
+    assert "," not in label
+    assert "Tue" not in label
+
+
+def test_short_date_appends_a_two_digit_year_off_the_current_one() -> None:
+    assert fmt_date_short(date(2024, 11, 3), today=date(2026, 7, 20)) == "Nov 3 24"
+
+
+def test_short_date_accepts_a_datetime() -> None:
+    got = fmt_date_short(datetime(2026, 3, 2, 14, 30, tzinfo=UTC), today=date(2026, 7, 1))
+    assert got == "Mar 2"
+
+
+def test_short_date_accepts_an_iso_string() -> None:
+    assert fmt_date_short("2026-03-02T00:00:00", today=date(2026, 7, 1)) == "Mar 2"
+
+
+def test_short_date_none_em_dash() -> None:
+    assert fmt_date_short(None) == EM_DASH
