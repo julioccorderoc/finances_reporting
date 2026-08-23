@@ -16,11 +16,21 @@
  * content — never `fixed` — so the nav stays visible and unscrolled behind
  * the scrim (criterion B11). That needs a positioned ancestor, and this is
  * it. */
+/* The content area is the whole viewport under the nav, and the QUEUE
+ * scrolls inside it rather than the page scrolling under everything. Two
+ * things depend on that: the nav stays visible and unscrolled behind the
+ * scrim (B11), and the dialog is centred on the content area rather than
+ * on wherever the page happened to be scrolled to. */
+.triage-main {
+  display: block;
+}
+
 .triage-screen {
   position: relative;
   display: flex;
   flex-direction: column;
-  min-height: calc(100vh - 57px);
+  height: calc(100vh - 55px);
+  overflow: hidden;
   background: var(--surface-canvas);
   color: var(--text-primary);
   font-family: var(--font-sans);
@@ -29,6 +39,7 @@
 .triage-scroll {
   flex: 1;
   min-height: 0;
+  overflow-y: auto;
   padding-bottom: var(--space-8);
 }
 

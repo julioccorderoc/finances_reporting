@@ -820,7 +820,12 @@ def _render_modal(
             "total": total,
             "prev_url": None if prev_item is None else modal_url_for(prev_item),
             "next_url": None if next_item is None else modal_url_for(next_item),
-            "picker": picker_payload(conn),
+            # Scoped to the row's own kind: apply_edit refuses a category
+            # whose kind contradicts it, so an unscoped picker would put
+            # Salary on keyboard shortcut 2 of an expense row.
+            "picker": picker_payload(
+                conn, kind=txn.kind if txn is not None else None
+            ),
             "day_rates": day_rates,
         },
     )
@@ -1161,6 +1166,7 @@ def triage_park_before_partial(
 
     response = _render_queue_partial(request, conn)
     response.headers["HX-Trigger"] = _hx_trigger_json(
+        "triageCloseSheet",
         toast_message=(
             f"Parking everything uncategorised before {fmt_date(cutoff)}."
         ),
@@ -1184,6 +1190,7 @@ def triage_unpark_all_partial(
 
     response = _render_queue_partial(request, conn)
     response.headers["HX-Trigger"] = _hx_trigger_json(
+        "triageCloseSheet",
         toast_message=f"{restored} rows back in the queue — oldest first.",
     )
     return response

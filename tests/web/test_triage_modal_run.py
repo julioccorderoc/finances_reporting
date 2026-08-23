@@ -8,6 +8,7 @@ hand and reported separately.
 from __future__ import annotations
 
 import json
+import pathlib
 import re
 import sqlite3
 from collections.abc import Callable
@@ -647,3 +648,109 @@ def test_the_write_lands_in_the_edit_history(
         )
 
     assert edits_repo.list_for_transaction(triage_web_db, 1)
+
+
+# ---------------------------------------------------------------------------
+# What only a browser found (Wave 2 walkthrough, 2026-08-23).
+#
+# Three defects that every server-side assertion above was happy with. Each
+# is pinned here at the level the bug actually lived at, so the next edit
+# that reintroduces it fails in CI rather than in the middle of a sitting.
+# ---------------------------------------------------------------------------
+
+
+def test_the_sitting_counter_is_incremented_from_exactly_one_place(
+    triage_web_db: sqlite3.Connection,
+    web_client_factory: Callable[[], TestClient],
+) -> None:
+    """One save must count as one.
+
+    htmx dispatches every ``HX-Trigger`` key as a DOM event AND a
+    kebab-case alias of it, so ``triageResolved`` already arrives at the
+    page as ``triage-resolved``. base.html re-dispatched it as well, and
+    the counter went up by two per save.
+    """
+    base = (
+        pathlib.Path(__file__).resolve().parents[2]
+        / "finances"
+        / "web"
+        / "templates"
+        / "base.html"
+    ).read_text(encoding="utf-8")
+    page = (
+        pathlib.Path(__file__).resolve().parents[2]
+        / "finances"
+        / "web"
+        / "templates"
+        / "pages"
+        / "triage.html"
+    ).read_text(encoding="utf-8")
+
+    assert "triage-resolved" not in base
+    assert page.count("@triage-resolved.window") == 1
+
+
+def test_the_footer_button_is_the_forms_own_submit(
+    triage_web_db: sqlite3.Connection,
+    web_client_factory: Callable[[], TestClient],
+) -> None:
+    """The design puts the primary button in the footer, outside the form.
+
+    Associating it by ``form=`` keeps the save a real form submission —
+    which is what htmx binds to. The first version clicked a hidden
+    submit button from an Alpine handler instead, and the nested
+    activation silently did nothing: the button highlighted, the row
+    stayed, and no request was made.
+    """
+    with web_client_factory() as client:
+        html = client.get("/_partial/triage/1/modal").text
+
+    assert 'id="triage-decision-form"' in html
+    primary = re.search(r"<button[^>]*data-modal-primary[^>]*>", html)
+    assert primary is not None
+    assert 'type="submit"' in primary.group(0)
+    assert 'form="triage-decision-form"' in primary.group(0)
+    assert "data-modal-submit" not in html
+
+
+def test_a_sheet_action_closes_on_the_response_not_on_the_click(
+    triage_web_db: sqlite3.Connection,
+    web_client_factory: Callable[[], TestClient],
+) -> None:
+    """Closing the sheet in the click handler removes the button — and
+    the date field it includes — before htmx has sent anything, and htmx
+    abandons a request whose element is gone. Both writes looked like
+    they worked and neither did.
+    """
+    with web_client_factory() as client:
+        sheet = client.get("/_partial/triage/parked").text
+        cutoff = client.post(
+            "/_partial/triage/park-before", data={"before": "2030-01-01"}
+        )
+        unpark = client.post("/_partial/triage/unpark-all")
+
+    for control in ("data-park-before", "data-unpark-all"):
+        button = re.search(r"<button[^>]*" + control + r"[^>]*>", sheet)
+        assert button is not None
+        assert "closeSheet()" not in button.group(0)
+
+    for response in (cutoff, unpark):
+        assert "triageCloseSheet" in response.headers["HX-Trigger"]
+
+
+def test_the_picker_never_offers_a_category_the_save_would_refuse(
+    triage_web_db: sqlite3.Connection,
+    web_client_factory: Callable[[], TestClient],
+) -> None:
+    """Keyboard 2 on an expense row landed on Salary — a guaranteed 422.
+
+    The chips are ranked over usage across all kinds; scoping the whole
+    picker to the row's own kind is what makes every shortcut legal.
+    """
+    with web_client_factory() as client:
+        # txn:10 is the income row (ABONO P2P LEGACY).
+        income = client.get("/_partial/triage/10/modal").text
+        expense = client.get("/_partial/triage/2/modal").text
+
+    assert 'data-kind="expense"' not in income
+    assert 'data-kind="income"' not in expense

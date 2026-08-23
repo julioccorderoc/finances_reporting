@@ -29,6 +29,7 @@ from datetime import date
 from pydantic import BaseModel, ConfigDict
 
 from finances.db.repos import categories as categories_repo
+from finances.domain.models import TransactionKind
 from finances.domain.category_definitions import definition_for
 from finances.web.services.category_stats import top_categories
 
@@ -100,21 +101,37 @@ def _to_picker_category(category) -> PickerCategory:
 def picker_payload(
     conn: sqlite3.Connection,
     *,
+    kind: TransactionKind | None = None,
     today: date | None = None,
     chip_count: int = CHIP_COUNT,
     months: int = USAGE_MONTHS,
 ) -> PickerPayload:
     """Build the whole picker from the database and the definitions doc.
 
+    ``kind`` scopes the picker to one transaction kind. The modal passes
+    the row's own, because ``transactions_write.apply_edit`` refuses a
+    category whose kind contradicts it — the guard that exists because
+    the ledger had accumulated 65 such contradictions, six of them income
+    rows filed under ``Fees``. An unscoped picker on an expense row would
+    put ``Salary`` on keyboard shortcut 2: a 422 waiting for a keystroke.
+    The bulk sheet passes ``None``, having no single row to scope to.
+
+    Every count in the payload describes the SCOPED set, so "Search 17
+    categories" and "The other 9" are both true of what is on screen.
+
     ``today`` anchors the usage window (defaults to the wall clock);
     ``chip_count`` and ``months`` exist so the sheet variant and future
     tuning do not need a second function.
     """
-    pickable = [_to_picker_category(c) for c in categories_repo.list_pickable(conn)]
+    pickable = [
+        _to_picker_category(c)
+        for c in categories_repo.list_pickable(conn)
+        if kind is None or c.kind is kind
+    ]
     by_id = {c.id: c for c in pickable}
 
     ranked = top_categories(
-        conn, kind=None, limit=chip_count, months=months, chips_only=True, today=today
+        conn, kind=kind, limit=chip_count, months=months, chips_only=True, today=today
     )
     chips = tuple(
         PickerChip(number=index, category=by_id[category.id])

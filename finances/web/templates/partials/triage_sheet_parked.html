@@ -12,6 +12,11 @@
 
 <div class="tover"
      data-triage-sheet="parked"
+     {# The sheet closes on the RESPONSE, never on the click: closing it
+        here would remove the button (and the date field it includes)
+        mid-flight, and htmx abandons a request whose element is gone.
+        The server sends ``triageCloseSheet``, which htmx re-emits as the
+        kebab-case ``triage-close-sheet`` the page listens for. #}
      @click.self="closeSheet()"
      @keydown.escape.window="closeSheet()"
      x-data="{ cutoff: '{{ screen.parked.cutoff.isoformat() }}' }">
@@ -71,16 +76,14 @@
               data-unpark-all
               hx-post="/_partial/triage/unpark-all"
               hx-target="#triage-queue"
-              hx-swap="innerHTML"
-              @click="closeSheet()">{{ icon("undo-2", 16) }}Bring back all {{ screen.parked.count }}</button>
+              hx-swap="innerHTML">{{ icon("undo-2", 16) }}Bring back all {{ screen.parked.count }}</button>
       <button type="button"
               class="tbtn tbtn-primary"
               data-park-before
               hx-post="/_partial/triage/park-before"
               hx-include="[data-park-cutoff]"
               hx-target="#triage-queue"
-              hx-swap="innerHTML"
-              @click="closeSheet()">Done</button>
+              hx-swap="innerHTML">Done</button>
     </footer>
   </div>
 </div>

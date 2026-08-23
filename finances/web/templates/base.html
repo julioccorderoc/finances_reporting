@@ -168,11 +168,6 @@
         if (t.names.includes('closeModal')) {
           window.dispatchEvent(new CustomEvent('close-modal'));
         }
-        {# The sitting counter is client state — the server knows how many
-           rows a write resolved, but not when the sitting began. #}
-        if (t.names.includes('triageResolved')) {
-          window.dispatchEvent(new CustomEvent('triage-resolved', { detail: t.payload.triageResolved }));
-        }
         showToast(t);
       }
     "

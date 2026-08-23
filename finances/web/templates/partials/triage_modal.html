@@ -82,7 +82,14 @@
         {% if is_pair %}
           {% include "partials/triage_pair_view.html" %}
         {% else %}
+          {# The footer's primary button lives OUTSIDE this form (the
+             design puts it in the footer), so it associates by id.
+             That keeps the save a real form submission — htmx binds
+             to the submit event — with no hidden button to click
+             through, which is where an earlier version silently did
+             nothing. #}
           <form class="triage-modal-form"
+                id="triage-decision-form"
                 data-triage-form
                 hx-post="/_partial/triage/{{ card.id }}/edit"
                 hx-target="#triage-modal-host"
@@ -150,7 +157,6 @@
                      @input="setNote($event.target.value)">
             </span>
 
-            <button type="submit" data-modal-submit hidden></button>
           </form>
         {% endif %}
       </div>
@@ -171,11 +177,11 @@
       </span>
       <span class="tmodal-spacer"></span>
       {% if not is_pair %}
-      <button type="button"
+      <button type="submit"
+              form="triage-decision-form"
               class="tbtn tbtn-primary"
               data-modal-primary
-              :disabled="!ready()"
-              @click="submit()">
+              :disabled="!ready()">
         {{ icon("check", 16) }}
         {%- if index + 1 < total -%}
           {% if needs_cat %}Sort and next{% else %}Use this rate and next{% endif %}

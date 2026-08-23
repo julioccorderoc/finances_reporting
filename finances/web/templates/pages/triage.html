@@ -13,6 +13,11 @@
 <div class="triage-screen"
      data-triage-screen
      x-data="triageScreen()"
+     {# htmx dispatches every HX-Trigger key as a DOM event on the element
+        that made the request, plus a kebab-case alias of it — so the
+        server's ``triageResolved`` arrives here as ``triage-resolved``
+        and bubbles to the window. Re-dispatching it from base.html as
+        well is what made one save count as two. #}
      @triage-resolved.window="done += ($event.detail && $event.detail.count) || 1"
      @triage-parked.window="clearSelection()"
      @triage-close-sheet.window="closeSheet()">

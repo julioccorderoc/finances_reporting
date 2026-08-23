@@ -23,6 +23,7 @@
      data-item-id="{{ item.item_id }}"
      data-modal-url="{{ modal_url }}"
      data-needs-category="{{ 'true' if item.needs.cat else 'false' }}"
+     data-kind="{{ card.kind }}"
      {% if item.txn_card is not none %}data-txn-id="{{ card.id }}"{% endif %}
      :class="rowClasses('{{ item.item_id }}')">
   <div class="triage-row-grid">

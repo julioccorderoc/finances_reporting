@@ -42,12 +42,13 @@
               data-cat-id="{{ chip.category.id }}"
               data-label="{{ chip.category.label }}"
               data-test="{{ chip.category.test }}"
+              data-kind="{{ chip.category.kind }}"
               :class="pickedCategory() === {{ chip.category.id }} ? 'is-on' : ''"
               @mouseenter="hoverFrom($el)"
               @mouseleave="hoverClear()"
               @focus="hoverFrom($el)"
               @blur="hoverClear()"
-              @click="pickCategory({{ chip.category.id }}, $el.dataset.label)">
+              @click="pickCategory({{ chip.category.id }}, $el.dataset.label, $el.dataset.kind)">
         <span class="catchip-icon">{{ icon(chip.category.icon or "tag", 15) }}</span>
         <span class="catchip-label">{{ chip.category.label }}</span>
         {% if picker_keys %}<span class="catchip-key">{{ chip.number }}</span>{% endif %}
@@ -73,12 +74,13 @@
                   data-cat-id="{{ category.id }}"
                   data-label="{{ category.label }}"
                   data-test="{{ category.test }}"
+                  data-kind="{{ category.kind }}"
                   data-search="{{ (category.label ~ ' ' ~ category.test) | lower }}"
                   x-show="matches($el.dataset.search)"
                   :class="pickedCategory() === {{ category.id }} ? 'is-on' : ''"
                   @mouseenter="hoverFrom($el)"
                   @mouseleave="hoverClear()"
-                  @click="pickCategory({{ category.id }}, $el.dataset.label)">
+                  @click="pickCategory({{ category.id }}, $el.dataset.label, $el.dataset.kind)">
             <span class="catrow-icon">{{ icon(category.icon or "tag", 15) }}</span>
             <span class="catrow-text">
               <span class="catrow-label">{{ category.label }}</span>

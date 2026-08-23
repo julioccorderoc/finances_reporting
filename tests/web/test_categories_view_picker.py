@@ -194,3 +194,45 @@ def test_payload_is_stable_without_any_usage_history(
 
     assert len(payload.chips) == 8
     assert len({c.category.id for c in payload.chips}) == 8
+
+
+# ---------------------------------------------------------------------------
+# Kind scoping (Wave 2).
+#
+# ``apply_edit`` refuses a category whose kind contradicts the row's — the
+# guard that exists because the ledger had accumulated 65 contradictions,
+# six of them income rows filed under Fees. A picker that offers one is a
+# 422 waiting for a keystroke: pressing "2" on an expense row must not
+# land on Salary.
+# ---------------------------------------------------------------------------
+
+
+def test_a_kind_scoped_picker_offers_only_that_kind(
+    web_db: sqlite3.Connection,
+) -> None:
+    payload = picker_payload(web_db, kind=TransactionKind.EXPENSE, today=TODAY)
+
+    assert payload.categories
+    assert {c.kind for c in payload.categories} == {"expense"}
+    assert {chip.category.kind for chip in payload.chips} == {"expense"}
+
+
+def test_the_scoped_counts_describe_the_scoped_set(
+    web_db: sqlite3.Connection,
+) -> None:
+    """"Search N categories" and "The other N" must both be true of what
+    the picker will actually show."""
+    scoped = picker_payload(web_db, kind=TransactionKind.INCOME, today=TODAY)
+
+    assert scoped.pickable_count == len(scoped.categories)
+    assert scoped.other_count == scoped.pickable_count - len(scoped.chips)
+    assert scoped.pickable_count < picker_payload(web_db, today=TODAY).pickable_count
+
+
+def test_an_unscoped_picker_still_mixes_both_kinds(
+    web_db: sqlite3.Connection,
+) -> None:
+    """The bulk sheet has no single row to scope to."""
+    payload = picker_payload(web_db, today=TODAY)
+
+    assert {c.kind for c in payload.categories} == {"expense", "income"}

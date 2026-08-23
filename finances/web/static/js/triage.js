@@ -81,6 +81,7 @@
       drafts: {},
       bulkCat: null,
       bulkCatLabel: null,
+      bulkCatKind: null,
 
       /* -- selection ---------------------------------------------- */
       isSelected: function (id) {
@@ -152,15 +153,17 @@
         if (host) host.replaceChildren();
         this.bulkCat = null;
         this.bulkCatLabel = null;
+        this.bulkCatKind = null;
       },
       /* The bulk sheet's picker writes here; the modal's picker shadows
        * these two with its own per-row versions. */
       pickedCategory: function () {
         return this.bulkCat;
       },
-      pickCategory: function (id, label) {
+      pickCategory: function (id, label, kind) {
         this.bulkCat = id;
         this.bulkCatLabel = label;
+        this.bulkCatKind = kind || null;
       },
 
       /* -- bulk --------------------------------------------------- */
@@ -178,12 +181,17 @@
        * that already has one is finished work, and re-filing it would
        * overwrite a decision the owner already made. */
       bulkTargets: function () {
+        var kind = this.bulkCatKind;
         return this.selected
           .map(rowFor)
           .filter(function (el) {
-            return (
-              el && el.dataset.txnId && el.dataset.needsCategory === "true"
-            );
+            if (!el || !el.dataset.txnId) return false;
+            if (el.dataset.needsCategory !== "true") return false;
+            /* And a kind the category can legally land on. The bulk
+             * endpoint writes through the repo rather than apply_edit, so
+             * it would happily file an income row under Fees; the count
+             * and the write agree here instead. */
+            return !kind || el.dataset.kind === kind;
           })
           .map(function (el) {
             return Number(el.dataset.txnId);
@@ -323,9 +331,12 @@
       },
 
       submit: function () {
+        /* ↵ goes through the form itself, exactly as the footer button
+         * does. requestSubmit() fires the submit event htmx listens for;
+         * form.submit() would bypass it and navigate the page away. */
         if (!this.ready()) return;
-        var button = this.$el.querySelector("[data-modal-submit]");
-        if (button) button.click();
+        var form = this.$el.querySelector("form[data-triage-form]");
+        if (form) form.requestSubmit();
       },
       close: function () {
         this.openId = null;
