@@ -1,0 +1,4 @@
+/* SIGNAL type: dot-matrix display, monospace labels, humanist body.
+   Doto is a display face only — see typography.css for where it may go.
+   Swap this @import for local @font-face rules when licensed files land. */
+@import url("https://fonts.googleapis.com/css2?family=Doto:wght@500;700;900&family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap");

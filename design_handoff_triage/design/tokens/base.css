@@ -1,0 +1,124 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--surface-canvas);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--body-size);
+  line-height: var(--body-line);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-wrap: pretty;
+}
+
+a {
+  color: var(--text-accent);
+  text-decoration-color: color-mix(in oklab, var(--red-500) 40%, transparent);
+  text-underline-offset: 2px;
+}
+
+a:hover {
+  color: var(--red-700);
+  text-decoration-color: currentColor;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-sm);
+}
+
+::selection {
+  background: var(--red-500);
+  color: var(--paper-050);
+}
+
+.bodega-num {
+  font-family: var(--font-mono);
+  font-size: var(--num-size);
+  letter-spacing: var(--num-tracking);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The dot-matrix figure: one number, big, and only where it is the point. */
+.bodega-figure {
+  font-family: var(--font-display);
+  font-size: var(--figure-size);
+  line-height: var(--figure-line);
+  font-weight: var(--figure-weight);
+  letter-spacing: -0.02em;
+}
+
+/* Mono caps carry every label in the system. */
+.bodega-eyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--eyebrow-size);
+  line-height: var(--eyebrow-line);
+  letter-spacing: var(--eyebrow-tracking);
+  font-weight: var(--eyebrow-weight);
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+/* The kicker: the signature. A red square, then red mono caps. Once per view. */
+.bodega-kick {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: var(--eyebrow-size);
+  letter-spacing: var(--eyebrow-tracking);
+  font-weight: var(--eyebrow-weight);
+  text-transform: uppercase;
+  color: var(--text-signal);
+}
+
+.bodega-kick::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  background: var(--red-500);
+  flex: 0 0 auto;
+}
+
+/* Dot grid — the one texture. SIGNAL's 20px matrix, not a paper grain. */
+.bodega-grain::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.55;
+  background-image: radial-gradient(var(--ink-200) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+@keyframes bodega-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes bodega-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes bodega-rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}

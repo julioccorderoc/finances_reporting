@@ -1,0 +1,43 @@
+:root {
+  /* 4-based, matching SIGNAL's 4·8·12·16·24·32·48·64·96.
+     6 and 10 survive because dense ledger rows need them. */
+  --space-0: 0px;
+  --space-05: 2px;
+  --space-1: 4px;
+  --space-15: 6px;
+  --space-2: 8px;
+  --space-25: 10px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 48px;
+  --space-9: 64px;
+  --space-10: 80px;
+  --space-11: 96px;
+
+  /* Near-square: 2 / 4 / 8, nothing softer. --radius-pill is retired to 2px
+     rather than deleted, so existing pill markup collapses to the right shape
+     instead of breaking. Nothing in this system is a lozenge. */
+  --radius-xs: 2px;
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 8px;
+  --radius-xl: 8px;
+  --radius-pill: 2px;
+
+  /* Control heights — the density contract */
+  --control-sm: 26px;
+  --control-md: 32px;
+  --control-lg: 40px;
+
+  --row-compact: 36px;
+  --row-default: 44px;
+  --row-relaxed: 56px;
+
+  --sidebar-width: 244px;
+  --content-max: 1040px;
+  --doc-max: 720px;
+  --border-hairline: 1px;
+}

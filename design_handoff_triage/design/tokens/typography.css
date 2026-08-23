@@ -1,0 +1,68 @@
+:root {
+  /* Doto is dot-matrix: a signature, not a typeface you read in.
+     Allowed: hero lines, three-word empty states, and big single figures
+     (a month total, a KPI tile). Forbidden: anything in a table row, any
+     sentence, anything under 22px. Table figures stay in the mono. */
+  --font-display: "Doto", "JetBrains Mono", ui-monospace, monospace;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  /* Display — Doto. Heavy weights only; the dot grid falls apart below 700. */
+  --display-weight: 900;
+  --display-1-size: 46px;
+  --display-1-line: 1.02;
+  --display-1-tracking: -0.02em;
+  --display-2-size: 34px;
+  --display-2-line: 1.06;
+  --display-2-tracking: -0.018em;
+  --display-3-size: 26px;
+  --display-3-line: 1.14;
+  --display-3-tracking: -0.014em;
+
+  /* Title — Inter. All in-product hierarchy. */
+  --title-1-size: 23px;
+  --title-1-line: 1.24;
+  --title-1-tracking: -0.02em;
+  --title-2-size: 19px;
+  --title-2-line: 1.3;
+  --title-2-tracking: -0.018em;
+  --title-3-size: 16px;
+  --title-3-line: 1.38;
+  --title-3-tracking: -0.012em;
+
+  /* Body — 16/1.55 is the reading spec; the dense product sizes sit under it. */
+  --body-lg-size: 16px;
+  --body-lg-line: 1.55;
+  --body-size: 14px;
+  --body-line: 1.55;
+  --body-sm-size: 13px;
+  --body-sm-line: 1.5;
+  --caption-size: 12.5px;
+  --caption-line: 1.45;
+
+  /* Eyebrow / kicker — mono, caps, wide. This is the system's voice: every
+     label, tag, date, column head and badge is set here, never in the sans. */
+  --eyebrow-size: 11px;
+  --eyebrow-line: 1.2;
+  --eyebrow-tracking: 0.14em;
+  --eyebrow-weight: 500;
+  --micro-size: 10.5px;
+  --micro-tracking: 0.08em;
+
+  /* Numeric — JetBrains Mono carries every figure in a table or stat. */
+  --num-size: 13px;
+  --num-line: 1.4;
+  --num-tracking: 0;
+  --num-lg-size: 30px;
+  --num-lg-line: 1.05;
+  --num-lg-tracking: -0.02em;
+  /* Dot-matrix figure: the one place numbers get the display face. */
+  --figure-size: 34px;
+  --figure-line: 1;
+  --figure-weight: 700;
+}

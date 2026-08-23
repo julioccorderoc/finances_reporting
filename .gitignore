@@ -21,7 +21,10 @@ data/
 # DB backups + archived pre-revival working artifacts (root cleanup 2026-07-11)
 backups/
 archive/
-design_handoff_triage
+
+# Stray screenshots at the repo root (browser tooling drops them there;
+# three commits have swept one up by accident)
+/*.png
 
 # SQLite database
 finances.db
