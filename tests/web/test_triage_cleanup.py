@@ -160,8 +160,11 @@ def test_the_favicon_is_served_and_is_local(web_client_factory) -> None:
 
     assert response.status_code == 200
     assert "svg" in response.headers["content-type"]
-    assert "http://" not in response.text
-    assert "https://" not in response.text
+    # ``xmlns`` is an identifier, not a fetch; anything that would actually
+    # be requested is not allowed (the offline rule).
+    body = response.text.replace('xmlns="http://www.w3.org/2000/svg"', "")
+    assert "http://" not in body
+    assert "https://" not in body
 
 
 # ---------------------------------------------------------------------------

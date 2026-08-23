@@ -5,6 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}Finances{% endblock %}</title>
 
+    <!-- Declaring the icon is what stops the browser probing /favicon.ico
+         on every page load — a 404 that has been sitting in the console
+         since the viewer shipped (criterion L5). Served from /static like
+         every other asset, so it works with the Wi-Fi off and needs no
+         route of its own. -->
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+
     <!-- Tailwind CSS compiled offline from the used utility classes
          (tailwind/ build config; regenerate per tailwind/README.md). No CDN —
          the viewer stays fully styled with Wi-Fi off (Thing 5C). -->
