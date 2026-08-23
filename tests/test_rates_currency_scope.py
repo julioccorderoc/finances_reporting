@@ -31,10 +31,10 @@ from tests.conftest import RateFactory, TransactionFactory
 
 DAY = date(2026, 5, 20)
 
-#: Every quote currency the ladder actually holds a tier for. Read off the
-#: tier table rather than spelled out, so a future tier in a new currency
-#: joins these tests instead of silently escaping them.
-LADDER_QUOTES = frozenset(quote for _base, quote, _source in rates_engine._FALLBACK_TIERS)
+#: Every quote currency the ladder holds a tier for — the resolver's own
+#: constant, not a copy, so a future tier in a new currency joins these
+#: tests instead of silently escaping them.
+LADDER_QUOTES = rates_engine.LADDER_QUOTE_CURRENCIES
 
 #: A currency the ledger has no rate pair for. Colombian pesos are the real
 #: case: the owner's ledger could grow one, and a COP row must not be

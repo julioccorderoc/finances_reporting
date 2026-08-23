@@ -18,6 +18,15 @@ ADR-021):
     5. the nearest rate in the table, either direction    (_nearest)
     6. none at all -> sets ``transaction.needs_review``    (needs_review)
 
+Branches 1-5 are a **bolívar** ladder: every tier quotes in VES, so they
+apply only to a row denominated in VES. A non-native row in any other
+currency resolves to branch 6 — unpriceable — because dividing pesos by a
+bolívar rate produces a number with no meaning and no warning label. The
+scope is read off :data:`_FALLBACK_TIERS` via
+:data:`LADDER_QUOTE_CURRENCIES`, so a new currency is reached by adding
+its rate pairs and a tier, never by borrowing another currency's
+(ADR-021 §2.5).
+
 Branch 0 is a guard, not a tier: a native-USD row has nothing to convert,
 and its ``user_rate`` — when it has one — is the bolívar price a P2P fill
 was struck at, recorded as provenance. Reading that as a conversion factor
@@ -95,6 +104,14 @@ _TIER_MAX_AGE_DAYS: dict[str, int] = {
     BCV_SOURCE: BCV_MAX_AGE_DAYS,
 }
 
+# The currencies the ladder can actually price, read off the tier table
+# rather than written down a second time (ADR-021 §2.5). Today it is
+# ``{"VES"}``; a tier added in a new currency extends the chain's reach by
+# definition, where a guard spelled ``== "VES"`` would not have noticed.
+LADDER_QUOTE_CURRENCIES: frozenset[str] = frozenset(
+    quote for _base, quote, _source in _FALLBACK_TIERS
+)
+
 
 class RateResolution(BaseModel):
     """One answer from the chain, with the provenance that produced it.
@@ -144,11 +161,23 @@ def max_age_days(source: str) -> int | None:
     return _TIER_MAX_AGE_DAYS.get(source)
 
 
+def _tiers_for(currency: str) -> tuple[tuple[str, str, str], ...]:
+    """The tiers that can price ``currency`` — the ones quoting in it.
+
+    Empty for any currency the table holds no pair for, which is what
+    makes the whole ladder VES-scoped without a second literal anywhere
+    (ADR-021 §2.5).
+    """
+    return tuple(tier for tier in _FALLBACK_TIERS if tier[1] == currency)
+
+
 def _in_window_tier(
-    conn: sqlite3.Connection, as_of: date
+    conn: sqlite3.Connection,
+    as_of: date,
+    tiers: tuple[tuple[str, str, str], ...],
 ) -> RateResolution | None:
     """Branches 2-4: the first tier with a rate inside its own window."""
-    for base, quote, source in _FALLBACK_TIERS:
+    for base, quote, source in tiers:
         found = rates_repo.latest_on_or_before(
             conn, as_of_date=as_of, base=base, quote=quote, source=source
         )
@@ -168,7 +197,11 @@ def _in_window_tier(
     return None
 
 
-def _nearest_tier(conn: sqlite3.Connection, as_of: date) -> RateResolution | None:
+def _nearest_tier(
+    conn: sqlite3.Connection,
+    as_of: date,
+    tiers: tuple[tuple[str, str, str], ...],
+) -> RateResolution | None:
     """Branch 5: the closest rate any tier holds, in either direction.
 
     Distance decides; the chain's own priority breaks a tie. Scanning the
@@ -179,7 +212,7 @@ def _nearest_tier(conn: sqlite3.Connection, as_of: date) -> RateResolution | Non
     best: RateResolution | None = None
     best_distance: int | None = None
 
-    for base, quote, source in _FALLBACK_TIERS:
+    for base, quote, source in tiers:
         found = rates_repo.nearest(
             conn, as_of_date=as_of, base=base, quote=quote, source=source
         )
@@ -210,17 +243,29 @@ def resolve_detail(
     when — and only when — the rates table holds nothing for the pair.
     """
     native_currencies, native_source = _native_usd()
-    if (txn.currency or "").upper() in native_currencies:
+    currency = (txn.currency or "").upper()
+    if currency in native_currencies:
         # One quote unit per dollar, which is what a dollar is: a caller
         # that divides gets the right answer without a special case.
         return RateResolution(rate=Decimal(1), source=native_source)
+
+    tiers = _tiers_for(currency)
+    if not tiers:
+        # A currency the chain holds no rate pair for. Every branch below,
+        # ``user_rate`` included, is denominated in the tiers' quote unit,
+        # so pricing here would divide pesos by a bolívar rate and report
+        # the answer as a fact (ADR-021 §2.5).
+        txn.needs_review = True
+        return RateResolution(rate=None, source=NEEDS_REVIEW_SOURCE)
 
     if txn.user_rate is not None:
         return RateResolution(rate=txn.user_rate, source=USER_RATE_SOURCE)
 
     as_of = txn.occurred_at.date()
 
-    resolution = _in_window_tier(conn, as_of) or _nearest_tier(conn, as_of)
+    resolution = _in_window_tier(conn, as_of, tiers) or _nearest_tier(
+        conn, as_of, tiers
+    )
     if resolution is not None:
         return resolution
 
@@ -247,6 +292,7 @@ __all__ = [
     "BCV_SOURCE",
     "BINANCE_P2P_SOURCE",
     "CARRY_SUFFIX",
+    "LADDER_QUOTE_CURRENCIES",
     "MEDIAN_MAX_AGE_DAYS",
     "NEAREST_SUFFIX",
     "NEEDS_REVIEW_SOURCE",
