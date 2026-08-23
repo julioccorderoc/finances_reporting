@@ -42,7 +42,7 @@
             hx-get="{{ modal_url }}"
             hx-target="#triage-modal-host"
             hx-swap="innerHTML"
-            @click="openId = '{{ item.item_id }}'">
+            @click="rememberOrigin('{{ item.item_id }}')">
       <span class="triage-row-name">{{ item.merchant or card.description }}</span>
       {%- if item.merchant %}
       <span class="triage-row-raw">{{ card.description }}</span>
@@ -82,7 +82,7 @@
             hx-get="{{ modal_url }}"
             hx-target="#triage-modal-host"
             hx-swap="innerHTML"
-            @click="openId = '{{ item.item_id }}'">{{ icon("maximize-2", 14) }}</button>
+            @click="rememberOrigin('{{ item.item_id }}')">{{ icon("maximize-2", 14) }}</button>
   </div>
 </div>
 <!-- /triage-row -->

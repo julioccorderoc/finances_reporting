@@ -43,6 +43,23 @@
   padding-bottom: var(--space-8);
 }
 
+/* J5: the live region. Read by assistive tech, invisible and unclickable
+ * to everything else. `clip-path` rather than `display: none` or
+ * `visibility: hidden` — both of those take the element out of the
+ * accessibility tree, which is the one thing it is for. Written here and
+ * not reached for from the vendored tailwind, which has no `sr-only`. */
+.tsr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* ── Page header ────────────────────────────────────────────────────────── */
 
 .triage-header {

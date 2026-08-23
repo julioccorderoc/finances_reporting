@@ -20,12 +20,32 @@
         well is what made one save count as two. #}
      @triage-resolved.window="done += ($event.detail && $event.detail.count) || 1"
      @triage-parked.window="clearSelection()"
-     @triage-close-sheet.window="closeSheet()">
+     @triage-close-sheet.window="closeSheet()"
+     {# J2: the run gives the keyboard back to the row it started from.
+        Fires after base.html's own close handler (registered first, on
+        <body>), which is what clears the host and arms the refresh. #}
+     @close-modal.window="restoreFocus()"
+     {# J5: the counts change on a swap, not on a keystroke, so this is
+        the one moment worth announcing. htmx dispatches both the camel
+        and the kebab spelling; the kebab one is what Alpine can bind. #}
+     @htmx:after-settle.window="if ($event.detail && $event.detail.target && $event.detail.target.id === 'triage-queue') announceCounts()">
 
   {# The swap target. Everything numeric on this screen is inside it. #}
   <div id="triage-queue" class="triage-scroll">
     {% include 'partials/triage_queue.html' %}
   </div>
+
+  {# J5: the live region sits OUT here on purpose. #triage-queue's
+     innerHTML is replaced on every save, and a region inserted by that
+     swap is a brand-new node — assistive tech announces changes *within*
+     a region it already knew about, not the arrival of one. This element
+     is written once and only ever has its text updated. #}
+  <p id="triage-announcer"
+     class="tsr-only"
+     role="status"
+     aria-live="polite"
+     aria-atomic="true"
+     x-text="announcement"></p>
 
   {# The modal run. Inside the screen so the overlay covers the content
      area and nothing else; outside #triage-queue so a queue refresh

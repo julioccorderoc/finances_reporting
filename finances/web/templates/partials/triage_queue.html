@@ -53,7 +53,7 @@
               hx-get="{{ modal_url_for(screen.walk[0]) }}"
               hx-target="#triage-modal-host"
               hx-swap="innerHTML"
-              @click="openId = '{{ screen.walk[0].item_id }}'">
+              @click="rememberOrigin('{{ screen.walk[0].item_id }}')">
         {{ icon("play", 14) }}Sort all {{ screen.walk | length }}
       </button>
     {% endif %}

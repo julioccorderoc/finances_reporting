@@ -57,6 +57,32 @@
     );
   }
 
+  /* Everything a Tab can land on, minus the things it must not: a
+   * disabled arrow at the end of the run, and a control inside a
+   * disclosure that is merely x-shown (the picker's full list is in the
+   * DOM the whole time). `[role="dialog"]` itself carries tabindex="-1"
+   * so it can take focus on open without joining the cycle. */
+  var FOCUSABLE = [
+    "a[href]",
+    "button:not([disabled])",
+    "input:not([disabled])",
+    "select:not([disabled])",
+    "textarea:not([disabled])",
+    '[tabindex]:not([tabindex="-1"])',
+  ].join(",");
+
+  function focusable(root) {
+    return Array.prototype.filter.call(
+      root.querySelectorAll(FOCUSABLE),
+      function (el) {
+        /* getClientRects rather than offsetParent: it reports empty for
+         * display:none AND for a zero-box element, and unlike
+         * offsetParent it does not lie about position:fixed. */
+        return el.getClientRects().length > 0;
+      }
+    );
+  }
+
   function toast(message, level) {
     window.dispatchEvent(
       new CustomEvent("show-toast", {
@@ -82,6 +108,17 @@
       bulkCat: null,
       bulkCatLabel: null,
       bulkCatKind: null,
+      /* J2: which row the run was started from, so closing puts the
+       * keyboard back where it found it. An ITEM ID, not an element —
+       * closing refreshes the queue, so the node that was clicked is
+       * detached by the time focus is restored. Lives here rather than
+       * in the modal because the modal is torn down and rebuilt on
+       * every advance. */
+      focusOrigin: null,
+      /* J5: what the persistent live region says. Written from the
+       * queue's own rendered headline after each swap, so the sentence
+       * a screen reader hears and the sentence on screen cannot drift. */
+      announcement: "",
 
       /* -- selection ---------------------------------------------- */
       isSelected: function (id) {
@@ -145,6 +182,71 @@
       },
       setDraft: function (id, patch) {
         this.drafts[id] = Object.assign({}, this.drafts[id] || {}, patch);
+      },
+
+      /* -- focus and announcements (J2, J5) ----------------------- */
+      rememberOrigin: function (id) {
+        this.openId = id;
+        this.focusOrigin = id;
+      },
+      /* Called on close-modal. The row may still be there (the owner
+       * looked and left), or gone (they resolved it and the queue
+       * re-rendered) — so it lands twice: once now, and once after the
+       * refresh settles, whichever of the two finds the row.
+       *
+       * Order of preference: the row's own open button, the run button,
+       * the queue itself. Focus is never left on <body>. */
+      restoreFocus: function () {
+        var id = this.focusOrigin;
+        this.focusOrigin = null;
+
+        var land = function () {
+          var row = id ? rowFor(id) : null;
+          var target =
+            (row && row.querySelector(".triage-row-open")) ||
+            document.querySelector("[data-sort-all]") ||
+            document.getElementById("triage-queue");
+          if (!target) return;
+          /* The queue is a plain container; make it focusable for the
+           * one moment it has to be. */
+          if (target.id === "triage-queue" && !target.hasAttribute("tabindex")) {
+            target.setAttribute("tabindex", "-1");
+          }
+          target.focus();
+        };
+
+        land();
+
+        var host = document.getElementById("triage-queue");
+        if (!host) return;
+        var settle = function () {
+          host.removeEventListener("htmx:afterSettle", settle);
+          land();
+        };
+        host.addEventListener("htmx:afterSettle", settle);
+        /* A close with nothing to reconcile never swaps, so the listener
+         * would sit there forever waiting for a settle that is not
+         * coming (C7's rule, applied to this one too). */
+        window.setTimeout(function () {
+          host.removeEventListener("htmx:afterSettle", settle);
+        }, 1200);
+      },
+      /* The headline and the three badges, read back off the queue that
+       * just rendered. Repeating the server's own words means there is
+       * no second copy of the counting rules to drift. */
+      announceCounts: function () {
+        var host = document.getElementById("triage-queue");
+        if (!host) return;
+        var parts = [];
+        var answer = host.querySelector(".triage-answer");
+        if (answer) parts.push(answer.textContent.trim());
+        Array.prototype.forEach.call(
+          host.querySelectorAll(".triage-meta .tbadge"),
+          function (badge) {
+            parts.push(badge.textContent.trim());
+          }
+        );
+        this.announcement = parts.join(", ");
       },
 
       /* -- sheets ------------------------------------------------- */
@@ -275,10 +377,58 @@
         this.openId = this.itemId;
         /* Advancing INTO a dialog replaces the element that had focus, so
          * it has to claim focus itself or the keyboard is left on
-         * <body>. The full focus trap is Wave 3 (J2); this is the half
-         * that makes the run usable. */
-        var dialog = this.$el.querySelector('[role="dialog"]');
+         * <body> — from where the first Tab walks into the queue behind
+         * the scrim. `trapTab` keeps it here from then on (J2). */
+        var dialog = this.dialog();
         if (dialog) dialog.focus();
+        /* Opening by URL rather than from a row leaves nothing to
+         * return to; `restoreFocus` falls back to the run button. */
+        if (this.focusOrigin === null) this.focusOrigin = this.itemId;
+      },
+
+      dialog: function () {
+        return this.$el.querySelector('[role="dialog"]');
+      },
+
+      /* J2 — the trap itself. Plain JS, no library: Tab from the last
+       * control wraps to the first, Shift-Tab from the first wraps to
+       * the last, and focus that has escaped the dialog altogether (a
+       * browser that restored it elsewhere, or the dialog itself, which
+       * is tabindex="-1" and outside the cycle) is pulled back to an
+       * end. */
+      trapTab: function (event) {
+        var dialog = this.dialog();
+        if (!dialog) return;
+
+        var items = focusable(dialog);
+        if (!items.length) {
+          event.preventDefault();
+          dialog.focus();
+          return;
+        }
+
+        var first = items[0];
+        var last = items[items.length - 1];
+        var active = document.activeElement;
+
+        if (!dialog.contains(active) || active === dialog) {
+          event.preventDefault();
+          if (event.shiftKey) {
+            last.focus();
+          } else {
+            first.focus();
+          }
+          return;
+        }
+        if (event.shiftKey && active === first) {
+          event.preventDefault();
+          last.focus();
+          return;
+        }
+        if (!event.shiftKey && active === last) {
+          event.preventDefault();
+          first.focus();
+        }
       },
 
       draftHere: function () {
@@ -356,6 +506,12 @@
         /* esc closes from anywhere, including from inside a field (C4). */
         if (event.key === "Escape") {
           this.close();
+          return;
+        }
+        /* Before the typing guard: Tab has to keep working inside a
+         * field, or the trap has a hole exactly where the caret is. */
+        if (event.key === "Tab") {
+          this.trapTab(event);
           return;
         }
         var target = event.target;

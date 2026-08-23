@@ -156,7 +156,10 @@ def test_the_queue_counts_have_a_live_region_that_survives_a_swap(
     swap is a brand-new node each time, and a newly inserted region does
     not announce — the update would be silent exactly when it matters.
     """
-    page = _page(web_client_factory)
+    with web_client_factory() as client:
+        page = client.get("/triage").text
+        # Exactly what a save swaps into #triage-queue.
+        swapped = client.get("/_partial/triage/queue").text
 
     assert 'id="triage-announcer"' in page
     announcer = page[page.index('id="triage-announcer"') :]
@@ -164,11 +167,7 @@ def test_the_queue_counts_have_a_live_region_that_survives_a_swap(
     assert 'aria-live="polite"' in announcer
     assert 'aria-atomic="true"' in announcer
 
-    # Outside the swap target: the announcer must come after the closing
-    # of #triage-queue, never within it.
-    queue_open = page.index('id="triage-queue"')
-    queue_close = page.index('id="triage-modal-host"')
-    assert not (queue_open < page.index('id="triage-announcer"') < queue_close)
+    assert "triage-announcer" not in swapped
 
 
 def test_the_announcer_is_fed_by_the_queue_swap(

@@ -80,6 +80,11 @@
                   :class="pickedCategory() === {{ category.id }} ? 'is-on' : ''"
                   @mouseenter="hoverFrom($el)"
                   @mouseleave="hoverClear()"
+                  {# J6/E5: the strip has to answer to the keyboard too.
+                     The chips already did; tabbing the expanded list
+                     left it blank. #}
+                  @focus="hoverFrom($el)"
+                  @blur="hoverClear()"
                   @click="pickCategory({{ category.id }}, $el.dataset.label, $el.dataset.kind)">
             <span class="catrow-icon">{{ icon(category.icon or "tag", 15) }}</span>
             <span class="catrow-text">
