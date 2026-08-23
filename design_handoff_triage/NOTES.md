@@ -6,6 +6,118 @@ a place the shipped code deliberately does something other than what
 
 ---
 
+## Wave 2 — the surface (queue, modal run, sheets, writes)
+
+Built 2026-08-23. Everything below is a place the shipped screen does
+something other than the README, with the reason.
+
+### The picker is scoped to the row's kind
+
+**Deviation.** The design's CatPicker is one list of 20 pickable
+categories, kind-agnostic, ranked over twelve months of usage.
+`transactions_write.apply_edit` refuses a category whose kind contradicts
+the row's — the guard added after the ledger accumulated 65 such
+contradictions, six of them income rows filed under `Fees`. Unscoped, the
+dialog put `Salary` on keyboard shortcut 2 of an expense row: a 422 behind
+one keystroke, found in the browser.
+
+`picker_payload` now takes a `kind` and the modal passes the row's own, so
+"Search 17 categories" and "The other 9" describe what is actually on
+screen. The bulk sheet stays unscoped (it has no single row to scope to);
+instead its target count filters by the chosen category's kind, so the
+number on the button and the rows the write touches are one set.
+
+### `Fees` can reach a chip on a kind with few pickable categories
+
+Wave 1.2 kept `Fees` pickable but off the chips, and `chip_eligible` still
+does that job. With the picker scoped by kind, a kind with fewer than
+eight `chip_eligible` categories gets padded from the rest of its pickable
+set, which can include `Fees`. It is pickable, the owner does file rows
+there by hand, and a blank chip slot would be worse.
+
+### Parked strip and sheet pluralise
+
+README copy is `266 parked rows, out of the queue` and `266 parked rows`.
+Rendered verbatim at a count of one that reads "1 parked rows". Both
+strings pluralise; every other copy string is verbatim.
+
+### The per-row unpark is gone
+
+The old viewer let you un-park one row from the list. The parked sheet
+offers `Bring back all N` and nothing else, so the endpoint had no caller —
+and an endpoint no surface calls is worse than one capability fewer. If
+per-row bring-back is wanted it belongs on the sheet's sample rows, which
+is a design question rather than a port.
+
+### "Not a pair" is remembered in the process, not the database
+
+Criterion H4 says both legs stay separate rows and the UI says so. The
+matcher is a pure function of the ledger and would propose the same two
+rows on the very next build, so a refusal that wrote nothing would be a
+button that does nothing. Writing something is worse: declining a *guess*
+is not a fact about the money, and there is no column for "I looked at
+this and said no". The dismissal lives on `app.state` for the run — the
+same lifetime the design gives a sitting. A restart forgets it.
+
+### `fmt_usd` / `fmt_native` sit beside `fmt_money`, they do not replace it
+
+D11 wants U+2212, sign before symbol and an explicit `+` on a credit.
+`fmt_money` emits an ASCII hyphen and no `+`, and it is what the
+transactions, monthly and accounts pages, the static report, the CSV
+export and the CLI all render through. Changing it would redesign five
+surfaces that are not in scope. The two new functions are the SIGNAL
+renderings and are used by the triage templates alone. The live rate
+preview in `triage.js` mirrors `fmt_usd` in JavaScript; that is the one
+duplicated formatter, and it exists because D8 is a live recompute.
+
+### The queue's date column: `Nov 3 24`, not `Nov 3, 2024`
+
+The README fixes `Jul 7` and says the year is appended off the current
+one, without saying how. The prototype's own `shortDate` appends a
+two-digit year with no comma, and that is what shipped.
+
+### The cutoff's default, and the date under it
+
+Nothing in the schema stores a cutoff, so the parked sheet pre-fills
+January 1 of the current year — the design's own `2026-01-01` on a 2026
+ledger. `The oldest one is …` names the oldest *uncategorised income or
+expense* row, parked or not: the floor the cutoff could actually reach,
+and exactly the set `park_before` scopes itself to.
+
+### The content area owns the viewport
+
+The prototype renders inside a device frame whose content area scrolls
+internally. Ported literally, the page scrolled as a whole and the nav
+scrolled off the top when the dialog opened — which contradicts B11. The
+triage screen is now `calc(100vh - 55px)` with the queue scrolling inside
+it. No other page is affected.
+
+### The dialog carries no Cancel button
+
+The design's footer is Park, the legend, and the primary. Closing is esc,
+the scrim, or the header's `x` — all three are wired. The old modal's
+Cancel button has no place in the new footer and was not smuggled back in.
+
+### Not built, deliberately
+
+The J group (focus trap, `aria-live` announcements, an AA audit of the
+10.5px chip) and the L cleanup of app.css's old triage block are Wave 3.
+The cheap parts of J are in: `role="dialog"`, `aria-modal`, an
+`aria-label` on the dialog and on every icon-only control, meaningful
+checkbox labels, and focus moving into the dialog on open.
+
+### Still true from Wave 1.1: a rate the resolver should not have used
+
+`rates.resolve`'s tiers are hard-coded to `quote = "VES"` and are not
+checked against the transaction's own currency, so a COP row is priced
+with a bolívar rate. Found while seeding a genuinely unpriceable row for
+D5 (the only way to reach `amount_usd IS NULL` today is an empty `rates`
+table). Out of scope here — it is a resolver change and would want an
+ADR — but it is a real defect and it is why the D5 fixtures seed no rates
+at all.
+
+---
+
 ## Wave 1.2 — CatPicker data (migration 021)
 
 Owner decisions taken 2026-08-21, before migrating.
