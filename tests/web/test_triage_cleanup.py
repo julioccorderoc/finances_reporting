@@ -191,3 +191,31 @@ def test_the_toast_rises_and_collapses_under_reduced_motion() -> None:
     keyframes = keyframes[: keyframes.index("}\n}") + 3]
     assert "translateY(6px)" in keyframes
     assert "opacity: 0" in keyframes
+
+
+# ---------------------------------------------------------------------------
+# L5 — the console, continued
+# ---------------------------------------------------------------------------
+
+
+def test_the_save_form_disables_a_button_that_actually_exists(
+    triage_web_db, web_client_factory
+) -> None:
+    """``hx-disabled-elt`` must resolve, or htmx logs on every save.
+
+    The design puts the primary button in the FOOTER, outside the form it
+    submits; it associates by ``form=`` id instead. ``find
+    button[type=submit]`` searches inside the form, finds nothing, and
+    htmx prints *The selector "find button[type=submit]" on
+    hx-disabled-elt returned no matches!* — twice per double-submit —
+    while the save itself works perfectly. Every server-side test stayed
+    green; a browser was the only witness.
+    """
+    with web_client_factory() as client:
+        html = client.get("/_partial/triage/1/modal").text
+
+    assert "find button[type=submit]" not in html
+    assert 'hx-disabled-elt="[data-modal-primary]"' in html
+    # And the thing it names is really there, in the footer.
+    assert "data-modal-primary" in html
+    assert 'form="triage-decision-form"' in html

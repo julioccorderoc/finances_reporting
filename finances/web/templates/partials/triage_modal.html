@@ -94,7 +94,14 @@
                 hx-post="/_partial/triage/{{ card.id }}/edit"
                 hx-target="#triage-modal-host"
                 hx-swap="innerHTML"
-                hx-disabled-elt="find button[type=submit]">
+                {# `find` searches INSIDE the form, and the primary button
+                   is in the footer — it associates by `form=` id, which is
+                   the whole point. The old selector matched nothing and
+                   htmx logged "returned no matches!" on every save while
+                   the save itself worked; a browser was the only witness
+                   (L5). A plain CSS selector resolves against the
+                   document, and only one dialog is ever mounted. #}
+                hx-disabled-elt="[data-modal-primary]">
             {# Dirty-tracked sentinels (the WP2 safety contract): a field
                the owner never touched writes nothing, so an untouched
                picker cannot wipe an existing category. #}
