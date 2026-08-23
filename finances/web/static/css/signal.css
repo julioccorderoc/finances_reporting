@@ -80,8 +80,21 @@
   /* ── Semantic: text ───────────────────────────────────────────────────── */
   --text-primary: var(--ink-900);
   --text-secondary: var(--ink-600);
-  --text-tertiary: var(--ink-500);
-  --text-placeholder: var(--ink-400);
+  /* AA at the sizes this design actually uses (criterion J7, measured in a
+     browser at 10.5–13px against each element's own fill).
+     --ink-500 #6d6d69 reached 4.39:1 on the canvas and 4.08:1 on a selected
+     row; --ink-400 #9a9a95 reached 2.22–2.59:1 and was carrying the raw bank
+     strings, the account detail, the chip shortcut numbers and the
+     disclosure note. #666662 is the lightest warm grey clearing 4.5:1 on all
+     three paper surfaces (canvas 4.9, raised 5.3, sunken 4.53).
+     Both tiers land on it: 4.5:1 is a floor, so at these sizes there is only
+     one lightest legible grey and the two tiers necessarily converge. The
+     ink ramp itself is untouched — a component using --ink-400 as a rule or
+     an icon still gets the drawn value. The hierarchy these two used to
+     carry is now size and weight, which is where it was already doing most
+     of the work. See design_handoff_triage/NOTES.md. */
+  --text-tertiary: #666662;
+  --text-placeholder: #666662;
   --text-disabled: var(--ink-300);
   --text-inverse: var(--paper-050);
   --text-accent: var(--red-600);
