@@ -41,12 +41,16 @@ unchanged. Only the two semantic text tokens moved. No other page reads
 either one (app.css references six custom properties, and these are not among
 them).
 
-**Left failing, deliberately:** the primary button's label, `#f5f5f3` on the
-`#e5231b` fill, at 4.19:1. Darkening the text makes it worse. White reaches
-4.58:1 but SIGNAL bans harsh white and `--text-inverse` is shared with the ink
-toast; `#f5f5f3` on `#c51a13` reaches 5.45:1 but that changes the resting
-fill. Both are fill decisions, and this wave was told not to change fills.
-Owner's call — recorded as the one ❌ in the report.
+**Was left failing, resolved 2026-08-24 (owner delegated the call):** the
+primary button's label, `#f5f5f3` on the `#e5231b` fill, sat at 4.19:1.
+Darkening the text makes it worse; white reaches only 4.58:1 and SIGNAL bans
+harsh white. The resting fill is now the 600 — `--surface-accent: #c51a13`
+(5.45:1), hover `#a5140e`, active `#7f0f0a` — the same reasoning the design's
+own divergence note used when it made red *text* the 600 ("the brand red
+fails AA at label sizes"), applied to a 13–14px label on a fill. The brand
+`#e5231b` keeps the focus ring (`--focus-ring` reads `--red-500` directly)
+and the danger fill. Side effect: the checked checkbox's white tick also
+gains contrast. J7 is now ✅ in the report.
 
 ### The rise keyframes are `triage-rise` / `toast-rise`, not `bodega-rise`
 

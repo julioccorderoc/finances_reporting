@@ -114,10 +114,13 @@
   /* Selection is grey, not tinted: a red row in a ledger reads as an error. */
   --surface-selected: var(--paper-200);
   --surface-inverse: var(--ink-900);
-  /* The primary action is the one red fill on the screen. */
-  --surface-accent: var(--red-500);
-  --surface-accent-hover: var(--red-600);
-  --surface-accent-active: var(--red-700);
+  /* The primary action is the one red fill on the screen. Resting fill is the
+     600 (J7: #f5f5f3 on the brand 500 is 4.19:1 at label sizes — the same
+     reason red *text* is the 600, per the design's own divergence note). The
+     brand 500 keeps the focus ring and the danger fill. */
+  --surface-accent: var(--red-600);
+  --surface-accent-hover: var(--red-700);
+  --surface-accent-active: var(--red-800);
 
   /* ── Semantic: border. Hairlines do the structural work ───────────────── */
   --border-subtle: #dbdad5;

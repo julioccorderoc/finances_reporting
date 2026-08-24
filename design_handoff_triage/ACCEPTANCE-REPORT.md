@@ -10,11 +10,11 @@
 > `NOTES.md`; this is the checklist view. Reconstructed 2026-08-23.
 
 **113 criteria (the header of `ACCEPTANCE-CRITERIA.md` says 74; the file
-carries 113). 112 ✅ · 1 ❌ · 0 N-A.**
+carries 113). 113 ✅ · 0 ❌ · 0 N-A.**
 
-The one ❌ is J7's primary button: `#f5f5f3` on `#e5231b` = 4.19:1 at
-13–14px/500. Every remedy changes a fill — the owner's call, options in
-`NOTES.md` §Wave 3.
+The last ❌ — J7's primary button, `#f5f5f3` on `#e5231b` at 4.19:1 — was
+resolved 2026-08-24 with the owner's delegated call: the resting accent fill
+is now the text-safe `#c51a13` (5.45:1). `NOTES.md` §Wave 3 has the ladder.
 
 ## A · Queue and ordering — 14/14 ✅
 
@@ -132,7 +132,9 @@ The one ❌ is J7's primary button: `#f5f5f3` on `#e5231b` = 4.19:1 at
 
 - I1 ✅ greyscale + the one red only
 - I2 ✅ positive money is ink with `+`
-- I3 ✅ red text `#c51a13`; `#e5231b` fills/rules/ring only
+- I3 ✅ red text `#c51a13`; `#e5231b` never text — since the J7 resolution it
+  carries the focus ring and the danger fill, while the accent fill rests on
+  `#c51a13` (NOTES §Wave 3)
 - I4 ✅ weight separates attention from action
 - I5 ✅ raised lighter than canvas; hairlines, not shadows
 - I6 ✅ radii 2/4/8 only
@@ -145,7 +147,7 @@ The one ❌ is J7's primary button: `#f5f5f3` on `#e5231b` = 4.19:1 at
 - I10 ✅ specific toast copy, 2600ms
 - I11 ✅ copy verbatim (except the logged pluralisation)
 
-## J · Accessibility and input — 6/7 · 1 ❌
+## J · Accessibility and input — 7/7 ✅
 
 - J1 ✅ role, aria-modal, label
 - J2 ✅ focus in on open, trapped, returns to the originating row by item id
@@ -154,9 +156,10 @@ The one ❌ is J7's primary button: `#f5f5f3` on `#e5231b` = 4.19:1 at
 - J4 ✅ accessible names on every icon-only control
 - J5 ✅ polite toast + queue announcements
 - J6 ✅ tab order = visual order; chips keyboard-operable
-- J7 ❌ **primary button label 4.19:1 on `#e5231b`** — every fix changes a
-  fill; owner's call (options in NOTES §Wave 3). Everything else measured AA
-  at size, after darkening `--text-tertiary`/`--text-placeholder` to `#666662`
+- J7 ✅ everything measured AA at size, after darkening
+  `--text-tertiary`/`--text-placeholder` to `#666662` and (2026-08-24, owner's
+  delegated call) moving the resting accent fill to `#c51a13` — the primary
+  button label now sits at 5.45:1 (NOTES §Wave 3)
 
 ## K · Data and writes — 12/12 ✅
 
