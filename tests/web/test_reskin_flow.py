@@ -330,6 +330,59 @@ def test_sort_chips_are_house_buttons_and_the_active_one_is_ink(
     assert 'hx-vals=\'{"sort": "amount_native", "direction": "desc", "page": "1"}\'' in body
 
 
+def test_per_page_sits_in_the_list_toolbar_not_the_filter_form(
+    seeded_web_db: sqlite3.Connection, web_client_factory
+) -> None:
+    """Owner decision 2026-09-03: 'put it on the table in a subtle way'.
+
+    The control moves into #tx-list's sort bar, beside the match count,
+    so every swap re-renders it with the current size. It stays a member
+    of the filter form through ``form="tx-filters"`` — the form's own
+    requests, the sort chips and the pager all serialise the form, so the
+    size survives a filter change without a hidden mirror. A change on it
+    fires its own request (a change outside the form's subtree never
+    reaches the form's hx-trigger).
+    """
+    client = web_client_factory()
+
+    body = client.get("/transactions").text
+
+    form = re.search(r'<form\s+id="tx-filters".*?</form>', body, re.S)
+    assert form and 'name="page_size"' not in form.group(0)
+    assert "Per page" not in form.group(0)
+
+    bar = re.search(r'<div class="flow-sortbar">.*?</div>', body, re.S)
+    assert bar, "no sort bar"
+    bar_html = bar.group(0)
+    assert bar_html.index('class="flow-count"') < bar_html.index("flow-pagesize")
+    select = re.search(r"<select[^>]*name=\"page_size\"[^>]*>.*?</select>", bar_html, re.S)
+    assert select, "no page_size select in the sort bar"
+    tag = select.group(0)
+    for needle in (
+        'id="tx-page-size"',
+        'form="tx-filters"',
+        'aria-label="Rows per page"',
+        'hx-get="/_partial/transactions/list"',
+        'hx-target="#tx-list"',
+        'hx-include="#tx-filters"',
+        'hx-push-url="true"',
+        "hx-vals='{\"page\": \"1\"}'",
+    ):
+        assert needle in tag, needle
+    assert re.findall(r'<option value="(\d+)"', tag) == ["25", "50", "100"]
+    assert '<option value="50" selected>' in tag
+    assert "per page" in bar_html
+
+    swapped = client.get(
+        "/_partial/transactions/list", params={"date_from": "2000-01-01", "page_size": "100"}
+    ).text
+    assert '<option value="100" selected>' in swapped
+    assert '<option value="50" selected>' not in swapped
+
+    css = FLOW_CSS.read_text(encoding="utf-8")
+    assert ".flow-pagesize" in css
+
+
 def test_empty_state_offers_a_way_back(
     seeded_web_db: sqlite3.Connection, web_client_factory
 ) -> None:
