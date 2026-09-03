@@ -22,6 +22,24 @@ in the UI, design still open; borrowed money — the cases in sitting E.**
 
 ## Sitting A — Delete a transaction (ADR-022), then remove the ten Binance twins
 
+> **Done 2026-09-03.** ADR-022 Accepted; migration 023, `transactions_repo.delete`,
+> the ingest skip, the Flow-modal control and the `doctor` check shipped
+> (commits `274a5c8` tests, `b690cd4` implementation), and the repair ran on the
+> live ledger after `backups/finances-20260903-161237-pre-dedupe.db`:
+> 3,009 → 2,999 rows, ten tombstones, Spot USDT opening 5,637.7657508 →
+> 3,377.0457508, every Binance balance byte-identical before and after.
+> November 2025 spending falls from $3,830.08 to $1,794.86; Dec −$25,
+> Jan −$4, Mar −$176.50, Apr −$20. Script:
+> `scripts/dedupe_binance_pay_twins_2026_09_03.py` (dry-run by default).
+> Two deviations from the brief, both forced by the live data and written up
+> in `ERRORS.md`: the twin guard compares **Caracas** days (five of the ten
+> twins sit on the next UTC day) and matches across **any Binance account**
+> (Pay history always reports Spot; five legacy rows are on Funding).
+> Left open: the Flow modal is also reachable from the dashboard, where a
+> delete now removes the card but the rest of the page (KPI tiles, chart)
+> still shows pre-delete figures until a reload.
+
+
 Owner said yes to deleting duplicates. ADR-022
 (`docs/ADR/ADR-022-deleting-a-transaction.md`, Status Proposed) is the
 design: a real `DELETE` plus a tombstone `(source, source_ref)` that
