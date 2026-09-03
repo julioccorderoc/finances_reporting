@@ -508,9 +508,10 @@ def test_rates_range_toggle_keeps_its_hx_contract_as_tabs(
             'hx-get="/_partial/rates/chart"',
             'hx-target="#rates-chart"',
             'hx-swap="outerHTML"',
-            'hx-push-url="true"',
         ):
             assert attr in button, attr
+        # The page's URL is pushed, never the partial's (see the test below).
+        assert re.search(r'hx-push-url="/rates\?range_days=\d+"', button)
         assert re.search(r"hx-vals='\{\"range_days\": \"\d+\"\}'", button)
         assert "tbtn tbtn-sm rpt-tab" in button
     assert sum("is-on" in b for b in buttons) == 1
@@ -626,3 +627,15 @@ def test_reports_css_owns_the_chart_height_and_reads_only_tokens() -> None:
     assert re.findall(r"#[0-9a-fA-F]{3,8}\b", css) == []
     # Depth is hairlines and the raised-on-canvas inversion, never a blur.
     assert "blur(" not in css
+
+
+def test_rates_range_toggle_pushes_the_page_url_not_the_partial(
+    seeded_web_db: sqlite3.Connection, web_client_factory
+) -> None:
+    """A reload after a toggle must land on /rates, never on the bare chart
+    fragment. ``hx-push-url="true"`` would push the partial's own URL."""
+    with web_client_factory() as client:
+        page = client.get("/rates").text
+
+    assert 'hx-push-url="/rates?range_days=90"' in page
+    assert 'hx-push-url="true"' not in page.split('id="rates-chart"', 1)[1].split("</div>", 1)[0]

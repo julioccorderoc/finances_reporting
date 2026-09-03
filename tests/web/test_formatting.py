@@ -80,9 +80,11 @@ def test_fmt_filters_registered_on_app_templates(web_db_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_macros_render_grouped_amount_and_weekday_date(
+def test_rows_render_the_shared_formatters(
     web_db: sqlite3.Connection, web_client_factory
 ) -> None:
+    """The Flow row goes through fmt_native / fmt_date (viewer reskin):
+    grouped, sign before symbol, the U+2212 minus, weekday + year."""
     _seed_negative_usd_expense(web_db)
     client = web_client_factory()
     resp = client.get(
@@ -91,9 +93,9 @@ def test_macros_render_grouped_amount_and_weekday_date(
     )
     assert resp.status_code == 200
     body = resp.text
-    # format_amount → fmt_number: grouped, sign preserved (native column).
-    assert "-1,234.56" in body
-    # format_date → fmt_date: weekday + year (2024 != current year).
+    # fmt_native on a USD row: the typographic minus, then the symbol.
+    assert "−$1,234.56" in body
+    # fmt_date: weekday + year (2024 != current year).
     assert "Mon, Jan 15, 2024" in body
 
 
@@ -159,8 +161,10 @@ def test_transactions_list_usd_sign_before_symbol(
     )
     assert resp.status_code == 200
     body = resp.text
-    assert "-$1,234.56" in body
+    # fmt_usd since the reskin: U+2212, sign before symbol.
+    assert "−$1,234.56" in body
     assert "$-1,234.56" not in body
+    assert "$−1,234.56" not in body
 
 
 def test_transaction_modal_usd_sign_before_symbol(
@@ -173,8 +177,10 @@ def test_transaction_modal_usd_sign_before_symbol(
     client = web_client_factory()
     resp = client.get(f"/_partial/transactions/{txn_id}/modal")
     assert resp.status_code == 200
-    assert "-$1,234.56" in resp.text
+    # fmt_usd since the reskin: U+2212, sign before symbol.
+    assert "−$1,234.56" in resp.text
     assert "$-1,234.56" not in resp.text
+    assert "$−1,234.56" not in resp.text
 
 
 def test_accounts_page_usd_sign_before_symbol(
