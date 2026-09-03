@@ -4,19 +4,23 @@
    <label>, so click and keyboard both work with no JS at all — Alpine only
    adds the drag highlight and the drop-to-fill shortcut.
 
-   Styling leans on .upload-* in app.css rather than utilities: the vendored
-   tailwind.css is a fixed extract with no build step and carries no
-   rounded-md / sr-only / border-2 / border-t.
+   A raised panel behind a <details>; the summary is a control row with the
+   upload glyph; the drop area is a dashed hairline on the canvas that goes
+   strong-bordered and raised while a file is over it. Styles: .flow-upload-*
+   and .flow-drop* in static/css/flow.css.
 #}
-<section class="mt-4" data-provincial-dropzone>
+{% from "_icons.html" import icon %}
+<section class="flow-upload" data-provincial-dropzone>
   {# The rail's "Upload a statement" lands here as /transactions?upload=1#upload
      and expects the panel open on arrival. #}
-  <details class="upload-card" id="upload"{% if request.query_params.get("upload") %} open{% endif %}>
-    <summary class="upload-panel-summary cursor-pointer text-sm text-slate-700">
-      Import a Provincial statement
+  <details class="flow-upload-panel" id="upload"{% if request.query_params.get("upload") %} open{% endif %}>
+    <summary class="flow-upload-summary">
+      {{ icon("upload", 16) }}
+      <span>Import a Provincial statement</span>
+      <span class="flow-upload-chevron">{{ icon("chevron-down", 14) }}</span>
     </summary>
 
-    <div class="upload-panel-body p-3">
+    <div class="flow-upload-body">
       <form
         id="provincial-upload-form"
         hx-post="/_partial/uploads/provincial/preview"
@@ -25,9 +29,9 @@
         hx-swap="innerHTML"
       >
         <label
-          class="upload-drop px-4 py-6"
+          class="flow-drop"
           x-data="{ over: false }"
-          x-bind:class="over && 'upload-drop-over'"
+          x-bind:class="over && 'is-over'"
           x-on:dragover.prevent="over = true"
           x-on:dragleave.prevent="over = false"
           x-on:drop.prevent="
@@ -40,7 +44,7 @@
             type="file"
             name="file"
             accept=".csv,.xls"
-            class="upload-file-input"
+            class="flow-drop-input"
             x-ref="file"
             hx-trigger="change"
             hx-post="/_partial/uploads/provincial/preview"
@@ -49,10 +53,8 @@
             hx-swap="innerHTML"
             hx-include="closest form"
           >
-          <span class="text-sm text-slate-600">
-            Drop the file here, or click to choose
-          </span>
-          <span class="mt-1 block text-xs text-slate-500">
+          <span class="flow-drop-line">Drop the file here, or click to choose</span>
+          <span class="flow-drop-hint">
             .csv or .xls straight from the bank &mdash; the name doesn't matter.
             Nothing is written until you confirm.
           </span>

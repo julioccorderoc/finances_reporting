@@ -6,50 +6,51 @@
    prefix is evaluated at request time, so it always reads the URL the
    filter form last pushed (hx-push-url) — a hidden input set on
    page load would go stale after the first filter change.
-#}
-<section id="saved-views" class="mb-4">
-  <div class="flex flex-wrap items-center gap-2">
-    {% if views %}
-      <div class="view-chips" role="list">
-        {% for v in views %}
-          <span class="view-chip" role="listitem">
-            <a
-              data-view-chip
-              href="/transactions{% if v.query_string %}?{{ v.query_string }}{% endif %}"
-            >{{ v.name }}</a>
-            <button
-              type="button"
-              class="view-chip-delete"
-              aria-label="Delete saved view {{ v.name }}"
-              hx-post="/_partial/views/{{ v.id }}/delete"
-              hx-confirm="Delete saved view “{{ v.name }}”?"
-              hx-target="#saved-views"
-              hx-swap="outerHTML"
-            >&times;</button>
-          </span>
-        {% endfor %}
-      </div>
-    {% endif %}
 
-    <form
-      class="flex items-center gap-2"
-      hx-post="/_partial/views"
-      hx-target="#saved-views"
-      hx-swap="outerHTML"
-      hx-vals='js:{"query_string": window.location.search.replace(/^\?/, "")}'
+   Each view is a bookmark chip: a hairline, radius 2, the bookmark glyph,
+   and an icon-only delete control.
+#}
+{% from "_icons.html" import icon %}
+<section id="saved-views" class="flow-views">
+  {% if views %}
+    <div class="flow-view-chips" role="list">
+      {% for v in views %}
+        <span class="flow-view-chip" role="listitem">
+          {{ icon("bookmark", 13) }}
+          <a
+            data-view-chip
+            href="/transactions{% if v.query_string %}?{{ v.query_string }}{% endif %}"
+          >{{ v.name }}</a>
+          <button
+            type="button"
+            class="ticon flow-view-delete"
+            aria-label="Delete saved view {{ v.name }}"
+            hx-post="/_partial/views/{{ v.id }}/delete"
+            hx-confirm="Delete saved view “{{ v.name }}”?"
+            hx-target="#saved-views"
+            hx-swap="outerHTML"
+          >{{ icon("x", 12) }}</button>
+        </span>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  <form
+    class="flow-views-save"
+    hx-post="/_partial/views"
+    hx-target="#saved-views"
+    hx-swap="outerHTML"
+    hx-vals='js:{"query_string": window.location.search.replace(/^\?/, "")}'
+  >
+    <input
+      type="text"
+      name="name"
+      required
+      maxlength="60"
+      placeholder="Save this view as…"
+      autocomplete="off"
+      class="flow-input"
     >
-      <input
-        type="text"
-        name="name"
-        required
-        maxlength="60"
-        placeholder="Save current view as…"
-        class="border border-slate-300 rounded px-2 py-1 text-sm"
-      >
-      <button
-        type="submit"
-        class="px-3 py-1.5 text-sm border border-slate-300 rounded bg-white hover:bg-slate-100"
-      >Save view</button>
-    </form>
-  </div>
+    <button type="submit" class="tbtn tbtn-sm">Save view</button>
+  </form>
 </section>

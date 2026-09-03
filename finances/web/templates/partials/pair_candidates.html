@@ -1,61 +1,63 @@
 {# Manual pair picker: unpaired bank rows near this sell, closest first.
    Re-rendered standalone by GET /_partial/transactions/{id}/pair-candidates,
-   so it must carry its own wrapper id. #}
-<div id="pair-candidates" class="flex flex-col gap-2">
-  <p class="text-xs text-slate-500">
-    {% if data.expected_ves is not none %}
-      expected {{ "{:,.2f}".format(data.expected_ves) }} Bs
-    {% else %}
-      no user rate on this sell — set one to score the matches
-    {% endif %}
+   so it must carry its own wrapper id.
+
+   Hairline rows, mono figures through fmt_native/fmt_date, the confirm
+   control as the small house button. Closeness is weight, never green.
+#}
+<div id="pair-candidates" class="flow-pairs">
+  <p class="flow-pairs-note">
+    {%- if data.expected_ves is not none -%}
+      Expected on the bank side: <span class="flow-mono">{{ data.expected_ves | fmt_native("VES") }}</span>
+    {%- else -%}
+      No user rate on this sell — set one to score the matches
+    {%- endif -%}
   </p>
 
-  {% for candidate in data.candidates %}
-    <div class="flex items-center justify-between gap-3 border border-slate-200 rounded px-2 py-1">
-      <div class="flex flex-col">
-        <span class="text-xs text-slate-500">{{ candidate.card.occurred_at.strftime('%a, %b %d') }}</span>
-        <span class="text-sm text-slate-800">
-          {{ "{:,.2f}".format(candidate.card.amount_native) }} {{ candidate.card.currency }}
+  {% if data.candidates %}
+  <div class="flow-pair-list">
+    {% for candidate in data.candidates %}
+      <div class="flow-pair">
+        <span class="flow-pair-text">
+          <span class="flow-pair-date">{{ candidate.card.occurred_at | fmt_date }}</span>
+          <span class="flow-pair-amount">{{ candidate.card.amount_native | fmt_native(candidate.card.currency) }}</span>
+          <span class="flow-pair-raw" title="{{ candidate.card.description }}">{{ candidate.card.description }}</span>
         </span>
-        <span class="text-xs text-slate-500 break-all">{{ candidate.card.description }}</span>
-      </div>
-      <div class="flex items-center gap-2">
-        <span class="text-xs {% if candidate.drift_ratio is not none and candidate.drift_ratio < 0.02 %}text-emerald-700{% else %}text-slate-500{% endif %}">
-          {% if candidate.drift_ratio is not none %}
-            {{ "{:.2%}".format(candidate.drift_ratio) }}
+        <span class="flow-pair-actions">
+          <span class="flow-pair-drift{% if candidate.drift_ratio is not none and candidate.drift_ratio < 0.02 %} is-close{% endif %}">
+            {%- if candidate.drift_ratio is not none %}{{ "{:.2%}".format(candidate.drift_ratio) }}{% else %}—{% endif -%}
+          </span>
+          {% if candidate.pairable %}
+            <button
+              type="button"
+              class="tbtn tbtn-sm"
+              hx-post="/_partial/transactions/{{ data.sell.id }}/pair/{{ candidate.card.id }}"
+              hx-target="#tx-list"
+              hx-swap="outerHTML"
+            >Pair</button>
           {% else %}
-            —
+            <button
+              type="button"
+              class="tbtn tbtn-sm"
+              disabled
+              title="{{ candidate.blocked_reason }}"
+            >{{ candidate.blocked_reason }}</button>
           {% endif %}
         </span>
-        {% if candidate.pairable %}
-          <button
-            type="button"
-            class="text-xs border border-slate-800 rounded px-2 py-1"
-            hx-post="/_partial/transactions/{{ data.sell.id }}/pair/{{ candidate.card.id }}"
-            hx-target="#tx-list"
-            hx-swap="outerHTML"
-          >pair</button>
-        {% else %}
-          <button
-            type="button"
-            class="text-xs border border-slate-200 text-slate-400 rounded px-2 py-1"
-            disabled
-            title="{{ candidate.blocked_reason }}"
-          >{{ candidate.blocked_reason }}</button>
-        {% endif %}
       </div>
-    </div>
+    {% endfor %}
+  </div>
   {% else %}
-    <p class="text-sm text-slate-500">No unpaired bank rows in this window.</p>
-  {% endfor %}
+    <p class="flow-muted">No unpaired bank rows in this window.</p>
+  {% endif %}
 
   {% if data.window_days < 7 %}
     <button
       type="button"
-      class="text-xs text-slate-600 underline self-start"
+      class="tlink"
       hx-get="/_partial/transactions/{{ data.sell.id }}/pair-candidates?window_days=7"
       hx-target="#pair-candidates"
       hx-swap="outerHTML"
-    >widen to ±7 days</button>
+    >Widen to ±7 days</button>
   {% endif %}
 </div>

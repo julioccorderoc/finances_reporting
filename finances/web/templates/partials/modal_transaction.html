@@ -1,30 +1,39 @@
 {# Transaction edit modal (EPIC-024 / Phase 3 / ADR-012).
 
-   Rendered into #tx-modal-host by HTMX when a card is clicked. The
+   Rendered into #tx-modal-host by HTMX when a row is clicked. The
    modal closes via the ``HX-Trigger: closeModal`` response header set
    on the POST handler, which fires a window event the base.html
    <body x-data> listener listens for to clear the host div.
 
-   Encoding choice (WP2 / ux-overhaul §2): ``set_category`` and
-   ``set_user_rate`` are dirty-tracked hidden inputs bound to Alpine
-   state — they submit ``true`` only when the user actually changed
-   that control. Clearing a category is the explicit "× remove
-   category" button, never a side effect of an untouched select.
-   Documented in routers/partials.py.
+   Encoding choice (WP2 / ux-overhaul §2): ``set_category``,
+   ``set_user_rate`` and ``set_notes`` are dirty-tracked hidden inputs
+   bound to Alpine state — they submit ``true`` only when the user
+   actually changed that control. Clearing a category is the explicit
+   "× remove category" button, never a side effect of an untouched
+   picker. Documented in routers/partials.py.
 
-   What is editable: ``category_id``, ``user_rate``.
+   What is editable: ``category_id``, ``user_rate``, ``notes``.
    What is read-only: everything else (description, amount, account,
    occurred_at, source, source_ref, kind, rate_source). This protects
    audit-trail / dedup-key invariants per ADR-012 / Phase 3 spec.
 
    No needs_review toggle (rule-012 — flag is fully derived from
    rates.resolve and recomputed on every save).
+
+   The dialog is the SIGNAL one (.flow-modal-* in static/css/flow.css):
+   a scrim with blur, a raised card with radius 8 and --shadow-pop, a
+   header and a footer separated by hairlines, the body scrolling
+   between them. The Save button sits in the footer, outside the form,
+   and associates by ``form=`` id — the same pattern as the triage
+   dialog, so the save stays a real form submission htmx binds to.
+   ``form.tx-modal-form`` is the hook base.html's dirty guard queries;
+   it stays on the form.
 #}
-{% from "_macros.html" import rate_source_badge, needs_review_badge,
-                              kind_class, format_date, format_amount %}
+{% from "_icons.html" import icon %}
+{% from "_triage.html" import money, prov %}
 
 <div
-  class="tx-modal-overlay"
+  class="flow-modal-over"
   data-tx-modal
   data-tx-id="{{ txn.id }}"
   x-data="{
@@ -33,7 +42,8 @@
       return t instanceof Element && t.matches('input, textarea, select, button');
     }
   }"
-  x-init="$nextTick(() => { const c = $el.querySelector('.tx-modal-card'); if (c) c.focus(); })"
+  x-init="$nextTick(() => { const c = $el.querySelector('.flow-modal'); if (c) c.focus(); })"
+  @click.self="window.dispatchEvent(new CustomEvent('close-modal'))"
   @keydown.escape.window="window.dispatchEvent(new CustomEvent('close-modal'))"
   @keydown.window="
     if (isTyping($event)) return;
@@ -42,172 +52,152 @@
       const chip = $el.querySelectorAll('[data-chip]')[Number(key) - 1];
       if (chip) { chip.click(); $event.preventDefault(); }
     } else if (key === 'Enter') {
-      const save = $el.querySelector('form.tx-modal-form button[type=submit]');
+      const save = $el.querySelector('[data-modal-save]');
       if (save) { save.click(); $event.preventDefault(); }
     }
   "
 >
-  <div class="tx-modal-card" role="dialog" aria-modal="true" tabindex="-1">
-    {# 1. Header --------------------------------------------------------- #}
-    <header class="tx-modal-header">
-      <div class="flex items-baseline gap-2">
-        <span class="text-xs uppercase tracking-wide {{ kind_class(card.kind) }}">{{ card.kind }}</span>
-        <time class="text-xs text-slate-500 tabular-nums" datetime="{{ card.occurred_at.isoformat() }}">
-          {{ format_date(card.occurred_at) }}
-        </time>
+  <div class="flow-modal" role="dialog" aria-modal="true" tabindex="-1">
+    {# 1. Header: what this row is. ------------------------------------ #}
+    <header class="flow-modal-header">
+      <div class="flow-modal-title">
+        <span class="teyebrow">{{ card.kind }} · {{ card.occurred_at | fmt_date }}</span>
+        <span class="flow-modal-name">{{ txn.description or '—' }}</span>
+        <span class="flow-modal-when">{{ account_name }}{% if card.category_name %} · {{ card.category_name }}{% endif %}</span>
       </div>
-      <div class="mt-1 text-lg font-semibold tabular-nums">
-        {{ format_amount(card.amount_native) }} <span class="text-sm text-slate-500">{{ card.currency }}</span>
-        {% if card.amount_usd is not none %}
-          <span class="ml-2 text-sm text-slate-500">{{ card.amount_usd | fmt_money }}</span>
-        {% else %}
-          <span class="ml-2 text-sm text-slate-400">&mdash;</span>
-        {% endif %}
-      </div>
-      <div class="mt-1 text-xs text-slate-500">{{ account_name }}</div>
+      {% if card.needs_review %}<span class="tbadge tbadge-warning tbadge-dot">Needs review</span>{% endif %}
+      <button type="button" class="ticon" aria-label="Close" @click="window.dispatchEvent(new CustomEvent('close-modal'))">{{ icon("x", 14) }}</button>
     </header>
 
-    {# 2. Provenance ----------------------------------------------------- #}
-    <section class="tx-modal-section">
-      <h3 class="tx-modal-section-title">Provenance</h3>
-      <dl class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-600">
-        <dt>source</dt>
-        <dd class="font-mono">{{ txn.source }}</dd>
+    <div class="flow-modal-body">
+      {# 2. The facts: the money pair, then provenance. ------------------ #}
+      <section class="flow-modal-section">
+        {{ money(card, size="lg", align="left") }}
+        <dl class="flow-facts">
+          <dt class="teyebrow">Source</dt>
+          <dd class="flow-mono">{{ txn.source }}</dd>
 
-        <dt>source_ref</dt>
-        <dd class="font-mono break-all">{{ txn.source_ref or '—' }}</dd>
+          <dt class="teyebrow">Reference</dt>
+          <dd class="flow-mono">{{ txn.source_ref or '—' }}</dd>
 
-        <dt>created_at</dt>
-        <dd class="font-mono">
-          {% if txn.created_at %}{{ format_date(txn.created_at) }}{% else %}&mdash;{% endif %}
-        </dd>
+          <dt class="teyebrow">Rate</dt>
+          <dd>
+            {%- set chip = prov_chip(card.rate_source, is_bcv_fallback=card.is_bcv_fallback, approximate=card.approximate) -%}
+            {%- if chip %}{{ prov(chip, card.rate) }}{% else %}<span class="flow-mono" data-rate-source="{{ card.rate_source }}">{{ card.rate_source }}</span>{% endif -%}
+            {%- if card.is_bcv_fallback %} <span class="flow-hint">BCV fallback — reference only</span>{% endif -%}
+          </dd>
 
-        <dt>updated_at</dt>
-        <dd class="font-mono">
-          {% if txn.updated_at %}{{ format_date(txn.updated_at) }}{% else %}&mdash;{% endif %}
-        </dd>
+          <dt class="teyebrow">Your rate</dt>
+          <dd class="flow-mono">{% if txn.user_rate is not none %}{{ txn.user_rate }}{% else %}—{% endif %}</dd>
 
-        <dt>rate_source</dt>
-        <dd>
-          {{ rate_source_badge(card.rate_source, card.is_bcv_fallback) }}
-          {% if card.is_bcv_fallback %}<span class="text-amber-700 ml-1">(BCV fallback — reference only)</span>{% endif %}
-        </dd>
+          <dt class="teyebrow">Created</dt>
+          <dd class="flow-mono">{% if txn.created_at %}{{ txn.created_at | fmt_date }}{% else %}—{% endif %}</dd>
 
-        <dt>user_rate (current)</dt>
-        <dd class="font-mono">
-          {% if txn.user_rate is not none %}{{ txn.user_rate }}{% else %}&mdash;{% endif %}
-        </dd>
+          <dt class="teyebrow">Updated</dt>
+          <dd class="flow-mono">{% if txn.updated_at %}{{ txn.updated_at | fmt_date }}{% else %}—{% endif %}</dd>
+        </dl>
+      </section>
 
-        <dt>needs_review</dt>
-        <dd>
-          {% if card.needs_review %}{{ needs_review_badge() }}{% else %}<span class="text-slate-400">no</span>{% endif %}
-        </dd>
-      </dl>
-    </section>
-
-    {# 3. Description ----------------------------------------------------- #}
-    <section class="tx-modal-section">
-      <h3 class="tx-modal-section-title">Description</h3>
-      <p class="text-sm text-slate-800 whitespace-pre-wrap break-words">{{ txn.description or '—' }}</p>
-    </section>
-
-    {# 3b. Manual pairing — unpaired outgoing Binance rows only ---------- #}
-    {% if txn.transfer_id is none and txn.source == 'binance' and txn.amount < 0 %}
-    <section class="tx-modal-section">
-      <h3 class="tx-modal-section-title">Pair with deposit</h3>
-      <div
-        hx-get="/_partial/transactions/{{ txn.id }}/pair-candidates"
-        hx-trigger="load"
-        hx-swap="outerHTML"
-      >
-        <p class="text-sm text-slate-400">Loading candidates…</p>
-      </div>
-    </section>
-    {% endif %}
-
-    {# 4. Editable form --------------------------------------------------- #}
-    <form
-      class="tx-modal-form"
-      hx-post="/_partial/transactions/{{ txn.id }}/edit"
-      hx-target="[data-tx-id='{{ txn.id }}']"
-      hx-swap="outerHTML"
-      x-data="{ catDirty: false, rateDirty: false, notesDirty: false }"
-      x-init="$nextTick(() => { const el = $root.querySelector('[name=category_id]'); if (el) el.focus(); })"
-    >
-      {# Dirty-tracked keep-set sentinels (WP2/WP3): submit true only when
-         the user actually touched user_rate / notes. The picker (WP4)
-         owns set_category + category_id and marks set_category=true only
-         once the user picks or removes a category, so an untouched picker
-         can never wipe an existing category. #}
-      <input type="hidden" name="set_user_rate" value="false" :value="rateDirty ? 'true' : 'false'">
-      <input type="hidden" name="set_notes" value="false" :value="notesDirty ? 'true' : 'false'">
-
-      <div class="block">
-        <span class="text-xs uppercase tracking-wide text-slate-500">Category</span>
-        {% with picker_selected = txn.category_id %}
-          {% include "partials/category_picker.html" %}
-        {% endwith %}
-      </div>
-
-      <label class="block" @input="rateDirty = true">
-        <span class="text-xs uppercase tracking-wide text-slate-500">User rate</span>
-        <input
-          type="text"
-          name="user_rate"
-          inputmode="decimal"
-          autocomplete="off"
-          value="{{ txn.user_rate if txn.user_rate is not none else '' }}"
-          placeholder="{% if card.amount_usd is not none and card.rate_source != 'user_rate' and card.rate_source != 'native_usd' %}fallback: {{ card.rate_source }}{% else %}native amount in {{ txn.currency }}/USD{% endif %}"
-          class="mt-1 w-full border border-slate-300 rounded px-2 py-1 text-sm font-mono"
+      {# 3. Manual pairing — unpaired outgoing Binance rows only. -------- #}
+      {% if txn.transfer_id is none and txn.source == 'binance' and txn.amount < 0 %}
+      <section class="flow-modal-section">
+        <span class="teyebrow">Pair with deposit</span>
+        <div
+          hx-get="/_partial/transactions/{{ txn.id }}/pair-candidates"
+          hx-trigger="load"
+          hx-swap="outerHTML"
         >
-        <span class="text-[11px] text-slate-500">
-          empty = clear (re-derives needs_review)
-        </span>
-      </label>
+          <p class="flow-muted">Loading candidates…</p>
+        </div>
+      </section>
+      {% endif %}
 
-      <label class="block" @input="notesDirty = true">
-        <span class="text-xs uppercase tracking-wide text-slate-500">Notes</span>
-        <textarea
-          name="notes"
-          rows="2"
-          class="mt-1 w-full border border-slate-300 rounded px-2 py-1 text-sm"
-          placeholder="private note — survives re-ingest"
-        >{{ txn.notes if txn.notes is not none else '' }}</textarea>
-      </label>
+      {# 4. The decision: category, rate, note. -------------------------- #}
+      <form
+        id="tx-edit-form"
+        class="tx-modal-form flow-modal-form"
+        hx-post="/_partial/transactions/{{ txn.id }}/edit"
+        hx-target="[data-tx-id='{{ txn.id }}']"
+        hx-swap="outerHTML"
+        x-data="{ catDirty: false, rateDirty: false, notesDirty: false }"
+        x-init="$nextTick(() => { const el = $root.querySelector('[name=category_id]'); if (el) el.focus(); })"
+      >
+        {# Dirty-tracked keep-set sentinels (WP2/WP3): submit true only when
+           the user actually touched user_rate / notes. The picker (WP4)
+           owns set_category + category_id and marks set_category=true only
+           once the user picks or removes a category, so an untouched picker
+           can never wipe an existing category. #}
+        <input type="hidden" name="set_user_rate" value="false" :value="rateDirty ? 'true' : 'false'">
+        <input type="hidden" name="set_notes" value="false" :value="notesDirty ? 'true' : 'false'">
 
-      <div class="tx-modal-actions">
-        <button
-          type="button"
-          class="px-3 py-1.5 text-sm border border-slate-300 rounded bg-white hover:bg-slate-50"
-          @click="window.dispatchEvent(new CustomEvent('close-modal'))"
-        >Cancel</button>
-        <button
-          type="submit"
-          class="px-3 py-1.5 text-sm border border-slate-900 rounded bg-slate-900 text-white hover:bg-slate-800"
-        >Save</button>
-      </div>
-    </form>
+        <div class="flow-modal-section">
+          <span class="teyebrow">Category</span>
+          {% with picker_selected = txn.category_id %}
+            {% include "partials/category_picker.html" %}
+          {% endwith %}
+        </div>
 
-    {# 5. History (Wave 2 Thing 3) ---------------------------------------
-       Every manual edit (category / user_rate / notes) recorded by
-       transactions_repo.update(). Native <details> — no JS. category_id
-       old/new values are resolved to names by the router; the section is
-       omitted entirely when the txn has never been edited. #}
-    {% if history %}
-    <section class="tx-modal-section">
-      <details>
-        <summary class="tx-modal-section-title">History ({{ history | length }})</summary>
-        <ul class="mt-2 text-xs text-slate-600">
+        <label class="flow-field" @input="rateDirty = true">
+          <span class="teyebrow">Your rate</span>
+          <span class="tinput tinput-mono">
+            <input
+              type="text"
+              name="user_rate"
+              inputmode="decimal"
+              autocomplete="off"
+              value="{{ txn.user_rate if txn.user_rate is not none else '' }}"
+              placeholder="{% if card.amount_usd is not none and card.rate_source != 'user_rate' and card.rate_source != 'native_usd' %}fallback: {{ card.rate_source }}{% else %}{{ txn.currency }} per USD{% endif %}"
+            >
+          </span>
+          <span class="flow-hint">Empty clears it — needs review is re-derived on save</span>
+        </label>
+
+        <label class="flow-field" @input="notesDirty = true">
+          <span class="teyebrow">Notes</span>
+          <textarea
+            name="notes"
+            rows="2"
+            class="flow-textarea"
+            placeholder="Private note — survives re-ingest"
+          >{{ txn.notes if txn.notes is not none else '' }}</textarea>
+        </label>
+      </form>
+
+      {# 5. History (Wave 2 Thing 3) -------------------------------------
+         Every manual edit (category / user_rate / notes) recorded by
+         transactions_repo.update(). Native <details> — no JS. category_id
+         old/new values are resolved to names by the router; the section is
+         omitted entirely when the txn has never been edited. #}
+      {% if history %}
+      <details class="flow-history">
+        <summary class="teyebrow">History ({{ history | length }})</summary>
+        <ul class="flow-history-list">
           {% for h in history %}
-          <li class="mt-1 flex items-baseline gap-2">
-            <time class="text-slate-500 tabular-nums">{{ h.edited_at | fmt_date }}</time>
-            <span class="font-semibold">{{ h.field_label }}</span>
-            <span class="font-mono break-all">{{ h.old_display if h.old_display is not none else '—' }} → {{ h.new_display if h.new_display is not none else '—' }}</span>
+          <li class="flow-history-item">
+            <time class="flow-history-when">{{ h.edited_at | fmt_date }}</time>
+            <span class="flow-history-field">{{ h.field_label }}</span>
+            <span class="flow-history-change">{{ h.old_display if h.old_display is not none else '—' }} → {{ h.new_display if h.new_display is not none else '—' }}</span>
           </li>
           {% endfor %}
         </ul>
       </details>
-    </section>
-    {% endif %}
+      {% endif %}
+    </div>
+
+    <footer class="flow-modal-footer">
+      <span class="flow-modal-legend"><kbd>1–8</kbd> pick · <kbd>↵</kbd> save · <kbd>esc</kbd> close</span>
+      <span class="flow-modal-spacer"></span>
+      <button
+        type="button"
+        class="tbtn tbtn-ghost"
+        @click="window.dispatchEvent(new CustomEvent('close-modal'))"
+      >Cancel</button>
+      <button
+        type="submit"
+        form="tx-edit-form"
+        class="tbtn tbtn-primary"
+        data-modal-save
+      >Save</button>
+    </footer>
   </div>
 </div>

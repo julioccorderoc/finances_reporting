@@ -1,63 +1,71 @@
 {# Filter form for /transactions. Uses HTMX so changing any filter
    swaps #tx-list without a page reload, and pushes the URL so the
    filter state is shareable.
+
+   A raised panel with a hairline; labels are eyebrows; the controls are
+   the house field (.flow-input, 32px, radius 2, red border on focus); the
+   multi-selects are checkbox chips whose selected state is grey. The
+   chip classes keep their pre-reskin names (`choice-chips`/`choice-chip`)
+   because tests/web/test_filters_polish.py pins the literals; flow.css
+   defines them under .flow-filters.
 #}
 <form
   id="tx-filters"
-  class="bg-white border border-slate-200 rounded-lg p-4 space-y-3"
+  class="flow-filters"
   hx-get="/_partial/transactions/list"
   hx-target="#tx-list"
   hx-push-url="true"
   hx-trigger="change, search delay:300ms from:input[name='q']"
 >
-  <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-    <label class="text-xs flex flex-col gap-1">
-      <span class="text-slate-500">From</span>
+  <div class="flow-filter-grid">
+    <label class="flow-field">
+      <span class="teyebrow">From</span>
       <input
         type="date"
         name="date_from"
         value="{{ filter.date_from.isoformat() if filter.date_from else '' }}"
-        class="border border-slate-300 rounded px-2 py-1 text-sm"
+        class="flow-input"
       >
     </label>
-    <label class="text-xs flex flex-col gap-1">
-      <span class="text-slate-500">To</span>
+    <label class="flow-field">
+      <span class="teyebrow">To</span>
       <input
         type="date"
         name="date_to"
         value="{{ filter.date_to.isoformat() if filter.date_to else '' }}"
-        class="border border-slate-300 rounded px-2 py-1 text-sm"
+        class="flow-input"
       >
     </label>
-    <label class="text-xs flex flex-col gap-1 sm:col-span-2">
-      <span class="text-slate-500">Search description</span>
+    <label class="flow-field flow-field-wide">
+      <span class="teyebrow">Search</span>
       <input
         type="search"
         name="q"
         value="{{ filter.q }}"
-        placeholder="e.g. COM.PAGO"
-        class="border border-slate-300 rounded px-2 py-1 text-sm"
+        placeholder="Description, e.g. COM.PAGO"
+        autocomplete="off"
+        class="flow-input"
       >
     </label>
-    <label class="text-xs flex flex-col gap-1">
-      <span class="text-slate-500">Needs review</span>
-      <select name="needs_review" class="border border-slate-300 rounded px-2 py-1 text-sm">
+    <label class="flow-field">
+      <span class="teyebrow">Needs review</span>
+      <select name="needs_review" class="flow-input">
         {% for opt in ['any', 'yes', 'no'] %}
           <option value="{{ opt }}" {% if filter.needs_review == opt %}selected{% endif %}>{{ opt }}</option>
         {% endfor %}
       </select>
     </label>
-    <label class="text-xs flex flex-col gap-1">
-      <span class="text-slate-500">Paired</span>
-      <select name="paired" class="border border-slate-300 rounded px-2 py-1 text-sm">
+    <label class="flow-field">
+      <span class="teyebrow">Paired</span>
+      <select name="paired" class="flow-input">
         {% for opt in ['any', 'yes', 'no'] %}
           <option value="{{ opt }}" {% if filter.paired == opt %}selected{% endif %}>{{ opt }}</option>
         {% endfor %}
       </select>
     </label>
-    <label class="text-xs flex flex-col gap-1">
-      <span class="text-slate-500">Page size</span>
-      <select name="page_size" class="border border-slate-300 rounded px-2 py-1 text-sm">
+    <label class="flow-field">
+      <span class="teyebrow">Per page</span>
+      <select name="page_size" class="flow-input">
         {% for sz in [25, 50, 100] %}
           <option value="{{ sz }}" {% if filter.page_size == sz %}selected{% endif %}>{{ sz }}</option>
         {% endfor %}
@@ -65,10 +73,10 @@
     </label>
   </div>
 
-  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+  <div class="flow-filter-groups">
     {% if accounts_options %}
-      <fieldset class="text-xs">
-        <legend class="text-slate-500 mb-1">Accounts</legend>
+      <fieldset class="flow-fieldset">
+        <legend class="teyebrow">Accounts</legend>
         <div class="choice-chips">
           {% for opt in accounts_options %}
             <label class="choice-chip"><input type="checkbox" name="accounts" value="{{ opt }}"{% if opt in filter.accounts %} checked{% endif %}><span>{{ opt }}</span></label>
@@ -77,8 +85,8 @@
       </fieldset>
     {% endif %}
     {% if kinds_options %}
-      <fieldset class="text-xs">
-        <legend class="text-slate-500 mb-1">Kinds</legend>
+      <fieldset class="flow-fieldset">
+        <legend class="teyebrow">Kinds</legend>
         <div class="choice-chips">
           {% for opt in kinds_options %}
             <label class="choice-chip"><input type="checkbox" name="kinds" value="{{ opt }}"{% if opt in filter.kinds %} checked{% endif %}><span>{{ opt }}</span></label>
@@ -87,8 +95,8 @@
       </fieldset>
     {% endif %}
     {% if currencies_options %}
-      <fieldset class="text-xs">
-        <legend class="text-slate-500 mb-1">Currencies</legend>
+      <fieldset class="flow-fieldset">
+        <legend class="teyebrow">Currencies</legend>
         <div class="choice-chips">
           {% for opt in currencies_options %}
             <label class="choice-chip"><input type="checkbox" name="currencies" value="{{ opt }}"{% if opt in filter.currencies %} checked{% endif %}><span>{{ opt }}</span></label>
@@ -97,8 +105,8 @@
       </fieldset>
     {% endif %}
     {% if sources_options %}
-      <fieldset class="text-xs">
-        <legend class="text-slate-500 mb-1">Sources</legend>
+      <fieldset class="flow-fieldset">
+        <legend class="teyebrow">Sources</legend>
         <div class="choice-chips">
           {% for opt in sources_options %}
             <label class="choice-chip"><input type="checkbox" name="sources" value="{{ opt }}"{% if opt in filter.sources %} checked{% endif %}><span>{{ opt }}</span></label>
@@ -113,10 +121,10 @@
   <input type="hidden" name="direction" value="{{ filter.direction }}">
   <input type="hidden" name="page" value="1">
 
-  <div class="flex justify-end">
+  <div class="flow-filters-foot">
     {# Full navigation on purpose: dropping ALL query params (incl. the
        hidden sort/direction) resets to the server-side defaults —
        last-30-days window per transactions_query.resolve_defaults. #}
-    <a href="/transactions" data-clear-filters class="text-xs text-sky-700 hover:underline">Clear filters</a>
+    <a href="/transactions" data-clear-filters class="flow-link">Clear filters</a>
   </div>
 </form>

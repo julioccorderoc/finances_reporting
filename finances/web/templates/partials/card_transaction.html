@@ -1,29 +1,35 @@
-{# Canonical transaction card. Self-contained: requires only `card`.
+{# Canonical transaction row. Self-contained: requires only `card`.
 
    Used by:
-   * /transactions list (Phase 2b — this phase)
-   * Dashboard "recent activity" panel (Phase 2a — consumes this file)
-   * Triage queue (Phase 4)
+   * /transactions list (inside `.flow-rows.is-selectable`)
+   * Today's "recent activity" panel (inside a bare `.flow-rows`)
 
-   The article is itself a CSS Grid row (subgrid). Wrap inside a
-   `.cards` parent (defined in static/css/app.css) for the column
-   layout to align across rows.
+   The article is itself a CSS Grid row (subgrid) — `.flow-row` in
+   static/css/flow.css — and MUST sit inside a `.flow-rows` parent for the
+   column tracks to align across rows. Date · description (with the note
+   under it) · account · category · money · flag.
 
-   Optional context variable (Phase 4):
-     triage_modal_url  Override the modal hx-get URL (e.g. point at the
-                       /_partial/triage/{id}/modal Save & next variant).
-                       Falls back to the Phase 3 /_partial/transactions
-                       endpoint when unset.
+   Money goes through the house `money()` macro (_triage.html): the
+   consolidated USD figure in mono, signed (a credit reads +$100.00, in
+   ink), the native amount under it, and the provenance chip. The raw
+   tier stays on the article as data-rate-source for anything keying off
+   it.
+
+   Optional context variables:
+     bulk_select       Render the leading checkbox cell (the /transactions
+                       list sets it; the dashboard does not).
+     triage_modal_url  Override the modal hx-get URL. Falls back to the
+                       /_partial/transactions endpoint when unset.
 #}
-{% from "_macros.html" import rate_source_badge, needs_review_badge, kind_class, format_date, format_amount %}
-
+{% from "_triage.html" import money %}
 <article
-  class="card-row hover:bg-slate-50 cursor-pointer"
+  class="flow-row"
   data-card-row
   data-tx-id="{{ card.id }}"
   data-account="{{ card.account_name }}"
   data-kind="{{ card.kind }}"
   data-needs-review="{{ 'true' if card.needs_review else 'false' }}"
+  data-rate-source="{{ card.rate_source }}"
   hx-get="{{ triage_modal_url if triage_modal_url is defined and triage_modal_url else ('/_partial/transactions/' ~ card.id ~ '/modal') }}"
   hx-target="#tx-modal-host"
   hx-trigger="click"
@@ -32,44 +38,28 @@
   {% if bulk_select is defined and bulk_select %}
     {# WP4 bulk select. @click.stop keeps the checkbox from opening the
        row's edit modal (the article's hx-get click trigger). #}
-    <span @click.stop>
-      <input type="checkbox" data-bulk-checkbox value="{{ card.id }}" x-model="selected" @click.stop>
+    <span class="flow-row-select" @click.stop>
+      <input type="checkbox" class="tcheck" data-bulk-checkbox value="{{ card.id }}" x-model="selected" @click.stop aria-label="Select {{ card.description }}">
     </span>
   {% endif %}
-  <time class="text-xs text-slate-500 tabular-nums" datetime="{{ card.occurred_at.isoformat() }}">
-    {{ format_date(card.occurred_at) }}
-  </time>
+  <time class="flow-row-date" datetime="{{ card.occurred_at.isoformat() }}">{{ card.occurred_at | fmt_date }}</time>
 
-  <span class="text-xs font-medium text-slate-700 truncate">
-    {{ card.account_name }}
-  </span>
-
-  <span class="text-sm text-slate-900 truncate" title="{{ card.description }}">
-    {{ card.description if card.description else '—' }}
+  <span class="flow-row-desc" title="{{ card.description }}">
+    <span class="flow-row-name">{{ card.description if card.description else '—' }}</span>
     {%- if card.notes %}
-      <span class="text-xs text-slate-500 italic" data-note-indicator title="{{ card.notes }}">&#9998; {{ card.notes | truncate(40) }}</span>
+    <span class="flow-row-note" data-note-indicator title="{{ card.notes }}">{{ card.notes | truncate(60) }}</span>
     {%- endif %}
   </span>
 
-  <div class="text-right tabular-nums">
-    <div class="text-sm font-mono {{ kind_class(card.kind) }}">
-      {{ format_amount(card.amount_native) }} <span class="text-xs text-slate-500">{{ card.currency }}</span>
-    </div>
-    <div class="text-[11px] {% if card.is_bcv_fallback %}text-slate-400 italic{% else %}text-slate-500{% endif %} flex items-center gap-1 justify-end">
-      {% if card.amount_usd is none %}
-        <span>&mdash;</span>
-      {% else %}
-        <span>{{ card.amount_usd | fmt_money }}</span>
-      {% endif %}
-      {{ rate_source_badge(card.rate_source, card.is_bcv_fallback) }}
-    </div>
-  </div>
+  <span class="flow-row-account">{{ card.account_name }}</span>
 
-  <span class="text-xs text-slate-600 truncate">
-    {% if card.category_name %}{{ card.category_name }}{% else %}<span class="text-slate-300">&mdash;</span>{% endif %}
+  <span class="flow-row-category">
+    {%- if card.category_name %}{{ card.category_name }}{% else %}<span class="flow-row-none">—</span>{% endif -%}
   </span>
 
-  <span class="text-right">
-    {% if card.needs_review %}{{ needs_review_badge() }}{% endif %}
+  <span class="flow-row-money">{{ money(card, "sm") }}</span>
+
+  <span class="flow-row-flag">
+    {%- if card.needs_review %}<span class="tbadge tbadge-warning tbadge-dot">Needs review</span>{% endif -%}
   </span>
 </article>

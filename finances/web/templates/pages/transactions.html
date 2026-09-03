@@ -1,12 +1,18 @@
 {% extends "base.html" %}
 {% block title %}Transactions{% endblock %}
 {% block content %}
-  <header class="mb-4">
-    <h1 class="text-2xl font-semibold">Transactions</h1>
-    <p class="mt-1 text-sm text-slate-600">
-      Browse, filter, and drill into the ledger. Default range is the last 30 days.
-    </p>
-  </header>
+  {% from "_macros.html" import page_header %}
+
+  {# The question, then THE one Doto figure of the view: how many rows the
+     current filter matches at render time. The live count that survives
+     list swaps is the "N matches" line inside #tx-list. #}
+  {% set answer %}{{ page.total | fmt_number(0) }} row{{ '' if page.total == 1 else 's' }}{% endset %}
+  {% set meta %}
+    {%- if filter.date_from or filter.date_to -%}
+      <span class="flow-window">{{ filter.date_from | fmt_date if filter.date_from else '…' }} – {{ filter.date_to | fmt_date if filter.date_to else '…' }}</span>
+    {%- endif -%}
+  {% endset %}
+  {{ page_header("What happened?", answer, meta) }}
 
   {# Saved views chip row + save form (Wave 2 Thing 2). #}
   {% include "partials/saved_views.html" %}
@@ -25,7 +31,7 @@
      (fetch bypasses htmx's HX-Trigger handling), then refreshes the
      list from the current URL query (URL = filter source of truth). #}
   <section
-    class="mt-4"
+    class="flow-body"
     x-data="{
       selected: [],
       toggleAll(checked) {
@@ -70,20 +76,17 @@
     }"
     @htmx:after-swap="selected = []"
   >
-    {# Bulk action bar — revealed while at least one row is selected. #}
-    <div
-      id="bulk-bar"
-      x-show="selected.length > 0"
-      x-cloak
-      class="mb-3 p-3 border border-slate-300 rounded-lg bg-white space-y-2"
-    >
-      <div class="flex items-center justify-between text-sm">
-        <span><strong x-text="selected.length"></strong> selected</span>
+    {# Bulk action bar — revealed while at least one row is selected. A
+       raised bar with a hairline; the count in mono; Apply is the one
+       red fill, and it only exists while something is selected. #}
+    <div id="bulk-bar" class="flow-bulk" x-show="selected.length > 0" x-cloak>
+      <div class="flow-bulk-head">
+        <span class="flow-bulk-count"><strong x-text="selected.length"></strong> selected</span>
         <button
           type="button"
+          class="tbtn tbtn-sm tbtn-primary"
           data-bulk-apply
           @click="applyBulk()"
-          class="px-3 py-1.5 text-sm border border-slate-900 rounded bg-slate-900 text-white hover:bg-slate-800"
         >Apply</button>
       </div>
       {% include "partials/category_picker.html" %}
