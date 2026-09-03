@@ -113,6 +113,48 @@ _Filled in as the track lands; each entry is one line of what, then why._
   scope for this track; this only keeps a phone no worse than the old
   wrapping nav.
 
+## Flow and reports — what stayed old, and why
+
+- **Three class names on Flow are not `flow-`**: `cards--selectable`,
+  `choice-chip(s)` and `tx-modal-form` — pinned by `test_bulk_ui.py`,
+  `test_filters_polish.py` and base.html's dirty guard respectively. Each
+  is defined in flow.css so nothing leans on app.css; rename them together
+  with those tests.
+- **The /transactions modal has no prev/next arrows**: the router supplies
+  no `prev_url`/`next_url`, and reading them would fail the template
+  contract. It is content-sized (`max-height: min(760px, 100% − 24px)`)
+  rather than the triage's fixed frame — there is no paging to hold still
+  for — and stays `position: fixed` because its host is at the end of body.
+- **Accounts' USD line and the monthly mobile totals keep `fmt_money`**
+  (ASCII minus): `test_formatting.py` pins those strings. The Flow row and
+  its modal moved to `fmt_usd` (U+2212) and their pins moved with them.
+- **The unpriced account line reads "Unpriced — no P2P rate"** with the em
+  dash a pre-existing test asserts.
+- **Range presets on Monthly are radios inside tab labels**; the active fill
+  uses `:has()` (Safari ≥15.4, Chrome ≥105, Firefox ≥121).
+- **/rates with no P2P median at all** shows the newest row of any pair
+  under a warning badge rather than a blank figure.
+- **The rates range toggle now pushes `/rates?range_days=N`**, not the
+  partial's URL — a pre-existing bug the reskin surfaced. Still pre-existing
+  and left alone: the monthly filter form swaps only the pivot, so the
+  monthly chart goes stale after a filter change.
+- **The wordmark letter is Doto at 16px**, the one Doto glyph under 22px,
+  exactly as Chrome.jsx's Wordmark sets it; on the 600 red for AA.
+
+## Verified in a browser (2026-09-03, scratch copy of the ledger)
+
+Eight destinations at 2560×1200, 1440×900 and 1200×900: the column caps at
+1196px and centres on wide, nothing scrolls horizontally, every page has one
+Doto answer (triage's is its own header), `aria-current` lands on the right
+rail link, and the console shows 0 errors, 0 warnings and 0 responses ≥400
+on every page. An automated contrast sweep over every text node found two
+pairs under 4.5:1 (fixed above); everything else clears. A triage sitting
+inside the shell: the scrim covers exactly the content column with the rail
+visible, focus lands in the dialog, → walks, `1` picks, ↵ saves and advances
+in place ("2 OF 107"), Park advances, Esc closes and refreshes the queue and
+the rail badge. Not walked by hand yet (see the handoff prompt): the Flow
+modal save, bulk apply, a real CSV drop, and the rates toggle click.
+
 ## Not brought over (REPO-RECONCILE §B2)
 
 Invented in the prototype and left there, on purpose:
