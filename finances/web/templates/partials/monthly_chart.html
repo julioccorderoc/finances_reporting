@@ -9,8 +9,14 @@
    Colour is SIGNAL's: the categories are steps on the ink ramp, separated
    by paper hairlines, and the BCV-fallback shadow is the one red on the
    chart — the part of a month that only BCV could price.
+
+   The drawing script lives INSIDE the section: the pivot partial carries
+   this file as an out-of-band twin (`chart_oob`) when the filters change,
+   and htmx re-runs only the scripts inside the element it swaps. The
+   previous Chart instance is destroyed first — it was bound to the canvas
+   this swap replaces.
 #}
-<section id="monthly-chart" class="rpt-chart-card">
+<section id="monthly-chart" class="rpt-chart-card"{% if chart_oob is defined and chart_oob %} hx-swap-oob="true"{% endif %}>
   <div class="rpt-chart">
     <canvas data-monthly-chart aria-label="Totals by category and month"></canvas>
   </div>
@@ -26,7 +32,6 @@
     "kind": {{ chart.filter.kind.value | tojson }}
   }
   </script>
-</section>
 
 <script>
 (function () {
@@ -39,6 +44,10 @@
   canvas.dataset.bound = 'true';
   var payload;
   try { payload = JSON.parse(dataEl.textContent); } catch (e) { return; }
+  if (window.__monthlyChart) {
+    try { window.__monthlyChart.destroy(); } catch (e) {}
+    window.__monthlyChart = null;
+  }
 
   // signal.css's tokens, read once, so the chart cannot drift from the sheet.
   var styles = getComputedStyle(document.documentElement);
@@ -80,7 +89,7 @@
     });
   }
 
-  new window.Chart(canvas, {
+  window.__monthlyChart = new window.Chart(canvas, {
     type: 'bar',
     data: { labels: payload.months || [], datasets: datasets },
     options: {
@@ -122,3 +131,4 @@
   });
 })();
 </script>
+</section>

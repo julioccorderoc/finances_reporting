@@ -96,11 +96,32 @@ def transactions_list_partial(
     """
     page = query_transactions(conn, f)
     templates = request.app.state.templates
-    return templates.TemplateResponse(
+    response = templates.TemplateResponse(
         request,
         "partials/transactions_list.html",
         {"page": page, "filter": page.filter},
     )
+    _push_page_url(request, response, "/transactions")
+    return response
+
+
+def _is_htmx(request: Request) -> bool:
+    return request.headers.get("HX-Request") == "true"
+
+
+def _push_page_url(request: Request, response, page_path: str) -> None:
+    """Point the address bar at the PAGE, with this request's query.
+
+    The filter forms, sort chips and pagers say ``hx-push-url="true"``,
+    which makes htmx push the request url — the partial's own path — so
+    a reload landed on a bare fragment with no shell (2026-09-03). The
+    ``HX-Push-Url`` header overrides the attribute; the attribute stays
+    for anything that reads it.
+    """
+    if not _is_htmx(request):
+        return
+    query = request.url.query
+    response.headers["HX-Push-Url"] = f"{page_path}?{query}" if query else page_path
 
 
 @router.get("/dashboard/sync-status", include_in_schema=False)
@@ -235,14 +256,28 @@ def monthly_pivot_partial(
     f: MonthlyFilter = Depends(monthly_filter_from_query),
     conn: sqlite3.Connection = Depends(get_conn),
 ):
-    """Return only the pivot fragment (filter / range / kind change swap)."""
+    """Return only the pivot fragment (filter / range / kind change swap).
+
+    An htmx request also gets the chart, out of band: the filter form
+    targets ``#monthly-pivot`` alone, and the chart above it went stale
+    after every range change. The full page includes the chart itself, so
+    the twin is only rendered when htmx asked — two elements with one id
+    is the bug the rail badge guard already names.
+    """
     pivot = build_pivot(conn, f)
     templates = request.app.state.templates
-    return templates.TemplateResponse(
+    response = templates.TemplateResponse(
         request,
         "partials/monthly_pivot.html",
-        {"pivot": pivot, "filter": f},
+        {
+            "pivot": pivot,
+            "filter": f,
+            "chart": build_chart(conn, f),
+            "chart_oob": _is_htmx(request),
+        },
     )
+    _push_page_url(request, response, "/monthly")
+    return response
 
 
 @router.get("/monthly/chart", include_in_schema=False)
