@@ -19,6 +19,7 @@ Contract these tests pin:
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from pathlib import Path
 
@@ -201,6 +202,27 @@ def test_preview_reports_a_parse_failure_instead_of_raising(
 
     assert preview.error is not None
     assert preview.rows_seen == 0
+
+
+def test_preview_error_is_plain_words_not_an_exception_class(
+    provincial_db: sqlite3.Connection, staging: Path
+) -> None:
+    """The owner reads this line in the dropzone; ``ValueError:`` is noise.
+
+    Keep the parser's own reason (it names the missing columns), drop the
+    Python class name the 2026-09-03 browser walk saw leading it.
+    """
+    staged = _stage(staging, body="not;a;statement\n1;2;3\n")
+
+    preview = uploads_svc.preview_upload(
+        provincial_db, staged.token, staging_dir=staging
+    )
+
+    assert preview.error is not None
+    assert not re.match(r"^\w*Error\b", preview.error), preview.error
+    assert preview.error.startswith("Could not read ")
+    assert staged.filename in preview.error
+    assert "missing required columns" in preview.error
 
 
 def test_preview_counts_already_known_rows_separately(

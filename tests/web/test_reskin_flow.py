@@ -526,6 +526,36 @@ def test_modal_is_the_signal_dialog_and_keeps_every_field(
     assert "tx-modal-section" not in body
 
 
+def test_every_way_out_of_the_modal_goes_through_the_dirty_guard(
+    seeded_web_db: sqlite3.Connection, web_client_factory
+) -> None:
+    """Esc, the scrim, Cancel and × all ask before discarding an edit.
+
+    base.html's ``modalDirty()`` reads the set_* sentinels; until now only
+    the prev/next arrows (which /transactions does not render) and the
+    restart banner's Reload consulted it, so Esc on a half-written note
+    closed the dialog and threw the note away (2026-09-03 browser walk).
+    """
+    txn_id = _txn_id(seeded_web_db, "prov-3")
+    client = web_client_factory()
+
+    body = client.get(f"/_partial/transactions/{txn_id}/modal").text
+
+    # One guarded exit, defined on the overlay's own scope.
+    guard = re.search(r"requestClose\(\)\s*\{(.*?)\n\s*\}", body, re.S)
+    assert guard, "the modal defines no requestClose()"
+    assert "this.modalDirty()" in guard.group(1)
+    assert "window.confirm('Discard unsaved changes?')" in guard.group(1)
+    assert "new CustomEvent('close-modal')" in guard.group(1)
+
+    # Every exit uses it: Esc, the scrim, the × and Cancel.
+    assert '@keydown.escape.window="requestClose()"' in body
+    assert '@click.self="requestClose()"' in body
+    assert body.count('@click="requestClose()"') == 2
+    # ...and nothing dispatches close-modal behind the guard's back.
+    assert body.count("new CustomEvent('close-modal')") == 1
+
+
 def test_modal_history_is_a_hairline_list(
     seeded_web_db: sqlite3.Connection, web_client_factory
 ) -> None:
