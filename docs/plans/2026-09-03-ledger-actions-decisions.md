@@ -171,6 +171,22 @@ My recommendation: **cash only now**, and revisit when a real case on a
 bank account shows up — every bank movement you have named so far did
 arrive in a statement.
 
+## Owner answers (2026-09-03, same day)
+
+1. Cash conversions: "I want to be able to do this myself on the UI" —
+   the script stays unrun; the UI design is open (handoff sitting D).
+2. Duplicates: "Delete duplicated stuff" — yes to ADR-022 (sitting A).
+3. "Became cash" button: not sure, another session (sitting D).
+4. Set balance: "let's make it happen" (sitting B).
+5. Manual transactions: "build it as if it were for everything, but only
+   cash available to act on" (sitting C).
+6. Borrowed money: real cases given — company purchase repaid in USDC,
+   mom's 10,000 Bs in/out, sister buying USDT (73,283.60 in, 9,100 back),
+   "P2P BUY" rows are transfers, two deposits he is sure are P2P
+   receptions (sitting E, with the row ids found).
+
+The sittings are laid out in `2026-09-03-next-sittings-handoff.md`.
+
 ## 6. Already written up elsewhere
 
 - **Delete a transaction** — ADR-022, proposed. §2 is the first concrete
