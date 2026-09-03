@@ -164,10 +164,12 @@ def preview_upload(
         report = provincial_ingest.ingest_csv(conn, path, dry_run=True)
         date_from, date_to = _date_span(path)
     except Exception as exc:  # noqa: BLE001 - surfaced to the owner as text
+        # Plain words, then the parser's own reason (it names the missing
+        # columns). The exception class is for the log, not the dropzone.
         return UploadPreview(
             token=token,
             filename=path.name,
-            error=f"{type(exc).__name__}: {exc}",
+            error=f"Could not read {path.name}: {exc}",
         )
     return UploadPreview(
         token=token,

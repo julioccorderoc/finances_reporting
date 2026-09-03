@@ -40,11 +40,19 @@
     isTyping(e) {
       const t = e.target;
       return t instanceof Element && t.matches('input, textarea, select, button');
+    },
+    {# The one way out. modalDirty() lives on <body>'s scope (base.html)
+       and reads the set_* sentinels; Alpine resolves it through the scope
+       chain. Esc, the scrim, × and Cancel all come through here, so a
+       half-written note is never thrown away without a word. #}
+    requestClose() {
+      if (this.modalDirty() && !window.confirm('Discard unsaved changes?')) return;
+      window.dispatchEvent(new CustomEvent('close-modal'));
     }
   }"
   x-init="$nextTick(() => { const c = $el.querySelector('.flow-modal'); if (c) c.focus(); })"
-  @click.self="window.dispatchEvent(new CustomEvent('close-modal'))"
-  @keydown.escape.window="window.dispatchEvent(new CustomEvent('close-modal'))"
+  @click.self="requestClose()"
+  @keydown.escape.window="requestClose()"
   @keydown.window="
     if (isTyping($event)) return;
     const key = $event.key;
@@ -66,7 +74,7 @@
         <span class="flow-modal-when">{{ account_name }}{% if card.category_name %} · {{ card.category_name }}{% endif %}</span>
       </div>
       {% if card.needs_review %}<span class="tbadge tbadge-warning tbadge-dot">Needs review</span>{% endif %}
-      <button type="button" class="ticon" aria-label="Close" @click="window.dispatchEvent(new CustomEvent('close-modal'))">{{ icon("x", 14) }}</button>
+      <button type="button" class="ticon" aria-label="Close" @click="requestClose()">{{ icon("x", 14) }}</button>
     </header>
 
     <div class="flow-modal-body">
@@ -190,7 +198,7 @@
       <button
         type="button"
         class="tbtn tbtn-ghost"
-        @click="window.dispatchEvent(new CustomEvent('close-modal'))"
+        @click="requestClose()"
       >Cancel</button>
       <button
         type="submit"
