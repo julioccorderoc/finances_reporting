@@ -40,13 +40,12 @@ from finances.web.settings import WebSettings
 STATIC = Path(__file__).resolve().parents[2] / "finances" / "web" / "static"
 FLOW_CSS = STATIC / "css" / "flow.css"
 
-#: The ten templates the Flow track owns.
+#: The nine templates the Flow track owns.
 FLOW_TEMPLATES = (
     "pages/transactions.html",
     "partials/transactions_list.html",
     "partials/transactions_filters.html",
     "partials/card_transaction.html",
-    "partials/saved_views.html",
     "partials/modal_transaction.html",
     "partials/category_picker.html",
     "partials/pair_candidates.html",
@@ -392,27 +391,31 @@ def test_filters_form_keeps_its_id_and_htmx_wiring(
 # ---------------------------------------------------------------------------
 
 
-def test_saved_view_chip_has_a_bookmark_and_an_icon_delete(
+def test_the_page_carries_no_saved_views_control(
     seeded_web_db: sqlite3.Connection, web_client_factory
 ) -> None:
+    """Owner decision 2026-09-03: the "Save this view as…" row goes.
+
+    The chip row, the save form and the three ``/_partial/views``
+    endpoints existed only for that control; with it gone they are dead
+    surface. The ``saved_views`` table, its repo and migration 010 stay —
+    the schema is append-only and the data layer is not the viewer's.
+    """
     client = web_client_factory()
-    created = client.post(
-        "/_partial/views", data={"name": "July expenses", "query_string": "kinds=expense"}
-    )
-    assert created.status_code == 200, created.text
 
     body = client.get("/transactions").text
 
-    section = body[body.index('id="saved-views"') : body.index("</section>", body.index('id="saved-views"'))]
-    assert 'class="flow-view-chip"' in section
-    assert 'data-icon="bookmark"' in section
-    assert re.search(r'data-view-chip[^>]*href="/transactions\?kinds=expense"', section)
-    assert 'class="ticon flow-view-delete"' in section
-    assert 'aria-label="Delete saved view July expenses"' in section
-    assert "hx-confirm" in section
-    assert 'hx-post="/_partial/views"' in section
-    assert re.search(r'<input\s+type="text"\s+name="name"[^>]*class="flow-input"', section)
-    assert 'class="tbtn tbtn-sm"' in section
+    assert 'id="saved-views"' not in body
+    assert "Save this view as" not in body
+    assert "/_partial/views" not in body
+    assert "flow-views" not in body
+
+    assert client.get("/_partial/views").status_code == 404
+    assert client.post("/_partial/views", data={"name": "x", "query_string": ""}).status_code == 404
+    assert client.post("/_partial/views/1/delete").status_code == 404
+
+    css = FLOW_CSS.read_text(encoding="utf-8")
+    assert ".flow-view" not in css
 
 
 def test_bulk_bar_is_a_raised_bar_with_the_same_hooks(
