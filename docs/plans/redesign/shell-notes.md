@@ -130,5 +130,52 @@ Invented in the prototype and left there, on purpose:
 
 `/plans` and `/ahead` exist so the rail is honest about the roadmap. Each is
 a SIGNAL empty state that says plainly what has to exist before the page
-can: Plans needs a plan table over categorised data; Ahead needs
-assumptions derived from history. No fake data, no dead controls.
+can. No fake data, no dead controls, one real link each.
+
+**/plans** — kicker *Where is the money going next?* over **No plans yet**;
+`target` icon; headline *Plans need a plan table.*; body: *A plan is a
+monthly amount with a category behind it, and what you spent is that
+category's rows for the month. That table does not exist yet, and it only
+means something once Triage has sorted the rows it would read. When it
+exists, this page shows what you gave a job and what is left.* Link: *Go to
+Triage* → `/triage`.
+
+**/ahead** — kicker *What happens if nothing changes?* over **Nothing to
+project yet**; `route` icon; headline *Ahead needs assumptions from
+history.*; body: *A forecast here runs on four assumptions: monthly income,
+monthly spend, the rate, and a cushion. Each can come from the ledger's own
+history rather than from you typing it, and that derivation does not exist
+yet. When it does, this page carries twelve months forward from it with
+every assumption shown.* Link: *See your months* → `/monthly`.
+
+Two Doto elements per page (the header's answer and the empty headline),
+the same pair the empty triage queue shows — accepted there under I8, and
+here for the same reason. "Sorted" rather than "categorised" in the Plans
+copy: SIGNAL's plain-words rule, and the verb Triage already ships.
+
+## Today — what stayed old, and why
+
+- **Tile figures carry an ASCII hyphen** (`-$48.59`), not U+2212: the
+  service pre-formats `KpiTile.value` with `fmt_money`, and `test_formatting`
+  pins that string. Switching the service to `fmt_usd` is a one-line change
+  plus test expectations, deliberately left for the Today design track
+  rather than done under a reskin ("same services").
+- **The needs-you card keeps `/triage?type_filter=rate`** — the href an
+  existing dashboard test asserts. The card copy is *N rows need you* over
+  the tile's own count.
+- **Staleness chips show the day, not the time**: `last_run_at` is UTC and
+  an `HH:MM` would read four hours wrong to a Caracas owner. The full
+  instant is in the chip's `title` and `<time datetime>`.
+- **The flows chart has no red series at all** (ink-900 income, ink-300
+  spend): a red bar on every month would have been decoration.
+- **Section headings keep the words existing tests assert** ("Recent
+  activity", "Net worth", "Needs review").
+
+## Triage — one change that is not a reskin
+
+The transfer categories are offered again in the picker (migration 022,
+owner decision 2026-09-03, *"money is entering in a transitional way, not
+for my expenses/income"*). Recorded in full in
+`design_handoff_triage/NOTES.md` § 2026-09-03; the open half of that
+question — money someone lends the owner — has its own prompt at
+`docs/plans/2026-09-03-borrowed-money-prompt.md`.
