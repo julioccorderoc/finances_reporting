@@ -115,19 +115,22 @@ _Filled in as the track lands; each entry is one line of what, then why._
 
 ## Flow and reports — what stayed old, and why
 
-- **Three class names on Flow are not `flow-`**: `cards--selectable`,
-  `choice-chip(s)` and `tx-modal-form` — pinned by `test_bulk_ui.py`,
-  `test_filters_polish.py` and base.html's dirty guard respectively. Each
-  is defined in flow.css so nothing leans on app.css; rename them together
-  with those tests.
+- **Three class names on Flow were not `flow-`** (`cards--selectable`,
+  `choice-chip(s)`, `tx-modal-form`), kept for the tests that pinned them.
+  Renamed with those tests on 2026-09-03: `.flow-rows.is-selectable`,
+  the chips replaced by dropdowns (`.flow-dd*`), `form.flow-modal-form`
+  is what base.html's dirty guard queries. Nothing is allowed through
+  `test_flow_templates_use_no_app_css_families` any more.
 - **The /transactions modal has no prev/next arrows**: the router supplies
   no `prev_url`/`next_url`, and reading them would fail the template
   contract. It is content-sized (`max-height: min(760px, 100% − 24px)`)
   rather than the triage's fixed frame — there is no paging to hold still
   for — and stays `position: fixed` because its host is at the end of body.
-- **Accounts' USD line and the monthly mobile totals keep `fmt_money`**
-  (ASCII minus): `test_formatting.py` pins those strings. The Flow row and
-  its modal moved to `fmt_usd` (U+2212) and their pins moved with them.
+- **Accounts' USD line and the monthly mobile figures kept `fmt_money`**
+  (ASCII minus) through the reskin because `test_formatting.py` pinned
+  those strings. On 2026-09-03 they, the Today tiles and their hints moved
+  to `fmt_usd` (U+2212) and the pins moved with them. `fmt_money` now
+  serves only the CLI reports.
 - **The unpriced account line reads "Unpriced — no P2P rate"** with the em
   dash a pre-existing test asserts.
 - **Range presets on Monthly are radios inside tab labels**; the active fill
@@ -135,9 +138,16 @@ _Filled in as the track lands; each entry is one line of what, then why._
 - **/rates with no P2P median at all** shows the newest row of any pair
   under a warning badge rather than a blank figure.
 - **The rates range toggle now pushes `/rates?range_days=N`**, not the
-  partial's URL — a pre-existing bug the reskin surfaced. Still pre-existing
-  and left alone: the monthly filter form swaps only the pivot, so the
-  monthly chart goes stale after a filter change.
+  partial's URL — a pre-existing bug the reskin surfaced. The same bug
+  lived on Flow (filter form, sort chips, pager) and Monthly (filter
+  form): `hx-push-url="true"` pushes the *request* url, so the address bar
+  read `/_partial/…` and a reload landed on a bare fragment. Fixed
+  2026-09-03 from the server side — the list and pivot partials answer
+  htmx with `HX-Push-Url` pointing at the page plus the request's query
+  (the header overrides the attribute). The monthly chart follows the
+  filters the same day: the pivot partial carries the chart as an
+  out-of-band twin on htmx requests only, with the drawing script inside
+  the section it swaps.
 - **The wordmark letter is Doto at 16px**, the one Doto glyph under 22px,
   exactly as Chrome.jsx's Wordmark sets it; on the 600 red for AA.
 
@@ -154,6 +164,65 @@ visible, focus lands in the dialog, → walks, `1` picks, ↵ saves and advances
 in place ("2 OF 107"), Park advances, Esc closes and refreshes the queue and
 the rail badge. Not walked by hand yet (see the handoff prompt): the Flow
 modal save, bulk apply, a real CSV drop, and the rates toggle click.
+
+## 2026-09-03 — finishing the track (the handoff prompt's list)
+
+Walked by hand against a scratch copy of the ledger, in a browser: the
+Flow modal (edit category + note, save, row swaps in place, toast),
+select-all → bulk Apply with and without a category, a real Provincial
+`.xls` through the rail's *Upload a statement* (drop event and file
+chooser; preview → import → receipt and toast), the rates toggle
+(`/rates?range_days=90`, survives a reload), `/monthly?layout=mobile`
+chevrons. Console clean throughout.
+
+Found only in the browser, fixed the same day, each as a test-first pair:
+
+- **Esc, the scrim, × and Cancel skipped the dirty guard** on the Flow
+  modal. `modalDirty()` existed on `<body>` but only the (unrendered)
+  prev/next arrows and the restart banner consulted it. One
+  `requestClose()` on the overlay now fronts every exit.
+- **A wrong file dropped on the import panel read `ValueError: …`.** Now
+  *Could not read <file>: <reason>*.
+- **The address bar took the partial's path** after any Flow or Monthly
+  filter change (see the Deviations bullet above), and **the monthly chart
+  went stale**. Both fixed server-side.
+
+Owner decisions from a screenshot of Flow, applied the same day:
+
+- The **"Save this view as…" row is gone**, with its chip partial and the
+  three `/_partial/views` endpoints. The `saved_views` table, repo and
+  migration 010 stay — append-only schema, and the data layer is not the
+  viewer's. Zero views existed in the ledger.
+- **Rows per page moved into the list's sort bar**, beside the match
+  count, as a boxless mono select ("364 matches · 50 per page"). It is
+  inside `#tx-list` (re-rendered with the size in force on every swap)
+  and `form="tx-filters"` keeps it in the filter form's serialisation.
+- **Accounts / Kinds / Currencies / Sources are dropdowns**: one Jinja
+  macro renders each as a native `<details>` — the summary is the house
+  field reading *Any*, the one value or *N selected*; the menu a raised
+  panel of house checkboxes; Escape and an outside click close it; a
+  four-line Alpine `sync()` keeps the summary honest after a change, since
+  a list swap never re-renders the form. Same repeated-param contract.
+
+Also closed from the handoff list: the three Flow aliases renamed; the
+last `fmt_money` sites on the viewer moved to `fmt_usd`; migration 022
+applied to the live ledger and `finances backup --label post-reskin`
+taken.
+
+**The triage ← arrow is not a bug.** Six presses (→ ← → → ← ←) with a
+250 ms settle each land on the right entry. A key pressed inside htmx's
+20 ms settle window after a swap is dropped — the new dialog is in the
+DOM and Alpine has bound its keys, but htmx has not yet wired the
+arrows' `hx-get` (that happens in the settle task). No human presses
+inside 20 ms; a script must wait for `htmx:afterSettle`. The scripted
+run pressed ← too early and then waited on a change that never came.
+
+Open, waiting on the owner:
+
+- **Delete a transaction** — [ADR-022](../../ADR/ADR-022-deleting-a-transaction.md),
+  proposed: a real delete plus a tombstone the ingest honours, so a
+  re-imported statement does not resurrect the row. Nothing implemented.
+- **Borrowed money** — `docs/plans/2026-09-03-borrowed-money-findings.md`.
 
 ## Not brought over (REPO-RECONCILE §B2)
 
@@ -197,11 +266,10 @@ copy: SIGNAL's plain-words rule, and the verb Triage already ships.
 
 ## Today — what stayed old, and why
 
-- **Tile figures carry an ASCII hyphen** (`-$48.59`), not U+2212: the
-  service pre-formats `KpiTile.value` with `fmt_money`, and `test_formatting`
-  pins that string. Switching the service to `fmt_usd` is a one-line change
-  plus test expectations, deliberately left for the Today design track
-  rather than done under a reskin ("same services").
+- **Tile figures carried an ASCII hyphen** (`-$48.59`) through the reskin:
+  the service pre-formats `KpiTile.value`, and `test_formatting` pinned
+  `fmt_money`'s string. Switched to `fmt_usd` on 2026-09-03 (the value and
+  the hint line), pins moved.
 - **The needs-you card keeps `/triage?type_filter=rate`** — the href an
   existing dashboard test asserts. The card copy is *N rows need you* over
   the tile's own count.
