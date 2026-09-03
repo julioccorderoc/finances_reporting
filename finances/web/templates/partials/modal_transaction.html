@@ -26,7 +26,7 @@
    between them. The Save button sits in the footer, outside the form,
    and associates by ``form=`` id — the same pattern as the triage
    dialog, so the save stays a real form submission htmx binds to.
-   ``form.tx-modal-form`` is the hook base.html's dirty guard queries;
+   ``form.flow-modal-form`` is the hook base.html's dirty guard queries;
    it stays on the form.
 #}
 {% from "_icons.html" import icon %}
@@ -123,7 +123,7 @@
       {# 4. The decision: category, rate, note. -------------------------- #}
       <form
         id="tx-edit-form"
-        class="tx-modal-form flow-modal-form"
+        class="flow-modal-form"
         hx-post="/_partial/transactions/{{ txn.id }}/edit"
         hx-target="[data-tx-id='{{ txn.id }}']"
         hx-swap="outerHTML"

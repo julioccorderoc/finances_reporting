@@ -9,12 +9,6 @@
  * with a `+`. The reusable classes (.tbtn, .tbadge, .teyebrow, .tinput,
  * .tmoney, .prov-*, .tlink, .ticon, .tcheck) come from triage.css and are
  * not redefined here.
- *
- * Two names on this surface are not `flow-` and are here on purpose:
- *   .cards--selectable   tests/web/test_bulk_ui.py pins the literal;
- *   .tx-modal-form       base.html's dirty guard queries `form.tx-modal-form`.
- * flow.css defines each so nothing here leans on app.css, which is being
- * swept. Rename them together with those tests, not before.
  */
 
 /* ── Page header extras ─────────────────────────────────────────────────── */
@@ -44,8 +38,7 @@
   font-family: var(--font-sans);
   color: var(--text-primary);
 }
-.flow-rows.is-selectable,
-.flow-rows.cards--selectable {
+.flow-rows.is-selectable {
   grid-template-columns: 26px 124px minmax(0, 1fr) 128px 132px 176px 104px;
 }
 
@@ -662,10 +655,9 @@ select.flow-input {
   min-width: 0;
 }
 /* The body is already a flex column with the right gap; the form must not
- * introduce a second box between it and its blocks. `.tx-modal-form` is
- * the hook base.html's dirty guard queries (`form.tx-modal-form`). */
-.flow-modal-form,
-.tx-modal-form {
+ * introduce a second box between it and its blocks. `.flow-modal-form` is
+ * also the hook base.html's dirty guard queries. */
+.flow-modal-form {
   display: contents;
 }
 
@@ -1028,8 +1020,7 @@ select.flow-input {
   .flow-rows {
     grid-template-columns: 124px minmax(0, 1fr) 176px 104px;
   }
-  .flow-rows.is-selectable,
-  .flow-rows.cards--selectable {
+  .flow-rows.is-selectable {
     grid-template-columns: 26px 124px minmax(0, 1fr) 176px 104px;
   }
   .flow-row-account,

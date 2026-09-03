@@ -57,11 +57,9 @@
   </div>
 
   {# The rows. WP4: leading checkbox track + select-all; rows opt into
-     their checkbox via bulk_select. `cards--selectable` is the pre-reskin
-     name of the same modifier, pinned by tests/web/test_bulk_ui.py and
-     defined in flow.css alongside `is-selectable`. #}
+     their checkbox via bulk_select. #}
   {% set bulk_select = true %}
-  <div class="flow-rows is-selectable cards--selectable">
+  <div class="flow-rows is-selectable">
     <div class="flow-head">
       <span class="flow-row-select"><input type="checkbox" class="tcheck" data-bulk-select-all @change="toggleAll($event.target.checked)" title="Select all on page" aria-label="Select all on page"></span>
       <span class="teyebrow">Date</span>

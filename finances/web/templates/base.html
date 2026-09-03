@@ -107,7 +107,7 @@
          implementation and the same htmx.ajax swap the queue refresh
          above already uses. #}
       modalDirty() {
-        const form = document.querySelector('#tx-modal-host form.tx-modal-form');
+        const form = document.querySelector('#tx-modal-host form.flow-modal-form');
         if (!form) return false;
         {# Read the hidden set_* sentinels, not the Alpine flags: the WP4
            category picker tracks its own dirty state in its own scope,
