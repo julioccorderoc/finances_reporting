@@ -86,7 +86,38 @@ DATA_ICONS = (
     "zap",
 )
 
-REQUIRED = tuple(sorted(set(UI_ICONS) | set(DATA_ICONS)))
+#: The SIGNAL shell (viewer reskin, 2026-09) — the rail's destinations and
+#: footer, plus a small kit the page reskins draw from so none of them has
+#: to touch this shared macro. Added at Lucide 0.469.0 like the rest.
+SHELL_ICONS = (
+    "arrow-right",
+    "arrow-up-right",
+    "bookmark",
+    "calendar",
+    "chart-column",
+    "circle-alert",
+    "circle-check",
+    "circle-help",
+    "clock",
+    "coins",
+    "database",
+    "filter",
+    "inbox",
+    "info",
+    "list-checks",
+    "minus",
+    "pencil",
+    "plus",
+    "power",
+    "route",
+    "sun",
+    "table",
+    "target",
+    "trending-up",
+    "upload",
+)
+
+REQUIRED = tuple(sorted(set(UI_ICONS) | set(DATA_ICONS) | set(SHELL_ICONS)))
 
 
 @pytest.fixture(scope="module")
