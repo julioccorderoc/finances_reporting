@@ -2,4 +2,327 @@
  *
  * Plain CSS on signal.css's tokens, prefixed `today-`. Loaded on every page
  * from base.html; inert where nothing carries the prefix.
+ *
+ * The page renders inside main.shell-content, which already caps and pads
+ * the column (shell.css), and opens with the page_header macro, which
+ * shell.css styles. What this sheet owns is everything under that header:
+ * the stat tiles, the needs-you card, the chart panel, the source chips and
+ * the recent-activity frame. The rows inside recent activity are the Flow
+ * row (partials/card_transaction.html) and belong to flow.css.
+ *
+ * House idiom: hairlines not shadows; raised (#f5f5f3) sits lighter than
+ * the canvas (#ececea); every figure in the mono with tabular-nums; radii
+ * 2/4/8; red only as THE accent, and here only as the warning trio's
+ * hairline + tint on something that needs you. Positive money is ink with
+ * a sign, never a colour. Nothing here is Doto — the page's one Doto figure
+ * is the header's answer.
  */
+
+/* ── Page ───────────────────────────────────────────────────────────────── */
+
+/* Sections stack 32px apart. No wrapper width, no max-width: the shell caps. */
+.today-sections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-7);
+}
+
+.today-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.today-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+.today-section-head > h2 {
+  margin: 0;
+}
+
+.today-caption {
+  font-size: var(--caption-size);
+  line-height: var(--caption-line);
+  color: var(--text-tertiary);
+}
+
+/* The header's meta row: the figure's name in the labelling voice, then
+   the Bank · Crypto · Cash split the service computes (figures, so mono). */
+.today-meta-label {
+  font-family: var(--font-mono);
+  font-size: var(--eyebrow-size);
+  line-height: var(--eyebrow-line);
+  letter-spacing: var(--eyebrow-tracking);
+  font-weight: var(--eyebrow-weight);
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.today-meta-hint {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--caption-size);
+  color: var(--text-tertiary);
+}
+
+/* ── Stat tiles ─────────────────────────────────────────────────────────── */
+
+.today-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+@media (max-width: 900px) {
+  .today-tiles {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.today-tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-15);
+  min-width: 0;
+  padding: var(--space-4) var(--space-5);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+/* The Money block's lg size: 22px/500/-0.03em in the mono. Not Doto. */
+.today-tile-figure {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 22px;
+  font-weight: var(--weight-medium);
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.today-tile-hint {
+  font-size: var(--caption-size);
+  line-height: var(--caption-line);
+  color: var(--text-tertiary);
+}
+
+/* ── The needs-you card ─────────────────────────────────────────────────── */
+
+/* A card that navigates. When rows are waiting it takes the warning trio
+   as a hairline + a tint, exactly like .tbanner — never a red fill, which
+   is the primary action's and nothing else's. */
+.today-needs {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-4) var(--space-5);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  text-decoration: none;
+  transition: var(--transition-control);
+}
+.today-needs:hover {
+  border-color: var(--border-default);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+.today-needs[data-severity="alert"],
+.today-needs[data-severity="warning"] {
+  background: var(--status-warning-bg);
+  border-color: var(--status-warning-border);
+}
+.today-needs[data-severity="alert"]:hover,
+.today-needs[data-severity="warning"]:hover {
+  border-color: var(--red-300);
+}
+
+.today-needs-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--text-secondary);
+}
+.today-needs[data-severity="alert"] .today-needs-icon,
+.today-needs[data-severity="warning"] .today-needs-icon {
+  color: var(--status-warning-text);
+}
+
+.today-needs-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-15);
+}
+.today-needs-line {
+  font-size: var(--title-3-size);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--title-3-tracking);
+  line-height: 1.3;
+}
+.today-needs-count {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-medium);
+}
+.today-needs-hint {
+  font-size: var(--caption-size);
+  line-height: var(--caption-line);
+  color: var(--text-tertiary);
+}
+
+.today-needs-arrow {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-self: center;
+  color: var(--text-tertiary);
+  transition: var(--transition-control);
+}
+.today-needs:hover .today-needs-arrow {
+  color: var(--text-primary);
+}
+
+/* ── Sources: staleness chips ───────────────────────────────────────────── */
+
+.today-sources {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Severity is the service's; this only dresses it. Green is the success
+   trio — greyscale, because "fresh" is not an event worth the accent.
+   Yellow (stale, or still running) is the warning trio: it wants a run.
+   Red (failed, or never ran) is the same trio with a stronger rule, a dot
+   and weight — separated from yellow by weight, the way attention and the
+   primary action are. Never a red fill. */
+.today-source {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--control-sm);
+  padding: 0 var(--space-25);
+  border-radius: var(--radius-xs);
+  background: var(--status-success-bg);
+  border: 1px solid var(--status-success-border);
+  color: var(--status-success-text);
+  font-size: var(--caption-size);
+  white-space: nowrap;
+  cursor: help;
+}
+.today-source-name {
+  font-family: var(--font-mono);
+  font-size: var(--eyebrow-size);
+  letter-spacing: var(--eyebrow-tracking);
+  font-weight: var(--eyebrow-weight);
+  text-transform: uppercase;
+  color: var(--text-primary);
+}
+.today-source-status {
+  color: var(--text-tertiary);
+}
+.today-source-when {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+
+.today-source[data-severity="yellow"],
+.today-source[data-severity="red"] {
+  background: var(--status-warning-bg);
+  border-color: var(--status-warning-border);
+}
+.today-source[data-severity="yellow"] .today-source-status,
+.today-source[data-severity="red"] .today-source-status {
+  color: var(--status-warning-text);
+}
+.today-source[data-severity="red"] {
+  border-color: var(--red-300);
+}
+.today-source[data-severity="red"] .today-source-status {
+  font-weight: var(--weight-medium);
+}
+.today-source[data-severity="red"] .today-source-status::before {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  vertical-align: middle;
+}
+
+/* ── The chart ──────────────────────────────────────────────────────────── */
+
+.today-panel {
+  padding: var(--space-4) var(--space-5);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+/* The page's main object: taller than the tiles above it so it reads
+   first. Moved here from app.css's .flows-chart. */
+.today-chart {
+  position: relative;
+  width: 100%;
+  height: 380px;
+}
+@media (max-width: 640px) {
+  .today-chart {
+    height: 260px;
+  }
+}
+
+/* Screen-reader-only: the chart's numbers as a table. The vendored
+   tailwind build has no sr-only, and app.css's .visually-hidden is not
+   this page's to lean on. */
+.today-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── Recent activity ────────────────────────────────────────────────────── */
+
+/* The rows are the Flow row, inside the flow-rows grid that flow.css
+   defines (no dotted selector here on purpose: the class guard reads
+   stylesheet comments too, and this sheet must not vouch for a class it
+   does not own). Nothing inside a row is styled from here. */
+.today-see-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  text-decoration: none;
+}
+
+.today-empty {
+  margin: 0;
+  padding: var(--space-6) var(--space-5);
+  text-align: center;
+  font-size: var(--body-size);
+  line-height: var(--body-line);
+  color: var(--text-secondary);
+  background: var(--surface-raised);
+  border: 1px dashed var(--border-default);
+  border-radius: var(--radius-md);
+}

@@ -1,11 +1,33 @@
-{# Dashboard sync-status strip.
+{# Sources — one staleness chip per feed.
    Context: ``chips`` (list[services.dashboard.SyncChip]).
-   Returned standalone by /_partial/dashboard/sync-status (no base.html shell).
-#}
-{% from "_macros.html" import sync_chip %}
+   Returned standalone by /_partial/dashboard/sync-status (no base.html
+   shell) and swapped into #sync-status-strip on Today every 60s.
 
-<div class="sync-strip" aria-label="Ingest sync status">
+   The chip is today.css's, not _macros.html's sync_chip (which emits
+   Tailwind). data-source / data-severity / data-status are the contract
+   tests/web/test_dashboard.py reads. The severity is the service's; this
+   template only dresses it. There is no feed to fake: a source that never
+   ran says so.
+
+   The day is fmt_date's; the time of day is deliberately not shown — the
+   datetime is UTC and a Caracas owner would read it four hours wrong. The
+   full instant is in the title and the <time datetime>.
+#}
+{%- set names = {"binance": "Binance", "provincial": "Provincial", "bcv": "BCV", "p2p_rates": "P2P rates"} -%}
+{%- set words = {"success": "landed", "running": "running", "error": "failed", "never": "never ran"} -%}
+
+<div class="today-sources" aria-label="Ingest sync status">
   {% for chip in chips %}
-    {{ sync_chip(chip.source, chip.last_status, chip.last_run_at, chip.severity) }}
+    <span class="today-source"
+          data-source="{{ chip.source }}"
+          data-severity="{{ chip.severity }}"
+          data-status="{{ chip.last_status }}"
+          title="{{ chip.source }} — {{ chip.last_status }}{% if chip.last_run_at is not none %} @ {{ chip.last_run_at.isoformat(timespec='minutes') }}{% endif %}">
+      <span class="today-source-name">{{ names.get(chip.source, chip.source) }}</span>
+      <span class="today-source-status">{{ words.get(chip.last_status, chip.last_status) }}</span>
+      {%- if chip.last_run_at is not none %}
+      <time class="today-source-when" datetime="{{ chip.last_run_at.isoformat() }}">{{ chip.last_run_at | fmt_date }}</time>
+      {%- endif %}
+    </span>
   {% endfor %}
 </div>

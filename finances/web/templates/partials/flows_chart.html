@@ -1,12 +1,16 @@
-{# Income vs expenses — the dashboard's main chart.
+{# Income vs expenses — Today's main object.
    Context: ``flows`` (services.dashboard.MonthlyFlows).
 
-   Two bars per month, grouped: income (blue) and expense (orange), both
-   drawn as magnitudes so the pair reads side by side; tooltips keep the
-   ledger's signed figures. Decimals are serialized as strings (tojson
-   cannot encode Decimal) and parsed with Number() below. The data-chart
-   attribute is single-quoted on purpose — a double-quoted attribute
-   truncates the JSON at the first embedded quote.
+   Two bars per month, grouped, both drawn as magnitudes so the pair reads
+   side by side; tooltips keep the ledger's signed figures. Greyscale and
+   nothing else: income is ink-900, expenses ink-300. Spending is not an
+   event that needs you, so it gets no red.
+
+   The payload rides in its own <script type="application/json"> block.
+   NEVER ``tojson`` inside a double-quoted attribute — it truncates the JSON
+   at the first embedded quote while every server-side test stays green.
+   Decimals are serialised as strings (tojson cannot encode Decimal) and
+   parsed with Number() below.
 #}
 {%- set _income_str = [] -%}
 {%- for v in flows.income_usd -%}
@@ -23,28 +27,24 @@
   'expense': _expense_str,
 } -%}
 
-<section aria-labelledby="flows-heading">
-  <header class="mb-2 flex items-baseline justify-between">
-    <h2 id="flows-heading" class="text-lg font-semibold">
-      Income vs expenses
-    </h2>
-    <span class="text-xs text-slate-500">
-      Last 6 months, headline USD — click a bar to open that month
-    </span>
-  </header>
+<section class="today-section" aria-labelledby="flows-heading">
+  <div class="today-section-head">
+    <h2 class="teyebrow" id="flows-heading">Income vs expenses</h2>
+    <span class="today-caption">Last 6 months, headline USD — click a bar to open that month</span>
+  </div>
 
-  <div class="rounded-lg border border-slate-200 bg-white p-4">
-    <div class="flows-chart">
+  <div class="today-panel">
+    <div class="today-chart">
       <canvas
         id="flows-chart"
         role="img"
         aria-label="Bar chart of total income and total expenses per month for the last six months"
-        data-chart='{{ _payload | tojson }}'
       ></canvas>
     </div>
+    <script id="flows-chart-data" type="application/json">{{ _payload | tojson }}</script>
 
     {# Same numbers as a table for screen readers and no-JS. #}
-    <table class="visually-hidden">
+    <table class="today-sr">
       <caption>Income and expenses per month, headline USD</caption>
       <thead>
         <tr><th scope="col">Month</th><th scope="col">Income</th><th scope="col">Expenses</th></tr>
@@ -65,15 +65,24 @@
 <script>
   (function () {
     var canvas = document.getElementById('flows-chart');
-    if (!canvas || typeof Chart === 'undefined') { return; }
-    var raw = canvas.getAttribute('data-chart');
-    if (!raw) { return; }
+    var dataEl = document.getElementById('flows-chart-data');
+    if (!canvas || !dataEl || typeof Chart === 'undefined') { return; }
     var payload;
-    try { payload = JSON.parse(raw); } catch (e) { return; }
+    try { payload = JSON.parse(dataEl.textContent); } catch (e) { return; }
 
     var months = payload.months || [];
     var income = (payload.income || []).map(Number);
     var expense = (payload.expense || []).map(Number);
+
+    // SIGNAL: greyscale, hairlines, the mono for every figure. The tooltip
+    // is the one inverse surface, like the toast.
+    var ink900 = '#131312';
+    var ink300 = '#bebdb8';
+    var hairline = '#dbdad5';
+    var label = '#666662';
+    var paper = '#f5f5f3';
+    var mono = "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
+    var tick = { family: mono, size: 11 };
 
     var fmtAxis = new Intl.NumberFormat('en-US', {
       style: 'currency', currency: 'USD', maximumFractionDigits: 0
@@ -90,15 +99,15 @@
           {
             label: 'Income',
             data: income.map(Math.abs),
-            backgroundColor: '#2a78d6',
-            borderRadius: { topLeft: 4, topRight: 4 },
+            backgroundColor: ink900,
+            borderRadius: 2,
             borderSkipped: 'bottom'
           },
           {
             label: 'Expenses',
             data: expense.map(Math.abs),
-            backgroundColor: '#eb6834',
-            borderRadius: { topLeft: 4, topRight: 4 },
+            backgroundColor: ink300,
+            borderRadius: 2,
             borderSkipped: 'bottom'
           }
         ]
@@ -109,13 +118,18 @@
         // Thin paired bars with air between the pair and between months.
         datasets: { bar: { barPercentage: 0.82, categoryPercentage: 0.62 } },
         scales: {
-          x: { grid: { display: false }, ticks: { color: '#64748b' } },
+          x: {
+            grid: { display: false },
+            border: { color: hairline },
+            ticks: { color: label, font: tick }
+          },
           y: {
             beginAtZero: true,
-            grid: { color: 'rgba(100, 116, 139, 0.12)' },
+            grid: { color: hairline },
             border: { display: false },
             ticks: {
-              color: '#64748b',
+              color: label,
+              font: tick,
               callback: function (v) { return fmtAxis.format(v); }
             }
           }
@@ -123,9 +137,22 @@
         plugins: {
           legend: {
             position: 'bottom',
-            labels: { usePointStyle: true, pointStyleWidth: 10, boxHeight: 6 }
+            labels: {
+              color: label,
+              font: tick,
+              boxWidth: 10,
+              boxHeight: 10,
+              padding: 16
+            }
           },
           tooltip: {
+            backgroundColor: ink900,
+            titleColor: paper,
+            bodyColor: paper,
+            titleFont: tick,
+            bodyFont: { family: mono, size: 12 },
+            cornerRadius: 4,
+            padding: 10,
             callbacks: {
               // Tooltips keep the ledger's signed figures (-$ order).
               label: function (ctx) {

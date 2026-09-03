@@ -1,36 +1,51 @@
 {% extends "base.html" %}
 {% block title %}Finances{% endblock %}
 {% block content %}
-  <header class="mb-4">
-    <h1 class="text-2xl font-semibold">Finances</h1>
-    <p class="mt-1 text-sm text-slate-600">
-      Headline net worth (USDT-denominated), this-month flows, sync status,
-      and the past six months of spending.
-    </p>
-  </header>
+  {% from "_macros.html" import page_header %}
 
-  <section class="space-y-6">
-    {# 1. KPI tiles. #}
+  {# The one question this page answers, and its one Doto answer: the
+     USDT-denominated net worth services/net_worth.py computes (never BCV),
+     as build_kpis already formats it. The meta row carries the figure's
+     name, the Bank · Crypto · Cash split and — when a balance could not be
+     priced — the warning badge. Staleness and gaps are the honest state;
+     they are shown, never hidden. #}
+  {% set meta %}
+    <span class="today-meta-label">Net worth</span>
+    <span class="today-meta-hint">{{ kpis.net_worth.hint }}</span>
+    {%- if kpis.net_worth.severity != "normal" %}
+    <span class="tbadge tbadge-warning tbadge-dot" data-net-worth-warning>Missing pair</span>
+    {%- endif %}
+  {% endset %}
+  {{ page_header("Where do I stand?", kpis.net_worth.value, meta) }}
+
+  <div class="today-sections">
+    {# 1. This month's spend and income, and what needs you. #}
     {% include "partials/kpi_tiles.html" %}
 
-    {# 2. The main chart: income vs expenses per month. #}
+    {# 2. The main object: income vs expenses per month. #}
     {% include "partials/flows_chart.html" %}
 
-    {# 3. Sync status strip. Polled every 60s for live updates, plus one
+    {# 3. Sources — when each feed last landed. Polled every 60s, plus one
        early poll: the startup refresh (web.services.refresh) takes roughly
        ten seconds, so a 60s-only cadence would show the owner stale chips
        for most of a minute after the data behind them already changed. #}
-    <div
-      id="sync-status-strip"
-      hx-get="/_partial/dashboard/sync-status"
-      hx-trigger="load delay:12s, every 60s"
-      hx-swap="innerHTML"
-      aria-live="polite"
-    >
-      {% include "partials/sync_status_strip.html" %}
-    </div>
+    <section class="today-section" aria-labelledby="sources-heading">
+      <div class="today-section-head">
+        <h2 class="teyebrow" id="sources-heading">Sources</h2>
+        <span class="today-caption">When each feed last landed</span>
+      </div>
+      <div
+        id="sync-status-strip"
+        hx-get="/_partial/dashboard/sync-status"
+        hx-trigger="load delay:12s, every 60s"
+        hx-swap="innerHTML"
+        aria-live="polite"
+      >
+        {% include "partials/sync_status_strip.html" %}
+      </div>
+    </section>
 
     {# 4. Recent activity. Reuses the canonical card partial. #}
     {% include "partials/recent_activity.html" %}
-  </section>
+  </div>
 {% endblock %}

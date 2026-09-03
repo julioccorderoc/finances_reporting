@@ -1,39 +1,25 @@
-{# Dashboard "Recent activity" panel.
+{# Recent activity — the last ten income/expense rows.
    Context: ``recent`` (list[services.transactions_query.TransactionCard]).
-   Reuses the canonical card_transaction.html partial inside a .cards
-   parent so the column tracks align with the rest of the viewer.
+
+   Each row is the canonical partials/card_transaction.html (the Flow row),
+   inside flow.css's .flow-rows grid so its columns align exactly as they
+   do on /transactions. This partial styles nothing inside a row.
 #}
-<section aria-labelledby="recent-activity-heading">
-  <header class="mb-2 flex items-baseline justify-between">
-    <h2 id="recent-activity-heading" class="text-lg font-semibold">
-      Recent activity
-    </h2>
-    <a
-      href="/transactions?kinds=income&kinds=expense"
-      class="text-sm text-sky-700 hover:text-sky-900"
-    >
-      View all &rarr;
-    </a>
-  </header>
+{% from "_icons.html" import icon %}
 
-  <div class="cards">
-    <div class="hidden sm:grid grid-cols-subgrid col-span-full text-[10px] uppercase tracking-wide text-slate-400 px-3">
-      <span>Date</span>
-      <span>Account</span>
-      <span>Description</span>
-      <span class="text-right">Amount</span>
-      <span>Category</span>
-      <span class="text-right">Flags</span>
-    </div>
+<section class="today-section" aria-labelledby="recent-activity-heading">
+  <div class="today-section-head">
+    <h2 class="teyebrow" id="recent-activity-heading">Recent activity</h2>
+    <a class="tlink today-see-all" href="/transactions?kinds=income&amp;kinds=expense">See all {{ icon("arrow-right", 12) }}</a>
+  </div>
 
-    {% if recent %}
+  {% if recent %}
+    <div class="flow-rows">
       {% for card in recent %}
         {% include "partials/card_transaction.html" %}
       {% endfor %}
-    {% else %}
-      <div class="col-span-full p-6 text-center text-slate-500 text-sm border border-dashed border-slate-300 rounded">
-        No recent income or expense activity yet.
-      </div>
-    {% endif %}
-  </div>
+    </div>
+  {% else %}
+    <p class="today-empty">Your first income or expense will appear here.</p>
+  {% endif %}
 </section>
