@@ -1,198 +1,28 @@
-{# Shared Jinja macros for the web viewer (EPIC-023+).
+{# Shared Jinja macros for the web viewer.
 
-   Append-only. New macros from Phase 2a/2c/2d should be added here
-   without modifying the existing ones. Each macro must be import-safe
-   (i.e. no reliance on a parent template's context).
+   Two macros survive the viewer reskin (2026-09): the page header every
+   page opens with, and the monthly pivot's cell. The badge, chip, tab,
+   tile and select macros that used to live here drew the old Tailwind
+   viewer; the reskinned pages render their own markup on signal.css
+   tokens, and tests/web/test_reskin_sweep.py fails the suite if a macro
+   here is left without a caller again.
+
+   Each macro must be import-safe (no reliance on a parent template's
+   context).
 #}
 
-{# --- formatting helpers ------------------------------------------------- #}
-
-{%- macro format_amount(value, places=2) -%}
-{#- Decimal/float -> grouped, sign-preserving string (finances.format).
-    None -> em dash. -#}
-{{ value | fmt_number(places) }}
-{%- endmacro -%}
-
-{%- macro format_date(dt) -%}
-{#- date/datetime/ISO string -> "Mon, Jul 7" (finances.format).
-    None -> em dash. -#}
-{{ dt | fmt_date }}
-{%- endmacro -%}
-
-{# --- badges ------------------------------------------------------------- #}
-
-{%- macro rate_source_badge(source, is_bcv_fallback=False) -%}
-{%- set label_map = {
-    "user_rate": ("user", "bg-emerald-100 text-emerald-700 border-emerald-300"),
-    "binance_p2p_realized": ("real", "bg-sky-100 text-sky-700 border-sky-300"),
-    "binance_p2p_realized_carry": ("real~", "bg-sky-50 text-sky-600 border-sky-200"),
-    "binance_p2p_median": ("p2p", "bg-sky-100 text-sky-700 border-sky-300"),
-    "binance_p2p_median_carry": ("p2p~", "bg-sky-50 text-sky-600 border-sky-200"),
-    "bcv": ("bcv", "bg-amber-100 text-amber-700 border-amber-300"),
-    "bcv_carry": ("bcv~", "bg-amber-50 text-amber-600 border-amber-200"),
-    "native_usd": ("native", "bg-slate-100 text-slate-600 border-slate-300"),
-    "needs_review": ("?", "bg-rose-100 text-rose-700 border-rose-400 font-bold"),
-} -%}
-{%- set entry = label_map.get(source, (source, "bg-slate-100 text-slate-600 border-slate-300")) -%}
-<span class="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide border rounded {{ entry[1] }}"
-      data-rate-source="{{ source }}"
-      title="rate source: {{ source }}{% if is_bcv_fallback %} (BCV fallback — reference only){% endif %}">
-  {{ entry[0] }}
-</span>
-{%- endmacro -%}
-
-{%- macro needs_review_badge() -%}
-<span class="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium border rounded
-             bg-yellow-100 text-yellow-800 border-yellow-300"
-      title="Needs review (no rate available)">
-  needs review
-</span>
-{%- endmacro -%}
-
-{%- macro kind_class(kind) -%}
-{%- if kind == 'income' -%}text-emerald-700
-{%- elif kind == 'expense' -%}text-rose-700
-{%- else -%}text-slate-700
-{%- endif -%}
-{%- endmacro -%}
-
-{# --- KPI tile placeholder (Phase 2a will append a richer macro) --------- #}
-
-{%- macro kpi_tile(label, value, hint=None) -%}
-<div class="rounded-lg border border-slate-200 bg-white p-4">
-  <div class="text-xs uppercase tracking-wide text-slate-500">{{ label }}</div>
-  <div class="mt-1 text-2xl font-semibold tabular-nums">{{ value }}</div>
-  {% if hint %}<div class="mt-1 text-xs text-slate-500">{{ hint }}</div>{% endif %}
-</div>
-{%- endmacro -%}
-
-{# --- Phase 2a additions (append-only) ---------------------------------- #}
-
-{%- macro sync_chip(source, status, last_run_at, severity='green') -%}
-{#- One sync-status chip. severity ∈ {green, yellow, red}. -#}
-{%- set sev_class = {
-    'green': 'bg-emerald-100 text-emerald-700 border-emerald-300',
-    'yellow': 'bg-amber-100 text-amber-700 border-amber-300',
-    'red':   'bg-rose-100 text-rose-700 border-rose-300',
-}.get(severity, 'bg-slate-100 text-slate-600 border-slate-300') -%}
-{%- set when_label -%}
-{%- if last_run_at is none -%}never{%- elif last_run_at.strftime is defined -%}{{ last_run_at.strftime('%Y-%m-%d %H:%M') }}{%- else -%}{{ last_run_at }}{%- endif -%}
-{%- endset -%}
-<span class="inline-flex items-center gap-1 px-2 py-1 text-xs border rounded-full {{ sev_class }}"
-      data-source="{{ source }}"
-      data-severity="{{ severity }}"
-      data-status="{{ status }}"
-      title="{{ source }} — {{ status }} @ {{ when_label }}">
-  <span class="font-medium">{{ source }}</span>
-  <span class="opacity-70">{{ status }}</span>
-  <span class="opacity-60 hidden sm:inline">{{ when_label }}</span>
-</span>
-{%- endmacro -%}
-
-{%- macro warning_chip(message) -%}
-{#- A loud yellow chip for the net-worth missing-pair indicator. -#}
-<span class="inline-flex items-center gap-1 px-2 py-1 text-xs border rounded-full
-             bg-amber-100 text-amber-800 border-amber-300"
-      data-warning-chip
-      title="{{ message }}">
-  <span aria-hidden="true">!</span>
-  <span>{{ message }}</span>
-</span>
-{%- endmacro -%}
-
-{# --- Phase 2d: account-kind chip --------------------------------------- #}
-
-{%- macro kind_chip(account_kind) -%}
-{%- set kind_map = {
-    "bank": ("bank", "bg-slate-100 text-slate-700 border-slate-300"),
-    "crypto_spot": ("spot", "bg-indigo-100 text-indigo-700 border-indigo-300"),
-    "crypto_funding": ("funding", "bg-violet-100 text-violet-700 border-violet-300"),
-    "crypto_earn": ("earn", "bg-emerald-100 text-emerald-700 border-emerald-300"),
-    "cash": ("cash", "bg-amber-100 text-amber-700 border-amber-300"),
-    "other": ("other", "bg-slate-100 text-slate-600 border-slate-300"),
-} -%}
-{%- set entry = kind_map.get(account_kind, (account_kind, "bg-slate-100 text-slate-600 border-slate-300")) -%}
-<span class="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide border rounded {{ entry[1] }}"
-      data-account-kind="{{ account_kind }}"
-      title="account kind: {{ account_kind }}">
-  {{ entry[0] }}
-</span>
-{%- endmacro -%}
-
-{# --- /monthly macros (Phase 2c) ----------------------------------------- #}
-
-{%- macro kind_tab(label, active, target_url) -%}
-<a
-  href="{{ target_url }}"
-  class="px-3 py-1.5 text-sm border rounded
-         {% if active %}bg-slate-900 text-white border-slate-900{% else %}bg-white text-slate-700 border-slate-300 hover:bg-slate-50{% endif %}"
-  data-kind-tab
-  data-active="{{ 'true' if active else 'false' }}"
->{{ label }}</a>
-{%- endmacro -%}
-
-{# --- Phase 3 (EPIC-024): category dropdown ----------------------------- #}
-
-{%- macro category_select(name, options, selected=None, autofocus=False) -%}
-{#- Render a <select> for the modal's category field.
-
-    ``options`` should be a list of Pydantic ``Category`` objects (the
-    output of ``categories_repo.list_all``). Categories are grouped by
-    ``kind`` to mimic the existing CLI flow.
-
-    ``autofocus=True`` renders the HTML autofocus attribute — htmx
-    focuses autofocused elements inside swapped-in content, so the modal
-    opens with the category control focused (WP2).
-
-    The "no category" option carries an empty value; since WP2 the
-    modals dirty-track the select, so an untouched empty option never
-    clears anything — clearing is the explicit remove-category control.
--#}
-<select
-  name="{{ name }}"
-  {% if autofocus %}autofocus{% endif %}
-  class="mt-1 w-full border border-slate-300 rounded px-2 py-1 text-sm bg-white"
->
-  <option value="" {% if selected is none %}selected{% endif %}>— no category —</option>
-  {%- set ns = namespace(prev_kind=None) -%}
-  {%- for opt in options -%}
-    {%- set kind_value = opt.kind.value if opt.kind.value is defined else opt.kind -%}
-    {%- if kind_value != ns.prev_kind -%}
-      {%- if ns.prev_kind is not none %}</optgroup>{% endif %}
-      <optgroup label="{{ kind_value }}">
-      {%- set ns.prev_kind = kind_value -%}
-    {%- endif -%}
-    <option value="{{ opt.id }}" {% if selected is not none and opt.id == selected %}selected{% endif %}>{{ opt.name }}</option>
-  {%- endfor -%}
-  {%- if ns.prev_kind is not none %}</optgroup>{% endif %}
-</select>
-{%- endmacro -%}
-
-{# --- Phase 4 (EPIC-025): triage type badge --------------------------- #}
-
-{%- macro triage_type_badge(badge_type) -%}
-{%- set badge_map = {
-    "rate":     ("RATE",     "bg-rose-100 text-rose-700 border-rose-300"),
-    "category": ("CATEGORY", "bg-sky-100 text-sky-700 border-sky-300"),
-    "pair":     ("PAIR",     "bg-violet-100 text-violet-700 border-violet-300"),
-} -%}
-{%- set entry = badge_map.get(badge_type, (badge_type, "bg-slate-100 text-slate-600 border-slate-300")) -%}
-<span class="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide border rounded {{ entry[1] }}"
-      data-triage-badge="{{ badge_type }}"
-      title="triage issue: {{ badge_type }}">
-  {{ entry[0] }}
-</span>
-{%- endmacro -%}
+{# --- /monthly: the pivot cell ------------------------------------------ #}
 
 {%- macro pivot_cell(amount, fallback_amount, needs_review_count) -%}
 {#- One pivot cell. Renders the headline amount, an overlay if BCV
     fallback contributed, and a small needs-review dot if any rows in
-    the bucket failed to resolve.
+    the bucket failed to resolve. The markers are styled under
+    .rpt-pivot in reports.css.
 
     Caller wraps the resulting span in an <a> for the drill-down URL.
 -#}
 <span
-  class="pivot-cell tabular-nums {% if fallback_amount and fallback_amount != 0 %}has-bcv-fallback{% endif %} {% if needs_review_count and needs_review_count > 0 %}has-needs-review{% endif %}"
+  class="pivot-cell {% if fallback_amount and fallback_amount != 0 %}has-bcv-fallback{% endif %} {% if needs_review_count and needs_review_count > 0 %}has-needs-review{% endif %}"
   data-bcv-fallback="{{ 'true' if fallback_amount and fallback_amount != 0 else 'false' }}"
   data-needs-review-count="{{ needs_review_count or 0 }}"
   title="USD {{ (amount or 0) | fmt_number }}{% if fallback_amount and fallback_amount != 0 %} (+ {{ fallback_amount | fmt_number }} BCV fallback){% endif %}{% if needs_review_count and needs_review_count > 0 %} · {{ needs_review_count }} needs review{% endif %}"

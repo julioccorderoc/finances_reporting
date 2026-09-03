@@ -31,7 +31,10 @@
           hx-get="/_partial/rates/chart"
           hx-target="#rates-chart"
           hx-swap="outerHTML"
-          hx-push-url="true"
+          {# The PAGE's URL, not the partial's: `true` would push
+             /_partial/rates/chart?range_days=N into the address bar, and a
+             reload would land on a bare chart fragment. #}
+          hx-push-url="/rates?range_days={{ opt }}"
           hx-vals='{"range_days": "{{ opt }}"}'
         >{{ opt }}d</button>
       {% endfor %}

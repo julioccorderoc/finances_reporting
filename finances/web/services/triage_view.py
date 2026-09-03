@@ -111,13 +111,24 @@ class ProvChip(BaseModel):
 
     @property
     def tone_class(self) -> str:
-        """``prov-warn``. Built here, not interpolated in the template.
+        """``prov-warn``. Looked up here, not interpolated in the template.
 
         A class name half-written in Jinja is invisible to the stylesheet
         guard (tests/web/test_template_css_classes.py), which is the one
         thing standing between a typo'd class and an unstyled element that
-        every server-side test calls fine."""
-        return f"prov-{self.tone}"
+        every server-side test calls fine. Spelled out in full rather than
+        built with an f-string for the mirror-image guard
+        (tests/web/test_reskin_sweep.py): a rule in triage.css must be
+        traceable to a literal somewhere."""
+        return _TONE_CLASSES[self.tone]
+
+
+#: The three chip treatments (README §Prov), by tone.
+_TONE_CLASSES: dict[str, str] = {
+    "trusted": "prov-trusted",
+    "quiet": "prov-quiet",
+    "warn": "prov-warn",
+}
 
 
 #: Short tier labels, keyed by the base source (suffixes stripped).
