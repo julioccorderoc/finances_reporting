@@ -30,6 +30,30 @@
       >{{ label }}{% if active %} {{ '↓' if page.filter.direction == 'desc' else '↑' }}{% endif %}</button>
     {% endfor %}
     <span class="flow-count">{{ page.total | fmt_number(0) }} match{{ '' if page.total == 1 else 'es' }}</span>
+    {# Rows per page, beside the count it changes. Inside #tx-list so
+       every swap re-renders it with the size in force; form="tx-filters"
+       makes it part of the filter form's serialisation (the form's own
+       requests, the sort chips and the pager all send the form), and a
+       change here fires its own request because a change outside the
+       form's subtree never reaches the form's hx-trigger. #}
+    <label class="flow-pagesize">
+      <select
+        name="page_size"
+        id="tx-page-size"
+        form="tx-filters"
+        aria-label="Rows per page"
+        hx-get="/_partial/transactions/list"
+        hx-target="#tx-list"
+        hx-include="#tx-filters"
+        hx-push-url="true"
+        hx-vals='{"page": "1"}'
+      >
+        {%- for sz in [25, 50, 100] %}
+        <option value="{{ sz }}"{% if page.filter.page_size == sz %} selected{% endif %}>{{ sz }}</option>
+        {%- endfor %}
+      </select>
+      <span>per page</span>
+    </label>
   </div>
 
   {# The rows. WP4: leading checkbox track + select-all; rows opt into

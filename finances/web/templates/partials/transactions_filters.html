@@ -63,14 +63,8 @@
         {% endfor %}
       </select>
     </label>
-    <label class="flow-field">
-      <span class="teyebrow">Per page</span>
-      <select name="page_size" class="flow-input">
-        {% for sz in [25, 50, 100] %}
-          <option value="{{ sz }}" {% if filter.page_size == sz %}selected{% endif %}>{{ sz }}</option>
-        {% endfor %}
-      </select>
-    </label>
+    {# Rows per page is in the list's sort bar (transactions_list.html),
+       associated with this form by id, so it is serialised with it. #}
   </div>
 
   <div class="flow-filter-groups">

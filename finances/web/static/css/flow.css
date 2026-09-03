@@ -186,6 +186,49 @@
   white-space: nowrap;
 }
 
+/* Rows per page, read as part of the count line ("364 matches · 50 per
+ * page"): mono, tertiary, no box — the chevron is the only hint it is a
+ * control until it is hovered or focused. */
+.flow-pagesize {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+.flow-pagesize::before {
+  content: "·";
+  margin-right: 2px;
+}
+.flow-pagesize select {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 20px;
+  padding: 0 14px 0 2px;
+  background: transparent;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236d6d69' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 1px center;
+  background-size: 11px 11px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  font: inherit;
+  color: var(--text-secondary);
+  cursor: pointer;
+  outline: none;
+  transition: var(--transition-control);
+}
+.flow-pagesize select:hover {
+  color: var(--text-primary);
+}
+.flow-pagesize select:focus-visible {
+  box-shadow: var(--focus-ring);
+  color: var(--text-primary);
+}
+
 .flow-pager {
   display: flex;
   align-items: center;
