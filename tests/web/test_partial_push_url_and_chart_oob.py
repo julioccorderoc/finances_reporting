@@ -132,6 +132,38 @@ def test_an_htmx_pivot_swap_carries_the_chart_out_of_band(
     assert len(payload["months"]) == len(build_pivot(seeded_web_db, f, today=date.today()).months)
 
 
+def test_an_htmx_pivot_swap_carries_the_page_header_out_of_band(
+    seeded_web_db: sqlite3.Connection, web_client_factory
+) -> None:
+    """The Doto total and the meta line sit above the pivot and went
+    just as stale as the chart: after a 3m preset the header still said
+    six months and the six-month total. Same twin, same rule."""
+    from datetime import date
+
+    from finances.format import fmt_usd
+    from finances.web.services.monthly_view import MonthlyFilter, build_pivot
+
+    client: TestClient = web_client_factory()
+
+    swapped = client.get(
+        "/_partial/monthly/pivot", params={"range_preset": "3m"}, headers=HX
+    ).text
+
+    header = re.search(r'<div id="monthly-header"[^>]*>.*?</div>\s*</div>', swapped, re.S)
+    assert header, "the pivot swap carries no header twin"
+    assert 'hx-swap-oob="true"' in header.group(0)
+    pivot = build_pivot(seeded_web_db, MonthlyFilter(range_preset="3m"), today=date.today())
+    assert fmt_usd(pivot.totals.grand_total_usd) in header.group(0)
+    assert f"{len(pivot.months)} months" in header.group(0)
+
+    plain = client.get("/_partial/monthly/pivot", params={"range_preset": "3m"}).text
+    assert 'id="monthly-header"' not in plain
+
+    page = client.get("/monthly", params={"layout": "desktop", "range_preset": "3m"}).text
+    assert page.count('id="monthly-header"') == 1
+    assert page.count('class="page-answer"') == 1
+
+
 def test_a_plain_pivot_render_and_the_full_page_carry_one_chart_at_most(
     seeded_web_db: sqlite3.Connection, web_client_factory
 ) -> None:
