@@ -1,0 +1,5 @@
+/* Today (/) — the dashboard's sheet (viewer reskin, 2026-09).
+ *
+ * Plain CSS on signal.css's tokens, prefixed `today-`. Loaded on every page
+ * from base.html; inert where nothing carries the prefix.
+ */

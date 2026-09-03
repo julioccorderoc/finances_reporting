@@ -50,6 +50,16 @@
     <link rel="stylesheet" href="/static/css/triage.css">
     <script src="/static/js/triage.js"></script>
 
+    <!-- Page sheets (viewer reskin, 2026-09). Global rather than per-page
+         on purpose: partials cross pages (the dashboard's recent activity
+         is the Flow row), so a sheet that loaded on one page only would
+         leave the same partial unstyled on another. Each is scoped by its
+         own class prefix and inert elsewhere. -->
+    <link rel="stylesheet" href="/static/css/today.css">
+    <link rel="stylesheet" href="/static/css/flow.css">
+    <link rel="stylesheet" href="/static/css/reports.css">
+    <link rel="stylesheet" href="/static/css/placeholders.css">
+
     {# Identity of the server process that rendered this page. Read from
        request.app.state rather than a context key on purpose: Starlette
        injects `request` into every template context, so no TemplateResponse

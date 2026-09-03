@@ -1,0 +1,5 @@
+/* Flow (/transactions) — the ledger list's sheet (viewer reskin, 2026-09).
+ *
+ * Plain CSS on signal.css's tokens, prefixed `flow-`. Loaded on every page
+ * from base.html because the row partial also renders on Today.
+ */

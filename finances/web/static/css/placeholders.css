@@ -1,0 +1,5 @@
+/* Plans and Ahead — the placeholders' sheet (viewer reskin, 2026-09).
+ *
+ * Plain CSS on signal.css's tokens, prefixed `placeholder-`. Loaded on every
+ * page from base.html; inert where nothing carries the prefix.
+ */
