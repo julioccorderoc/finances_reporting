@@ -33,14 +33,14 @@ def get_settings(request: Request) -> WebSettings:
     return settings
 
 
-def get_conn(request: Request) -> Iterator[sqlite3.Connection]:
-    """Yield a per-request ``sqlite3.Connection`` to the configured DB.
+def open_conn(settings: WebSettings) -> sqlite3.Connection:
+    """Open a connection the way every request does.
 
     Mirrors the production connection setup: ``Row`` factory, FK on,
-    autocommit (``isolation_level=None``). The connection is closed on
-    teardown regardless of handler outcome.
+    autocommit (``isolation_level=None``). The caller closes it. Shared
+    by :func:`get_conn` and by the rail, which renders outside the
+    dependency graph (see ``services/rail.py``).
     """
-    settings = get_settings(request)
     # Lazy import to keep import-time cycles off the Decimal adapter
     # registration in finances.db.connection.
     from finances.db.connection import _register_decimal_adapters
@@ -53,6 +53,15 @@ def get_conn(request: Request) -> Iterator[sqlite3.Connection]:
     )
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
+
+def get_conn(request: Request) -> Iterator[sqlite3.Connection]:
+    """Yield a per-request ``sqlite3.Connection`` to the configured DB.
+
+    The connection is closed on teardown regardless of handler outcome.
+    """
+    conn = open_conn(get_settings(request))
     try:
         yield conn
     finally:

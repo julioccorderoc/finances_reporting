@@ -200,3 +200,37 @@
   {{ amount | fmt_number }}
 </span>
 {%- endmacro -%}
+
+{# --- SIGNAL shell (viewer reskin, 2026-09): the page header ------------ #}
+
+{%- macro page_header(question, answer, meta=None) -%}
+{#- Every screen opens with the question it answers, then the answer:
+    the question small, in the mono-caps kicker with the red square; the
+    answer as THE one headline figure of the view, in Doto. At most one
+    per view — a second Doto figure on a page is the design broken.
+
+    ``meta`` is rendered as given, so build it with a ``{% set %}`` block
+    (autoescape makes that Markup) when it carries badges:
+
+        {% set meta %}<span class="tbadge">3 accounts</span>{% endset %}
+        {% call page_header("What do I hold?", total, meta) %}
+          <a class="tbtn" href="...">Action</a>
+        {% endcall %}
+
+    The call block, when present, is the actions slot on the right.
+    Modelled on the triage header and Chrome.jsx's PageHeader; the CSS is
+    the .page-* block in shell.css.
+-#}
+<header class="page-header">
+  <div class="page-header-text">
+    <span class="page-question">{{ question }}</span>
+    <h1 class="page-answer">{{ answer }}</h1>
+    {%- if meta %}
+    <div class="page-meta">{{ meta }}</div>
+    {%- endif %}
+  </div>
+  {%- if caller is defined %}
+  <div class="page-actions">{{ caller() }}</div>
+  {%- endif %}
+</header>
+{%- endmacro -%}

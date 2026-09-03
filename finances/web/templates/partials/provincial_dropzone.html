@@ -9,7 +9,9 @@
    rounded-md / sr-only / border-2 / border-t.
 #}
 <section class="mt-4" data-provincial-dropzone>
-  <details class="upload-card">
+  {# The rail's "Upload a statement" lands here as /transactions?upload=1#upload
+     and expects the panel open on arrival. #}
+  <details class="upload-card" id="upload"{% if request.query_params.get("upload") %} open{% endif %}>
     <summary class="upload-panel-summary cursor-pointer text-sm text-slate-700">
       Import a Provincial statement
     </summary>

@@ -41,6 +41,7 @@ from finances.web.routers import api as api_router
 from finances.web.routers import pages as pages_router
 from finances.web.routers import partials as partials_router
 from finances.web.settings import WebSettings
+from finances.web.services.rail import build_rail
 from finances.web.services.triage_view import prov_chip
 from finances.web.urls import modal_url_for
 
@@ -160,11 +161,15 @@ def create_app(settings: WebSettings) -> FastAPI:
     # Globals rather than filters: both take keyword arguments and read
     # more like the components they stand for. ``prov_chip`` is the one
     # place that decides how a rate tier is drawn (D2/D3); ``modal_url_for``
-    # is how a row knows which dialog opens it.
+    # is how a row knows which dialog opens it; ``rail_state`` is what the
+    # shell's rail reads — a global rather than a context processor so the
+    # blocking count is computed only when a page renders the rail, not on
+    # every partial swap.
     app.state.templates.env.globals.update(
         {
             "prov_chip": prov_chip,
             "modal_url_for": modal_url_for,
+            "rail_state": build_rail,
         }
     )
 

@@ -18,6 +18,14 @@
 #}
 {% from "_icons.html" import icon %}
 
+{# The rail's Triage badge is the one count OUTSIDE this swap that a
+   sitting changes. When htmx asked for this partial, ship it an
+   out-of-band twin; on the full page render the rail already carries the
+   element, and a second one with the same id would be the bug. #}
+{% if request.headers.get("HX-Request") %}
+<span id="rail-triage-count" class="rail-count" data-rail-triage-count hx-swap-oob="true">{{ screen.queue.blocking_count if screen.queue.blocking_count else "" }}</span>
+{% endif %}
+
 <header class="triage-header">
   <div class="triage-header-text">
     <span class="triage-question">What still needs you?</span>

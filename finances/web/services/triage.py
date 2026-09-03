@@ -757,6 +757,35 @@ def build_queue(
     )
 
 
+def count_blocking(
+    conn: sqlite3.Connection, *, dismissed: Container[str] = ()
+) -> int:
+    """What ``build_queue(...).blocking_count`` would say, without the pricing.
+
+    The rail badge asks this on every page load. ``build_queue`` prices
+    every non-native row that lacks a ``user_rate`` to find the
+    approximate ones — and approximate rows do not block (criterion A8),
+    so the badge never needed that work. Categories are the same
+    predicate ``_collect_txn_items`` uses, counted in SQL; pairs are the
+    strategy's proposals minus this run's refusals, exactly as the queue
+    drops them. ``tests/web/test_shell.py`` pins the two equal.
+    """
+    row = conn.execute(
+        """
+        SELECT COUNT(*) AS c
+        FROM transactions t
+        WHERE t.category_id IS NULL
+          AND t.kind NOT IN ('transfer', 'adjustment')
+          AND t.parked = 0
+        """
+    ).fetchone()
+    categories = int(row["c"]) if row is not None else 0
+    pairs = sum(
+        1 for item in _collect_pair_items(conn) if item.item_id not in dismissed
+    )
+    return categories + pairs
+
+
 def _index_of(items: Sequence[TriageItem], item_id: str) -> int | None:
     return next(
         (n for n, item in enumerate(items) if item.item_id == item_id),
@@ -1056,6 +1085,7 @@ __all__ = [
     "assess_pair",
     "build_queue",
     "confirm_pair",
+    "count_blocking",
     "neighbours_of",
     "next_item_after",
 ]

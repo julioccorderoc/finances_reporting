@@ -194,12 +194,17 @@ def test_dates_are_short_and_carry_no_weekday(
     triage_web_db: sqlite3.Connection,
     web_client_factory: Callable[[], TestClient],
 ) -> None:
-    """A5 — `Jul 3`, never `Fri, Jul 3` and never `Today`."""
-    body = _page(web_client_factory)
+    """A5 — `Jul 3`, never `Fri, Jul 3` and never `Today`.
 
-    assert ">Jul 3<" in body
-    assert "Today" not in body
-    assert "Yesterday" not in body
+    Scoped to the queue: the shell's rail names the dashboard *Today*,
+    which is a destination, not a day label.
+    """
+    body = _page(web_client_factory)
+    queue = body.split('id="triage-queue"', 1)[1]
+
+    assert ">Jul 3<" in queue
+    assert "Today" not in queue
+    assert "Yesterday" not in queue
 
 
 def test_the_checkbox_names_the_row_it_selects(

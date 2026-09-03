@@ -16,20 +16,27 @@
  * content — never `fixed` — so the nav stays visible and unscrolled behind
  * the scrim (criterion B11). That needs a positioned ancestor, and this is
  * it. */
-/* The content area is the whole viewport under the nav, and the QUEUE
+/* The content area is the whole column right of the rail, and the QUEUE
  * scrolls inside it rather than the page scrolling under everything. Two
- * things depend on that: the nav stays visible and unscrolled behind the
+ * things depend on that: the rail stays visible and unscrolled behind the
  * scrim (B11), and the dialog is centred on the content area rather than
- * on wherever the page happened to be scrolled to. */
+ * on wherever the page happened to be scrolled to.
+ *
+ * The screen is the full viewport height: the rail is a column beside the
+ * content, not a bar above it (the 55px this used to subtract was the top
+ * nav the shell replaced). Its width is the whole column so the scrim covers
+ * everything right of the rail; the queue's rows are capped INSIDE it by
+ * shell.css's .shell-cap on the swap target. */
 .triage-main {
   display: block;
+  width: 100%;
 }
 
 .triage-screen {
   position: relative;
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 55px);
+  height: 100vh;
   overflow: hidden;
   background: var(--surface-canvas);
   color: var(--text-primary);

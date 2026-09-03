@@ -79,7 +79,7 @@ def test_every_page_renders_inside_the_rail(
     # The old top nav is gone, not hidden.
     assert "max-w-6xl" not in body
     assert ">Dashboard<" not in body
-    assert '<body class="shell"' in body
+    assert re.search(r'<body\s+class="shell"', body)
 
 
 def test_the_rail_lists_the_destinations_in_order(
@@ -385,10 +385,16 @@ def test_the_modal_overlay_still_covers_only_the_content_area() -> None:
 
 @pytest.fixture(scope="module")
 def render() -> Callable[[str], str]:
+    from finances.format import fmt_date, fmt_money, fmt_number
+
     env = Environment(
         loader=FileSystemLoader(str(TEMPLATES)),
         undefined=StrictUndefined,
         autoescape=True,
+    )
+    # _macros.html compiles its older macros against the app's filters.
+    env.filters.update(
+        {"fmt_number": fmt_number, "fmt_money": fmt_money, "fmt_date": fmt_date}
     )
 
     def _render(source: str, **context: object) -> str:

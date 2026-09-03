@@ -30,9 +30,14 @@
         and the kebab spelling; the kebab one is what Alpine can bind. #}
      @htmx:after-settle.window="if ($event.detail && $event.detail.target && $event.detail.target.id === 'triage-queue') announceCounts()">
 
-  {# The swap target. Everything numeric on this screen is inside it. #}
-  <div id="triage-queue" class="triage-scroll">
-    {% include 'partials/triage_queue.html' %}
+  {# The scroller spans the whole column so its scrollbar sits at the
+     viewport edge; the swap target inside it is the width cap, so a
+     queue refresh keeps the cap. Everything numeric on this screen is
+     inside #triage-queue. #}
+  <div class="triage-scroll">
+    <div id="triage-queue" class="shell-cap">
+      {% include 'partials/triage_queue.html' %}
+    </div>
   </div>
 
   {# J5: the live region sits OUT here on purpose. #triage-queue's

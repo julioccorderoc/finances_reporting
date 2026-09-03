@@ -39,6 +39,11 @@
     <link rel="stylesheet" href="/static/css/fonts.css">
     <link rel="stylesheet" href="/static/css/signal.css">
 
+    <!-- The shell (viewer reskin, 2026-09): the rail, the content column
+         and its 1196px cap, the page header. Reads signal.css's tokens, so
+         it loads after them. -->
+    <link rel="stylesheet" href="/static/css/shell.css">
+
     <!-- Triage component layer (Wave 2). Loads after signal.css because it
          reads its tokens; scoped to .triage-* / .t* classes, so it is inert
          on every other page. -->
@@ -53,7 +58,7 @@
     <meta name="finances-boot" content="{{ request.app.state.boot_id }}">
   </head>
   <body
-    class="min-h-screen bg-slate-50 text-slate-900"
+    class="shell"
     {# queueDirty: a triage run mutates rows while the modal stays mounted,
        so the list behind it goes stale by design (ADR-012 Amendment
        2026-07-26). It reconciles ONCE, when the run ends — re-rendering
@@ -205,55 +210,45 @@
       failureToast('Received a response this page could not render. Reload (Cmd-R).');
     "
   >
-    <nav class="bg-white border-b border-slate-200">
-      <div class="max-w-6xl mx-auto px-4 py-3 flex flex-wrap gap-4 items-center">
-        <a href="/" class="font-semibold text-slate-900">Finances</a>
-        <div class="flex flex-wrap gap-3 text-sm">
-          <a href="/" class="text-slate-600 hover:text-slate-900">Dashboard</a>
-          <a href="/transactions" class="text-slate-600 hover:text-slate-900">Transactions</a>
-          <a href="/monthly" class="text-slate-600 hover:text-slate-900">Monthly</a>
-          <a href="/triage" class="text-slate-600 hover:text-slate-900">Triage</a>
-          <a href="/accounts" class="text-slate-600 hover:text-slate-900">Accounts</a>
-          <a href="/rates" class="text-slate-600 hover:text-slate-900">Rates</a>
-        </div>
-        {# Always-visible graceful stop: plain form POST (no htmx) so the
-           browser navigates to the goodbye page before the server exits. #}
-        <form method="post" action="/shutdown" class="stop-server-form"
-              onsubmit="return confirm('Stop the finances server?')">
-          <button type="submit" class="stop-server-btn">Stop server</button>
-        </form>
+    {# The rail (viewer reskin, 2026-09): the shell's one navigation,
+       244px on the left of every page. Destinations, the live Triage
+       badge, Upload a statement, the demoted Rates link and the stop
+       control all live in partials/rail.html. #}
+    {% include "partials/rail.html" %}
+
+    <div class="shell-main">
+      {# Stale-page notice. Deliberately polite, never assertive: it appears
+         while the owner is typing into a modal, and stealing focus there
+         would be worse than the staleness it reports. Styled from shell.css,
+         not Tailwind utilities — tailwind.css is compiled offline by
+         scanning templates, and a notice about broken state must not depend
+         on someone having run that build. #}
+      <div
+        id="server-restarted"
+        class="server-restart-banner"
+        role="status"
+        aria-live="polite"
+        x-show="serverRestarted"
+        x-cloak
+      >
+        <span>
+          The server picked up new code while this page was open. Reload so what
+          you see matches what saves — everything already saved is in the
+          database.
+        </span>
+        <span class="server-restart-actions">
+          <button type="button" @click="reloadForNewCode()">Reload</button>
+          <button type="button" @click="dismissRestart()">Dismiss</button>
+        </span>
       </div>
-    </nav>
 
-    {# Stale-page notice. Deliberately polite, never assertive: it appears
-       while the owner is typing into a modal, and stealing focus there
-       would be worse than the staleness it reports. Styled from app.css,
-       not Tailwind utilities — tailwind.css is compiled offline by
-       scanning templates, and a notice about broken state must not depend
-       on someone having run that build. #}
-    <div
-      id="server-restarted"
-      class="server-restart-banner"
-      role="status"
-      aria-live="polite"
-      x-show="serverRestarted"
-      x-cloak
-    >
-      <span>
-        The server picked up new code while this page was open. Reload so what
-        you see matches what saves — everything already saved is in the
-        database.
-      </span>
-      <span class="server-restart-actions">
-        <button type="button" @click="reloadForNewCode()">Reload</button>
-        <button type="button" @click="dismissRestart()">Dismiss</button>
-      </span>
+      {# The content column: capped at 1196px and centred, with the canvas
+         running full-bleed behind it (shell.css). A page that owns its
+         whole column (triage) overrides main_class and caps itself. #}
+      <main class="{% block main_class %}shell-content{% endblock %}">
+        {% block content %}{% endblock %}
+      </main>
     </div>
-
-    {# Pages that own their whole content area (triage) override this. #}
-    <main class="{% block main_class %}max-w-6xl mx-auto px-4 py-6{% endblock %}">
-      {% block content %}{% endblock %}
-    </main>
 
     {# Modal host (EPIC-024 / Phase 3). HTMX swaps in modal_transaction.html
        when a transaction card is clicked. The Alpine listener on <body>

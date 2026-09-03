@@ -1,0 +1,70 @@
+{# The rail — the shell's one navigation, on every page.
+
+   Recreated in Jinja + CSS from Chrome.jsx's Rail (a 244px SideNav with a
+   wordmark up top and a footer); never ported. The destinations are the
+   five surfaces the ledger has data for, then a hairline, then the two the
+   roadmap names (REPO-RECONCILE §B1) as placeholders. The footer carries
+   the design brief's non-negotiable — Upload a statement, reachable from
+   anywhere — the demoted Rates link, and the stop control.
+
+   Reads ``rail_state(request)`` (services/rail.py) for the current path
+   and the live blocking count. The badge is the one element outside
+   #triage-queue that a sitting changes, so the queue partial refreshes
+   it out of band on every swap.
+#}
+{% from "_icons.html" import icon %}
+{% set rail = rail_state(request) %}
+
+<nav class="rail" aria-label="Primary">
+  <a class="rail-brand" href="/">
+    <span class="rail-brand-mark" aria-hidden="true">F</span>
+    <span class="rail-brand-name">Finances</span>
+  </a>
+
+  <div class="rail-nav">
+    <a class="rail-link" href="/triage"{% if rail.is_current("/triage") %} aria-current="page"{% endif %}>
+      {{ icon("list-checks", 16) }}<span>Triage</span>
+      <span id="rail-triage-count" class="rail-count" data-rail-triage-count>{{ rail.blocking_count if rail.blocking_count else "" }}</span>
+    </a>
+    <a class="rail-link" href="/"{% if rail.is_current("/") %} aria-current="page"{% endif %}>
+      {{ icon("sun", 16) }}<span>Today</span>
+    </a>
+    <a class="rail-link" href="/transactions"{% if rail.is_current("/transactions") %} aria-current="page"{% endif %}>
+      {{ icon("arrow-left-right", 16) }}<span>Flow</span>
+    </a>
+    <a class="rail-link" href="/monthly"{% if rail.is_current("/monthly") %} aria-current="page"{% endif %}>
+      {{ icon("calendar", 16) }}<span>Monthly</span>
+    </a>
+    <a class="rail-link" href="/accounts"{% if rail.is_current("/accounts") %} aria-current="page"{% endif %}>
+      {{ icon("landmark", 16) }}<span>Accounts</span>
+    </a>
+
+    <div class="rail-divider" role="separator"></div>
+
+    <a class="rail-link" href="/plans"{% if rail.is_current("/plans") %} aria-current="page"{% endif %}>
+      {{ icon("target", 16) }}<span>Plans</span>
+    </a>
+    <a class="rail-link" href="/ahead"{% if rail.is_current("/ahead") %} aria-current="page"{% endif %}>
+      {{ icon("route", 16) }}<span>Ahead</span>
+    </a>
+  </div>
+
+  <div class="rail-footer">
+    {# The existing Provincial drop flow, opened on arrival by the flag
+       (partials/provincial_dropzone.html reads it). No new upload code. #}
+    <a class="rail-upload" href="/transactions?upload=1#upload" data-rail-upload>
+      {{ icon("upload", 16) }}<span>Upload a statement</span>
+    </a>
+    <div class="rail-minor">
+      <a class="rail-minor-link" href="/rates"{% if rail.is_current("/rates") %} aria-current="page"{% endif %}>
+        {{ icon("percent", 13) }}<span>Rates</span>
+      </a>
+      {# Plain form POST (no htmx) so the browser navigates to the goodbye
+         page before the server exits. #}
+      <form method="post" action="/shutdown" class="rail-stop-form"
+            onsubmit="return confirm('Stop the finances server?')">
+        <button type="submit" class="rail-stop">{{ icon("power", 13) }}<span>Stop server</span></button>
+      </form>
+    </div>
+  </div>
+</nav>

@@ -1,0 +1,418 @@
+/* Shell — the SIGNAL frame every page renders inside (viewer reskin, 2026-09).
+ *
+ * The rail, the content column and its width cap, the page header, and the
+ * two pieces of chrome that outlived the old top nav (the restart banner
+ * and the stop control). Plain CSS on signal.css's tokens, same rule as
+ * triage.css: the vendored tailwind.css has no build step, so nothing new
+ * may be a utility class.
+ *
+ * Geometry comes from the design's own frame: Chrome.jsx renders the app in
+ * a 1440×900 LaptopFrame with a 244px SideNav, so the content column is at
+ * most 1196px wide and sits centred in whatever is left of the viewport,
+ * with the canvas running full-bleed behind it. That cap is what stops the
+ * triage grid — and every other page — stretching across a wide monitor.
+ */
+
+:root {
+  --rail-width: 244px;
+  --content-cap: 1196px;
+}
+
+/* ── Ground ─────────────────────────────────────────────────────────────── */
+
+html {
+  background: var(--surface-canvas);
+}
+
+body.shell {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  align-items: stretch;
+  background: var(--surface-canvas);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--body-size);
+  line-height: var(--body-line);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Rail ───────────────────────────────────────────────────────────────── */
+
+.rail {
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  box-sizing: border-box;
+  width: var(--rail-width);
+  flex: 0 0 var(--rail-width);
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-5) var(--space-3) var(--space-4);
+  background: var(--surface-canvas);
+  border-right: 1px solid var(--border-subtle);
+}
+
+/* The wordmark: the red square (the system's one geometric signature) and
+   the name in mono with a red full stop. There is no logo, and none was
+   invented. */
+.rail-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 var(--space-2) var(--space-3);
+  color: var(--text-primary);
+  text-decoration: none;
+}
+.rail-brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-sm);
+  background: var(--red-500);
+  color: var(--paper-050);
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+}
+.rail-brand-name {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+.rail-brand-name::after {
+  content: ".";
+  color: var(--red-500);
+}
+
+.rail-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rail-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: var(--control-md);
+  padding: 0 var(--space-25);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: var(--body-size);
+  font-weight: var(--weight-regular);
+  letter-spacing: -0.004em;
+  transition: var(--transition-control);
+}
+.rail-link svg {
+  flex: 0 0 auto;
+  color: var(--ink-500);
+}
+.rail-link:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+/* Active is weight and ink, never a fill: a filled row in a rail reads as
+   a selection, and nothing here is selected. */
+.rail-link[aria-current="page"] {
+  color: var(--text-primary);
+  font-weight: var(--weight-semibold);
+}
+.rail-link[aria-current="page"] svg {
+  color: var(--ink-900);
+}
+
+/* The one live number on the rail. A filled badge is one of the sanctioned
+   uses of the red, and this is exactly what "needs you" looks like. The
+   600 rather than the brand 500: paper on #e5231b is 4.19:1 at this size
+   (J7). Empty means zero, and an empty badge draws nothing at all. */
+.rail-count {
+  margin-left: auto;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-xs);
+  background: var(--red-600);
+  color: var(--text-inverse);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--micro-size);
+  font-weight: var(--weight-medium);
+  line-height: 1;
+}
+.rail-count:empty {
+  display: none;
+}
+
+.rail-divider {
+  height: 1px;
+  margin: var(--space-2) var(--space-25);
+  background: var(--border-subtle);
+}
+
+.rail-footer {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* First-class by size and position, not by hue: the one red fill on a
+   screen belongs to that screen's primary action (Sort all N on /triage),
+   and a second one in the rail would compete with it on every page. */
+.rail-upload {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: var(--control-lg);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-default);
+  color: var(--text-primary);
+  text-decoration: none;
+  font-size: var(--body-size);
+  font-weight: var(--weight-medium);
+  letter-spacing: -0.004em;
+  transition: var(--transition-control);
+}
+.rail-upload:hover {
+  background: var(--paper-050);
+  border-color: var(--border-strong);
+}
+.rail-upload svg {
+  color: var(--ink-700);
+}
+
+.rail-minor {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 0 var(--space-1);
+}
+.rail-minor-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  text-decoration: none;
+  font-size: var(--caption-size);
+}
+.rail-minor-link:hover {
+  color: var(--text-primary);
+  background: var(--surface-hover);
+}
+.rail-minor-link[aria-current="page"] {
+  color: var(--text-primary);
+  font-weight: var(--weight-semibold);
+}
+
+.rail-stop-form {
+  margin: 0;
+}
+.rail-stop {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--control-sm);
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-tertiary);
+  font-family: var(--font-sans);
+  font-size: var(--caption-size);
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+.rail-stop:hover {
+  color: var(--text-danger);
+  border-color: var(--border-danger);
+  background: var(--red-050);
+}
+
+/* ── Content column ─────────────────────────────────────────────────────── */
+
+.shell-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The cap. Padding is inside the 1196px, so a page's content aligns to the
+   same 32px gutter the triage rows use, and the canvas runs full-bleed
+   behind it on a wide monitor. */
+.shell-content {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--content-cap);
+  margin: 0 auto;
+  padding: 0 var(--space-7) var(--space-8);
+}
+
+/* The bare cap, for a screen that owns its own gutters (the triage queue,
+   whose rows already carry 32px of padding). */
+.shell-cap {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--content-cap);
+  margin: 0 auto;
+}
+
+/* ── Page header ────────────────────────────────────────────────────────── */
+
+.page-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-6);
+  padding: var(--space-7) 0 var(--space-5);
+}
+.page-header-text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+/* The kicker: a red square, then red mono caps. Once per view. */
+.page-question {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: var(--eyebrow-size);
+  letter-spacing: var(--eyebrow-tracking);
+  font-weight: var(--eyebrow-weight);
+  text-transform: uppercase;
+  color: var(--text-signal);
+}
+.page-question::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  background: var(--red-500);
+  flex: 0 0 auto;
+}
+/* The one Doto figure on the page. */
+.page-answer {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--display-2-size);
+  line-height: 1.05;
+  letter-spacing: var(--display-2-tracking);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.page-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-top: 2px;
+  font-size: var(--caption-size);
+  color: var(--text-tertiary);
+}
+.page-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+}
+
+/* ── Restart banner ─────────────────────────────────────────────────────── */
+/* In flow at the top of the content column, never fixed and never modal:
+   it appears while the owner may be typing into a dialog. The warning
+   trio, because it is something that needs you. */
+.server-restart-banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-25) var(--space-4);
+  background: var(--status-warning-bg);
+  border-bottom: 1px solid var(--status-warning-border);
+  color: var(--status-warning-text);
+  font-size: var(--body-sm-size);
+}
+.server-restart-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+.server-restart-actions button {
+  height: var(--control-sm);
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--status-warning-border);
+  background: var(--surface-raised);
+  color: var(--status-warning-text);
+  font-family: var(--font-sans);
+  font-size: var(--body-sm-size);
+  cursor: pointer;
+}
+.server-restart-actions button:hover {
+  background: var(--paper-050);
+  border-color: var(--red-300);
+}
+
+/* ── Narrow widths ──────────────────────────────────────────────────────── */
+/* Mobile is out of this track's scope; this only keeps a phone no worse
+   than the old wrapping top nav: the rail becomes a bar across the top. */
+@media (max-width: 720px) {
+  body.shell {
+    flex-direction: column;
+  }
+  .rail {
+    position: static;
+    width: auto;
+    height: auto;
+    flex: 0 0 auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    border-right: 0;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .rail-brand {
+    padding: 0 var(--space-1);
+  }
+  .rail-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .rail-divider {
+    display: none;
+  }
+  .rail-footer {
+    margin-top: 0;
+    margin-left: auto;
+    flex-direction: row;
+    align-items: center;
+  }
+  .rail-upload {
+    height: var(--control-md);
+  }
+  .shell-content {
+    padding: 0 var(--space-4) var(--space-7);
+  }
+}
