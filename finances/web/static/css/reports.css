@@ -328,7 +328,9 @@
   background: var(--surface-hover);
 }
 .rpt-pivot-empty {
-  color: var(--ink-300);
+  /* The placeholder grey, not --ink-300: the dash is information ("no
+     rows this month") and #bebdb8 on the canvas was 1.59:1. */
+  color: var(--text-placeholder);
 }
 /* The cell itself sits inside the anchor; markers (BCV stripe + needs
    review dot) attach via ::before / ::after. */

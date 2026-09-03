@@ -74,7 +74,8 @@ body.shell {
   height: 26px;
   flex: 0 0 auto;
   border-radius: var(--radius-sm);
-  background: var(--red-500);
+  /* The 600, not the brand 500: paper on #e5231b is 4.19:1 at 16px (J7). */
+  background: var(--red-600);
   color: var(--paper-050);
   font-family: var(--font-display);
   font-size: 16px;
