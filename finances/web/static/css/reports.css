@@ -2,4 +2,588 @@
  *
  * Plain CSS on signal.css's tokens, prefixed `rpt-`. Loaded on every page
  * from base.html; inert where nothing carries the prefix.
+ *
+ * The house idiom is the shipped /triage: hairlines not shadows, raised
+ * (--surface-raised) lighter than the canvas, mono figures with
+ * tabular-nums, radii 2/4/8, red only as THE accent, positive money in ink.
+ * Every colour here is a token — a raw hex would be a second palette.
+ *
+ * The monthly pivot keeps its old class names (.pivot-head, .pivot-row,
+ * .pivot-cell and the pivot_cell macro's markers) because its structure is
+ * deliberately untouched; they are re-declared here, scoped under
+ * .rpt-pivot, so the app.css block that used to style them can go.
  */
+
+/* ── Shared ─────────────────────────────────────────────────────────────── */
+
+.rpt-section {
+  margin-top: var(--space-6);
+}
+.rpt-section-title {
+  margin: 0 0 var(--space-3);
+}
+
+.rpt-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-4);
+}
+
+/* A row of small tabs — the kind tabs, the range presets, the rates range
+   toggle, the month chevrons. The active one is an ink fill: selection is
+   grey or ink in this system, never red. */
+.rpt-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.rpt-tab {
+  position: relative;
+  text-decoration: none;
+}
+.rpt-tab.is-on,
+.rpt-tab:has(.rpt-tab-radio:checked) {
+  background: var(--surface-inverse);
+  color: var(--text-inverse);
+  border-color: var(--surface-inverse);
+}
+.rpt-tab.is-on:hover:not(:disabled),
+.rpt-tab:has(.rpt-tab-radio:checked):hover {
+  background: var(--ink-800);
+  border-color: var(--ink-800);
+  color: var(--text-inverse);
+}
+.rpt-tab.is-disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+/* The radio is the control; the label is what you see. */
+.rpt-tab-radio {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  pointer-events: none;
+}
+.rpt-tab:has(.rpt-tab-radio:focus-visible) {
+  box-shadow: var(--focus-ring);
+}
+
+/* A raised tile: the mobile Total, a rate, an account. */
+.rpt-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: var(--space-4);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+}
+.rpt-tile-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.rpt-tile-caption {
+  font-size: var(--caption-size);
+  line-height: var(--caption-line);
+  color: var(--text-tertiary);
+}
+/* The mono figure of a tile. Not Doto: the page has exactly one of those. */
+.rpt-figure {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+/* Native form controls in the .tinput idiom. */
+.rpt-input {
+  box-sizing: border-box;
+  height: var(--control-md);
+  padding: 0 10px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--body-sm-size);
+  color: var(--text-primary);
+  transition: var(--transition-control);
+}
+.rpt-input:focus {
+  outline: none;
+  border-color: var(--red-500);
+  box-shadow: var(--focus-ring-flush);
+}
+.rpt-input-multi {
+  height: auto;
+  padding: 4px 6px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.rpt-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--body-sm-size);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+/* The empty state, in the triage idiom: a glyph and one line. */
+.rpt-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-8) var(--space-7);
+  text-align: center;
+  color: var(--ink-400);
+}
+.rpt-empty-line {
+  margin: 0;
+  font-size: var(--body-size);
+  line-height: var(--body-line);
+  color: var(--text-secondary);
+}
+.rpt-empty code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+/* Something needs you: the red dot. */
+.rpt-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--red-600);
+  vertical-align: middle;
+}
+/* The part of a figure only BCV could price — reference, not truth. */
+.rpt-bcv-note {
+  font-family: var(--font-mono);
+  font-size: var(--micro-size);
+  letter-spacing: var(--micro-tracking);
+  text-transform: uppercase;
+  color: var(--red-700);
+  white-space: nowrap;
+}
+
+/* ── Charts (Chart.js draws into these) ─────────────────────────────────── */
+
+.rpt-chart-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+}
+/* Fixed height so Chart.js has a deterministic canvas while the card
+   flexes its width. */
+.rpt-chart {
+  position: relative;
+  height: 288px;
+}
+.rpt-chart-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.rpt-chart-legend-note {
+  margin-left: auto;
+  font-size: var(--caption-size);
+  color: var(--text-tertiary);
+}
+
+/* ── Monthly: filters ───────────────────────────────────────────────────── */
+
+.rpt-filters {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+}
+.rpt-filters-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--space-3);
+  align-items: start;
+}
+.rpt-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.rpt-filters-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+/* ── Monthly: the pivot ─────────────────────────────────────────────────── */
+
+/* A CSS Grid (not <table>): first column = category, remaining columns =
+   months. Sticky first row + first column let the owner scroll a wide
+   pivot without losing context; the footer totals stick to the bottom.
+   The column count arrives on the element as --month-cols from the
+   template. The body sits on the canvas so the raised header and footer
+   read as the frame around it. */
+.rpt-pivot {
+  display: grid;
+  grid-template-columns: minmax(10rem, 14rem) repeat(var(--month-cols, 6), minmax(5.5rem, 1fr));
+  gap: 0;
+  margin-top: var(--space-4);
+  background: var(--surface-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  overflow: auto;
+  max-height: 70vh;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--num-size);
+  line-height: var(--num-line);
+  color: var(--text-primary);
+}
+.rpt-pivot .pivot-row {
+  display: contents;
+}
+.rpt-pivot .pivot-head,
+.rpt-pivot .pivot-row-label,
+.rpt-pivot .pivot-row > a,
+.rpt-pivot .pivot-row > span,
+.rpt-pivot .pivot-footer {
+  box-sizing: border-box;
+  padding: 8px 12px;
+  border-right: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.rpt-pivot .pivot-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding-top: 10px;
+  padding-bottom: 10px;
+  background: var(--surface-raised);
+  border-bottom-color: var(--border-default);
+  font-size: var(--eyebrow-size);
+  line-height: var(--eyebrow-line);
+  letter-spacing: var(--eyebrow-tracking);
+  font-weight: var(--eyebrow-weight);
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  text-align: right;
+  white-space: nowrap;
+}
+.rpt-pivot .pivot-head.first {
+  left: 0;
+  z-index: 3;
+  text-align: left;
+}
+.rpt-pivot .pivot-row-label {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--surface-canvas);
+  font-family: var(--font-sans);
+  font-size: var(--body-sm-size);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rpt-pivot .pivot-row > a,
+.rpt-pivot .pivot-row > span {
+  display: block;
+  text-align: right;
+  text-decoration: none;
+  color: var(--text-primary);
+  white-space: nowrap;
+  transition: background-color var(--dur-fast) var(--ease-standard);
+}
+.rpt-pivot .pivot-row > a:hover {
+  background: var(--surface-hover);
+}
+.rpt-pivot-empty {
+  color: var(--ink-300);
+}
+/* The cell itself sits inside the anchor; markers (BCV stripe + needs
+   review dot) attach via ::before / ::after. */
+.rpt-pivot .pivot-cell {
+  position: relative;
+  display: inline-block;
+  padding: 0 4px;
+}
+/* Priced by BCV: reference, not truth. Red diagonals, the one accent. */
+.rpt-pivot .pivot-cell.has-bcv-fallback::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: var(--radius-xs);
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--red-050) 0,
+    var(--red-050) 3px,
+    var(--red-200) 3px,
+    var(--red-200) 4px
+  );
+}
+.rpt-pivot .pivot-cell.has-needs-review::after {
+  content: "";
+  position: absolute;
+  top: 1px;
+  right: -3px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--red-600);
+}
+/* Footer row: column totals. */
+.rpt-pivot .pivot-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  background: var(--surface-raised);
+  border-top: 1px solid var(--border-default);
+  border-bottom: 0;
+  font-weight: 500;
+  color: var(--text-primary);
+  text-align: right;
+  white-space: nowrap;
+}
+.rpt-pivot .pivot-footer.first {
+  left: 0;
+  z-index: 3;
+  text-align: left;
+  font-size: var(--eyebrow-size);
+  letter-spacing: var(--eyebrow-tracking);
+  font-weight: var(--eyebrow-weight);
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+/* ── Monthly: the mobile list ───────────────────────────────────────────── */
+
+.rpt-mobile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.rpt-mobile-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.rpt-mobile-month {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--body-sm-size);
+  font-weight: 500;
+}
+.rpt-mobile-total {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.rpt-mobile-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-2);
+}
+
+.rpt-mcard {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  text-decoration: none;
+  color: inherit;
+  transition: var(--transition-control);
+}
+.rpt-mcard:hover {
+  border-color: var(--border-default);
+}
+.rpt-mcard-head,
+.rpt-mcard-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.rpt-mcard-name {
+  min-width: 0;
+  font-size: var(--body-sm-size);
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rpt-mcard-amount {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--num-size);
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+/* The share of the month: ink on paper. */
+.rpt-mcard-bar {
+  height: 4px;
+  background: var(--paper-200);
+  border-radius: var(--radius-xs);
+  overflow: hidden;
+}
+.rpt-mcard-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--ink-900);
+}
+.rpt-mcard-foot {
+  font-family: var(--font-mono);
+  font-size: var(--micro-size);
+  letter-spacing: var(--micro-tracking);
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+/* ── Accounts ───────────────────────────────────────────────────────────── */
+
+.rpt-accounts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: var(--space-3);
+}
+/* A card that navigates: lifts 1px and gains the 1px lift on hover. */
+.rpt-account {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-4);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  text-decoration: none;
+  color: inherit;
+  transition: var(--transition-control);
+}
+.rpt-account:hover {
+  border-color: var(--border-default);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+.rpt-account.is-inactive {
+  opacity: 0.55;
+}
+.rpt-account-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.rpt-account-id {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.rpt-account-name {
+  font-size: var(--title-3-size);
+  line-height: var(--title-3-line);
+  letter-spacing: var(--title-3-tracking);
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rpt-account-inst {
+  font-size: var(--caption-size);
+  line-height: var(--caption-line);
+  color: var(--text-tertiary);
+}
+.rpt-account-badges {
+  display: inline-flex;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+.rpt-account-money {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.rpt-account-native {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+.rpt-account-usd {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.rpt-account-usd.is-unpriced {
+  font-family: var(--font-sans);
+  font-size: var(--caption-size);
+  font-weight: 500;
+  color: var(--red-700);
+}
+
+/* ── Rates ──────────────────────────────────────────────────────────────── */
+
+.rpt-rate-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: var(--space-2);
+}
+/* A rate carries less text than an account, so its tile sits denser. */
+.rpt-rate-tile {
+  gap: 4px;
+  padding: var(--space-3) var(--space-4);
+}
+
+/* ── Narrow widths ──────────────────────────────────────────────────────── */
+
+@media (max-width: 640px) {
+  .rpt-chart {
+    height: 224px;
+  }
+  .rpt-chart-legend-note {
+    margin-left: 0;
+  }
+}

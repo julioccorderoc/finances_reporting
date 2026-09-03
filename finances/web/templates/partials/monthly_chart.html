@@ -1,87 +1,124 @@
-{# Stacked-bar chart for /monthly. Chart.js via vendored UMD.
+{# Stacked-bar chart for /monthly. Chart.js via the vendored UMD.
 
-   We embed the data as JSON in a `data-chart` attribute and a tiny
-   inline <script> instantiates the chart. Bar click uses
-   getElementsAtEventForMode to navigate to /transactions.
+   The payload rides in a <script type="application/json"> block, never in
+   an attribute: tojson emits double quotes, which end the attribute and
+   truncate the JSON while every server-side test stays green. A tiny
+   inline <script> instantiates the chart; a bar click drills into
+   /transactions for that month and kind.
+
+   Colour is SIGNAL's: the categories are steps on the ink ramp, separated
+   by paper hairlines, and the BCV-fallback shadow is the one red on the
+   chart — the part of a month that only BCV could price.
 #}
-{%- set chart_payload -%}
-{
-  "months": {{ chart.months | tojson }},
-  "series": [
-    {%- for s in chart.series -%}
-      {"category": {{ s.category | tojson }}, "values": [{% for v in s.values %}{{ v }}{% if not loop.last %},{% endif %}{% endfor %}]}{% if not loop.last %},{% endif %}
-    {%- endfor -%}
-  ],
-  "fallback_per_month": [{% for v in chart.fallback_per_month %}{{ v }}{% if not loop.last %},{% endif %}{% endfor %}],
-  "kind": {{ chart.filter.kind.value | tojson }}
-}
-{%- endset -%}
-<section id="monthly-chart" class="mt-4">
-  <div class="monthly-chart-wrap bg-white border border-slate-200 rounded-lg p-3">
-    <canvas
-      data-monthly-chart
-      data-chart='{{ chart_payload | safe }}'
-    ></canvas>
+<section id="monthly-chart" class="rpt-chart-card">
+  <div class="rpt-chart">
+    <canvas data-monthly-chart aria-label="Totals by category and month"></canvas>
   </div>
+  <script id="monthly-chart-data" type="application/json">
+  {
+    "months": {{ chart.months | tojson }},
+    "series": [
+      {%- for s in chart.series -%}
+        {"category": {{ s.category | tojson }}, "values": [{% for v in s.values %}{{ v }}{% if not loop.last %},{% endif %}{% endfor %}]}{% if not loop.last %},{% endif %}
+      {%- endfor -%}
+    ],
+    "fallback_per_month": [{% for v in chart.fallback_per_month %}{{ v }}{% if not loop.last %},{% endif %}{% endfor %}],
+    "kind": {{ chart.filter.kind.value | tojson }}
+  }
+  </script>
 </section>
 
 <script>
 (function () {
   if (typeof window === 'undefined' || !window.Chart) return;
-  var canvases = document.querySelectorAll('canvas[data-monthly-chart]');
-  canvases.forEach(function (canvas) {
-    if (canvas.dataset.bound === 'true') return;
-    canvas.dataset.bound = 'true';
-    var raw = canvas.getAttribute('data-chart');
-    if (!raw) return;
-    var payload;
-    try { payload = JSON.parse(raw); } catch (e) { return; }
-    var palette = ['#0ea5e9','#22c55e','#a855f7','#f59e0b','#ef4444','#64748b'];
-    var datasets = (payload.series || []).map(function (s, i) {
-      return {
-        label: s.category,
-        data: s.values,
-        backgroundColor: palette[i % palette.length],
-        stack: 'stack-a',
-      };
+  var section = document.getElementById('monthly-chart');
+  var dataEl = document.getElementById('monthly-chart-data');
+  if (!section || !dataEl) return;
+  var canvas = section.querySelector('canvas[data-monthly-chart]');
+  if (!canvas || canvas.dataset.bound === 'true') return;
+  canvas.dataset.bound = 'true';
+  var payload;
+  try { payload = JSON.parse(dataEl.textContent); } catch (e) { return; }
+
+  // signal.css's tokens, read once, so the chart cannot drift from the sheet.
+  var styles = getComputedStyle(document.documentElement);
+  function tok(name, fallback) {
+    var value = styles.getPropertyValue(name).trim();
+    return value || fallback;
+  }
+  var ink = [
+    tok('--ink-900', '#131312'),
+    tok('--ink-600', '#4b4b46'),
+    tok('--ink-500', '#6d6d69'),
+    tok('--ink-400', '#9a9a95'),
+    tok('--ink-300', '#bebdb8'),
+    tok('--ink-100', '#dbdad5')
+  ];
+  var paper = tok('--surface-raised', '#f5f5f3');
+  var grid = tok('--border-subtle', '#dbdad5');
+  var tick = tok('--text-tertiary', '#666662');
+  var mono = "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
+
+  var datasets = (payload.series || []).map(function (s, i) {
+    return {
+      label: s.category,
+      data: s.values,
+      backgroundColor: ink[i % ink.length],
+      borderColor: paper,
+      borderWidth: 1,
+      stack: 'stack-a'
+    };
+  });
+  if ((payload.fallback_per_month || []).some(function (v) { return Number(v) !== 0; })) {
+    datasets.push({
+      label: 'BCV fallback',
+      data: payload.fallback_per_month,
+      backgroundColor: tok('--red-050', '#fbe9e8'),
+      borderColor: tok('--red-600', '#c51a13'),
+      borderWidth: 1,
+      stack: 'stack-b'
     });
-    if ((payload.fallback_per_month || []).some(function (v) { return Number(v) !== 0; })) {
-      datasets.push({
-        label: 'BCV fallback',
-        data: payload.fallback_per_month,
-        backgroundColor: 'rgba(245, 158, 11, 0.35)',
-        stack: 'stack-b',
-        borderColor: '#f59e0b',
-        borderWidth: 1,
-      });
-    }
-    new window.Chart(canvas, {
-      type: 'bar',
-      data: { labels: payload.months || [], datasets: datasets },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        scales: {
-          x: { stacked: true, ticks: { font: { size: 11 } } },
-          y: { stacked: true, ticks: { font: { size: 11 } } },
+  }
+
+  new window.Chart(canvas, {
+    type: 'bar',
+    data: { labels: payload.months || [], datasets: datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: {
+          stacked: true,
+          grid: { display: false },
+          border: { color: grid },
+          ticks: { color: tick, font: { family: mono, size: 11 } }
         },
-        plugins: {
-          legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
-          tooltip: { mode: 'index', intersect: false },
-        },
-        onClick: function (evt) {
-          var pts = this.getElementsAtEventForMode(evt, 'index', { intersect: false }, true);
-          if (!pts || !pts.length) return;
-          var idx = pts[0].index;
-          var month = (payload.months || [])[idx];
-          if (!month) return;
-          var df = month + '-01';
-          var url = '/transactions?date_from=' + encodeURIComponent(df) +
-                    '&kinds=' + encodeURIComponent(payload.kind || 'expense');
-          window.location.href = url;
-        },
+        y: {
+          stacked: true,
+          grid: { color: grid },
+          border: { display: false },
+          ticks: { color: tick, font: { family: mono, size: 11 } }
+        }
       },
-    });
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: { boxWidth: 10, boxHeight: 10, color: tick, font: { family: mono, size: 11 } }
+        },
+        tooltip: { mode: 'index', intersect: false, bodyFont: { family: mono, size: 11 }, titleFont: { family: mono, size: 11 } }
+      },
+      onClick: function (evt) {
+        var pts = this.getElementsAtEventForMode(evt, 'index', { intersect: false }, true);
+        if (!pts || !pts.length) return;
+        var idx = pts[0].index;
+        var month = (payload.months || [])[idx];
+        if (!month) return;
+        var df = month + '-01';
+        var url = '/transactions?date_from=' + encodeURIComponent(df) +
+                  '&kinds=' + encodeURIComponent(payload.kind || 'expense');
+        window.location.href = url;
+      }
+    }
   });
 })();
 </script>

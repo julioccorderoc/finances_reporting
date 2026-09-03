@@ -1,29 +1,26 @@
-{# One category card for the mobile view. #}
+{# One category card for the mobile view: a raised tile with a hairline,
+   the share of the month as an ink bar on paper, mono figures. #}
 <a
   href="{{ category.drill_url }}"
-  class="monthly-mobile-card hover:bg-slate-50"
+  class="rpt-mcard"
   data-mobile-card
   data-category="{{ category.category_name or 'Uncategorized' }}"
   data-needs-review-count="{{ category.needs_review_count }}"
 >
-  <div class="flex items-center justify-between">
-    <span class="text-sm font-medium text-slate-900">
+  <div class="rpt-mcard-head">
+    <span class="rpt-mcard-name">
       {{ category.category_name or 'Uncategorized' }}
-      {% if category.needs_review_count > 0 %}
-        <span class="ml-1 inline-block w-2 h-2 rounded-full bg-yellow-500"></span>
-      {% endif %}
+      {%- if category.needs_review_count > 0 %}<span class="rpt-dot" title="{{ category.needs_review_count }} needs review"></span>{% endif %}
     </span>
-    <span class="text-sm tabular-nums font-mono text-slate-900">
+    <span class="rpt-mcard-amount">
       {{ category.total_usd | fmt_money }}
-      {% if category.fallback_usd and category.fallback_usd != 0 %}
-        <span class="text-[10px] text-amber-600 ml-1">(+{{ category.fallback_usd | fmt_number }} bcv)</span>
-      {% endif %}
+      {%- if category.fallback_usd and category.fallback_usd != 0 %} <span class="rpt-bcv-note">+{{ category.fallback_usd | fmt_number }} bcv</span>{% endif %}
     </span>
   </div>
-  <div class="bar" aria-hidden="true">
+  <div class="rpt-mcard-bar" aria-hidden="true">
     <span style="width: {{ (category.pct_of_month * 100) | round(1) }}%"></span>
   </div>
-  <div class="flex items-center justify-between text-[11px] text-slate-500">
+  <div class="rpt-mcard-foot">
     <span>{{ (category.pct_of_month * 100) | round(1) }}% of month</span>
     <span>tap to view</span>
   </div>

@@ -1,19 +1,44 @@
 {% extends "base.html" %}
 {% block title %}Rates{% endblock %}
 {% block content %}
-  <header class="mb-4">
-    <h1 class="text-2xl font-semibold">Rates</h1>
-    <p class="mt-1 text-sm text-slate-600">
-      USDT/VES P2P median is the headline rate (rule-005). BCV is reference only.
-    </p>
-  </header>
+{% from "_macros.html" import page_header %}
+{# The headline is the latest USDT/VES P2P median (rule-005: BCV is
+   reference only). When no P2P median exists at all, the newest row of
+   any pair stands in and the meta says so — an honest badge rather than
+   a blank figure. #}
+{% set ns = namespace(p2p=none, best=none) %}
+{% for r in latest %}
+  {% if r.base == "USDT" and r.quote == "VES" and r.source == "binance_p2p_median" %}
+    {% set ns.p2p = r %}
+  {% endif %}
+  {% if ns.best is none or r.as_of_date > ns.best.as_of_date %}
+    {% set ns.best = r %}
+  {% endif %}
+{% endfor %}
+{% set head = ns.p2p if ns.p2p is not none else ns.best %}
+{% if head is none %}
+  {% set answer = "No rates yet" %}
+{% else %}
+  {% set unit = "Bs./$" if (head.quote == "VES" and head.base in ("USD", "USDT")) else (head.quote ~ " per " ~ head.base) %}
+  {% set answer = (head.rate | fmt_number) ~ " " ~ unit %}
+{% endif %}
+{% set meta %}
+  {%- if head is not none %}
+  <span class="tbadge" data-rate-as-of>{{ head.as_of_date | fmt_date }}</span>
+  {%- if ns.p2p is none %}
+  <span class="tbadge tbadge-warning tbadge-dot" data-rate-fallback>no P2P median · {{ head.source }}</span>
+  {%- endif %}
+  {%- endif %}
+  <span>BCV is reference only (rule-005)</span>
+{% endset %}
+{{ page_header("What is a dollar worth?", answer, meta) }}
 
-  <section class="mb-6">
-    {% include "partials/rates_chart.html" %}
-  </section>
+<section class="rpt-section">
+  {% include "partials/rates_chart.html" %}
+</section>
 
-  <section>
-    <h2 class="text-sm font-semibold text-slate-700 mb-2">Latest per pair</h2>
-    {% include "partials/rates_latest_per_pair.html" %}
-  </section>
+<section class="rpt-section">
+  <h2 class="teyebrow rpt-section-title">Latest per pair</h2>
+  {% include "partials/rates_latest_per_pair.html" %}
+</section>
 {% endblock %}

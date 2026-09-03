@@ -1,28 +1,38 @@
-{# Latest-rate-per-pair card list. Self-contained: requires `latest`. #}
-{% from "_macros.html" import format_amount, format_date, rate_source_badge %}
+{# Latest-rate-per-pair tiles. Self-contained: requires `latest`.
+
+   One raised tile per (base, quote, source): the pair as the eyebrow, the
+   rate in mono at 22px, source and date as the caption. The BCV tile is
+   marked reference only (rule-005). #}
+{% from "_icons.html" import icon %}
+{% set source_labels = {
+  "user_rate": "user rate",
+  "binance_p2p_realized": "realized",
+  "binance_p2p_median": "P2P median",
+  "binance_p2p_median_buy": "P2P buy",
+  "binance_p2p_median_sell": "P2P sell",
+  "bcv": "BCV",
+  "native_usd": "native",
+} %}
 
 {% if latest %}
-  <div class="rate-cards">
+  <div class="rpt-rate-tiles">
     {% for r in latest %}
-      <div class="rate-card" data-rate-card data-base="{{ r.base }}" data-quote="{{ r.quote }}" data-source="{{ r.source }}">
-        <div class="flex items-center justify-between gap-2">
-          <div class="text-sm font-semibold text-slate-900">
-            {{ r.base }}/{{ r.quote }}
-          </div>
-          {{ rate_source_badge(r.source) }}
+      <div class="rpt-tile rpt-rate-tile" data-rate-card data-base="{{ r.base }}" data-quote="{{ r.quote }}" data-source="{{ r.source }}">
+        <div class="rpt-tile-head">
+          <span class="teyebrow">{{ r.base }}/{{ r.quote }}</span>
+          {%- if r.source == "bcv" %}
+          <span class="tbadge tbadge-warning">reference only</span>
+          {%- endif %}
         </div>
-        <div class="mt-1 text-lg font-mono tabular-nums text-slate-900">
-          {{ format_amount(r.rate, 4) }}
-        </div>
-        <div class="text-[11px] text-slate-500">
-          as of {{ format_date(r.as_of_date) }}
-        </div>
+        <span class="rpt-figure">{{ r.rate | fmt_number(4) }}</span>
+        <span class="rpt-tile-caption" data-rate-source="{{ r.source }}">{{ source_labels.get(r.source, r.source) }} · {{ r.as_of_date | fmt_date }}</span>
       </div>
+      <!-- /rpt-rate-tile -->
     {% endfor %}
   </div>
 {% else %}
-  <div class="p-6 text-center text-slate-500 text-sm border border-dashed border-slate-300 rounded">
-    No rates yet. Run <code>finances ingest p2p-rates</code> and
-    <code>finances ingest bcv</code>.
+  <div class="rpt-empty" data-rates-empty>
+    {{ icon("percent", 28) }}
+    <p class="rpt-empty-line">No rates yet. Run <code>finances ingest p2p-rates</code> and <code>finances ingest bcv</code>.</p>
   </div>
 {% endif %}

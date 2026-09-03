@@ -1,23 +1,51 @@
 {% extends "base.html" %}
 {% block title %}Accounts{% endblock %}
 {% block content %}
-  <header class="mb-4">
-    <h1 class="text-2xl font-semibold">Accounts</h1>
-    <p class="mt-1 text-sm text-slate-600">
-      Active accounts first, then inactive. Click any card to drill into its
-      transactions. USDT-equivalent uses Binance P2P median (rule-005, never BCV).
-    </p>
-  </header>
-
-  {% if cards %}
-    <section class="account-cards" id="account-cards">
-      {% for card in cards %}
-        {% include "partials/account_card.html" %}
-      {% endfor %}
-    </section>
+{% from "_macros.html" import page_header %}
+{% from "_icons.html" import icon %}
+{# Active accounts first, then inactive. Click any card to drill into its
+   transactions. The answer is the sum of every ACTIVE card's
+   USDT-equivalent when all of them price; otherwise it is a count, and
+   the meta says how many could not be priced. USDT-equivalent uses the
+   Binance P2P median (rule-005, never BCV). #}
+{% set ns = namespace(total=0, priced=true, active=0, unpriced=0, inactive=0) %}
+{% for card in cards %}
+  {% if card.active %}
+    {% set ns.active = ns.active + 1 %}
+    {% if card.balance_usdt is none %}
+      {% set ns.priced = false %}
+      {% set ns.unpriced = ns.unpriced + 1 %}
+    {% else %}
+      {% set ns.total = ns.total + card.balance_usdt %}
+    {% endif %}
   {% else %}
-    <div class="p-6 text-center text-slate-500 text-sm border border-dashed border-slate-300 rounded">
-      No accounts found. Run the ingest commands first.
-    </div>
+    {% set ns.inactive = ns.inactive + 1 %}
   {% endif %}
+{% endfor %}
+{% if not cards %}
+  {% set answer = "No accounts" %}
+{% elif ns.priced %}
+  {% set answer = ns.total | fmt_usd %}
+{% else %}
+  {% set answer = ns.active ~ " account" ~ ("" if ns.active == 1 else "s") %}
+{% endif %}
+{% set meta %}
+  {%- if ns.unpriced %}<span class="tbadge tbadge-warning tbadge-dot" data-unpriced-count>{{ ns.unpriced }} unpriced</span>{% endif %}
+  {%- if ns.inactive %}<span class="tbadge">{{ ns.inactive }} inactive</span>{% endif %}
+  <span>USDT-equivalent via P2P median, never BCV</span>
+{% endset %}
+{{ page_header("What do I hold?", answer, meta) }}
+
+{% if cards %}
+  <section class="rpt-accounts" id="account-cards">
+    {% for card in cards %}
+      {% include "partials/account_card.html" %}
+    {% endfor %}
+  </section>
+{% else %}
+  <div class="rpt-empty" data-accounts-empty>
+    {{ icon("landmark", 28) }}
+    <p class="rpt-empty-line">No accounts yet. Run the ingest commands first.</p>
+  </div>
+{% endif %}
 {% endblock %}

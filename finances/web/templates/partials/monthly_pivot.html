@@ -6,11 +6,16 @@
 
    The grid template column count is bound via a CSS custom property
    set on the parent so the same stylesheet works for any range size.
+
+   Structurally untouched by the 2026-09 reskin on purpose — sticky first
+   row and column, sticky footer totals, the pivot_cell macro's markers —
+   only restyled from reports.css under .rpt-pivot. Its real redesign is
+   the next design track.
 #}
 {% from "_macros.html" import pivot_cell %}
 <section
   id="monthly-pivot"
-  class="monthly-pivot mt-4"
+  class="rpt-pivot"
   style="--month-cols: {{ pivot.months | length }};"
 >
   {# Header row: blank corner + month labels. #}
@@ -24,7 +29,7 @@
     <div class="pivot-row-label" data-row-category="{{ row.category_name or 'Uncategorized' }}">
       {{ row.category_name or 'Uncategorized' }}
     </div>
-    <div class="contents pivot-row" data-row>
+    <div class="pivot-row" data-row>
       {% for m in pivot.months %}
         {% set cell = row.cells_by_month[m] %}
         {% if cell.tx_count > 0 or cell.fallback_usd != 0 %}
@@ -33,7 +38,7 @@
           </a>
         {% else %}
           <span data-cell data-empty data-month="{{ m }}">
-            <span class="text-slate-300">&mdash;</span>
+            <span class="rpt-pivot-empty">&mdash;</span>
           </span>
         {% endif %}
       {% endfor %}

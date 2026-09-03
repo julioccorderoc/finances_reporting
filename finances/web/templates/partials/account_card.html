@@ -1,44 +1,41 @@
 {# Canonical account card. Self-contained: requires only `card`.
 
-   Wrap inside `.account-cards` for the auto-fit grid layout.
+   Wrap inside `.rpt-accounts` for the auto-fit grid layout. One balance
+   per account, exactly as the data gives it — the Binance accounts hold
+   USDT and USDC mixed and this never invents per-asset rows.
 #}
-{% from "_macros.html" import format_amount, kind_chip %}
-
-<a
-  class="account-card{% if not card.active %} is-inactive{% endif %}"
-  href="{{ card.drill_url }}"
-  data-account-card
-  data-account="{{ card.name }}"
-  data-account-kind="{{ card.kind }}"
-  data-active="{{ 'true' if card.active else 'false' }}"
->
-  <div class="flex items-start justify-between gap-2">
-    <div class="min-w-0">
-      <div class="text-base font-semibold text-slate-900 truncate" title="{{ card.name }}">
-        {{ card.name }}
-      </div>
-      {% if card.institution %}
-        <div class="text-xs text-slate-500 truncate">{{ card.institution }}</div>
-      {% endif %}
+{% set kind_labels = {
+  "bank": "bank",
+  "crypto_spot": "spot",
+  "crypto_funding": "funding",
+  "crypto_earn": "earn",
+  "cash": "cash",
+  "other": "other",
+} %}
+<a class="rpt-account{% if not card.active %} is-inactive{% endif %}" href="{{ card.drill_url }}" data-account-card data-account="{{ card.name }}" data-account-kind="{{ card.kind }}" data-active="{{ 'true' if card.active else 'false' }}">
+  <div class="rpt-account-head">
+    <div class="rpt-account-id">
+      <span class="rpt-account-name" title="{{ card.name }}">{{ card.name }}</span>
+      {%- if card.institution %}
+      <span class="rpt-account-inst">{{ card.institution }}</span>
+      {%- endif %}
     </div>
-    {{ kind_chip(card.kind) }}
+    <span class="rpt-account-badges">
+      <span class="tbadge" data-kind-badge title="account kind: {{ card.kind }}">{{ kind_labels.get(card.kind, card.kind) }}</span>
+      {%- if not card.active %}
+      <span class="tbadge" data-inactive-badge>inactive</span>
+      {%- endif %}
+    </span>
   </div>
 
-  <div class="mt-3 flex items-baseline justify-between gap-2 tabular-nums">
-    <div class="text-lg font-mono text-slate-900">
-      {{ format_amount(card.balance_native) }}
-      <span class="text-xs text-slate-500">{{ card.currency }}</span>
-    </div>
-    <div class="text-xs italic text-slate-500">
-      {% if card.balance_usdt is none %}
-        &mdash;
-      {% else %}
-        {{ card.balance_usdt | fmt_money }} <span class="not-italic">USDT</span>
-      {% endif %}
-    </div>
+  <div class="rpt-account-money">
+    <span class="rpt-account-native">{{ card.balance_native | fmt_native(card.currency) }}</span>
+    {%- if card.balance_usdt is none %}
+    {# No P2P median can price this balance today, and BCV is never
+       borrowed for it (rule-005). The em dash is the missing figure. #}
+    <span class="rpt-account-usd is-unpriced" title="No USDT/{{ card.currency }} P2P median to price this balance; BCV is never used">Unpriced &mdash; no P2P rate</span>
+    {%- else %}
+    <span class="rpt-account-usd">{{ card.balance_usdt | fmt_money }} USDT</span>
+    {%- endif %}
   </div>
-
-  {% if not card.active %}
-    <div class="mt-2 text-[10px] uppercase tracking-wide text-slate-400">inactive</div>
-  {% endif %}
 </a>

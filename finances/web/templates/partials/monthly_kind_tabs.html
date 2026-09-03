@@ -1,10 +1,10 @@
 {# Kind tabs: Expense / Income / Net.
 
-   Keeps every other filter intact via hidden form fields rendered by
-   the parent. Each tab is a regular link (full-page nav) — the change
-   is small enough that we don't bother with HTMX swaps.
+   Keeps every other filter intact via the query string. Each tab is a
+   regular link (full-page nav) — the change is small enough that we don't
+   bother with HTMX swaps. The active tab is an ink fill (SIGNAL: selection
+   is grey or ink, never red).
 #}
-{% from "_macros.html" import kind_tab %}
 
 {%- macro _build_url(kind, filter) -%}
 ?range_preset={{ filter.range_preset.value }}
@@ -17,8 +17,9 @@
 &include_bcv_fallback={{ 'true' if filter.include_bcv_fallback else 'false' }}
 {%- endmacro -%}
 
-<div class="flex flex-wrap items-center gap-2" data-monthly-kind-tabs>
-  {{ kind_tab('Expense', filter.kind.value == 'expense', _build_url('expense', filter)) }}
-  {{ kind_tab('Income',  filter.kind.value == 'income',  _build_url('income',  filter)) }}
-  {{ kind_tab('Net',     filter.kind.value == 'net',     _build_url('net',     filter)) }}
+<div class="rpt-tabs" data-monthly-kind-tabs>
+  {%- for value, label in [("expense", "Expense"), ("income", "Income"), ("net", "Net")] %}
+  {%- set active = filter.kind.value == value %}
+  <a href="{{ _build_url(value, filter) }}" class="tbtn tbtn-sm rpt-tab{% if active %} is-on{% endif %}" data-kind-tab data-active="{{ 'true' if active else 'false' }}"{% if active %} aria-current="true"{% endif %}>{{ label }}</a>
+  {%- endfor %}
 </div>

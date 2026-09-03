@@ -1,17 +1,19 @@
 {% extends "base.html" %}
 {% block title %}Monthly (mobile){% endblock %}
 {% block content %}
-  <header class="mb-3">
-    <h1 class="text-xl font-semibold">Monthly</h1>
-    <p class="mt-1 text-xs text-slate-600">
-      Single-month view. Use the chevrons to walk months.
-    </p>
-  </header>
+{% from "_macros.html" import page_header %}
+{# Single-month view. The chevrons walk months; the kind tabs are the
+   desktop component, which already fits a phone. #}
+{% set kind_label = {"expense": "Expense", "income": "Income", "net": "Net"}.get(filter.kind.value, filter.kind.value) %}
+{% set meta %}
+  <span class="tbadge" data-kind-badge>{{ kind_label }}</span>
+  <span>{{ mobile.month | fmt_month }} · one month at a time</span>
+{% endset %}
+{{ page_header("Where did it go?", mobile.month_total_usd | fmt_usd, meta) }}
 
-  {# Kind tabs reuse the same desktop component — mobile-friendly already. #}
-  <div class="mb-3">
-    {% include "partials/monthly_kind_tabs.html" %}
-  </div>
+<div class="rpt-toolbar">
+  {% include "partials/monthly_kind_tabs.html" %}
+</div>
 
-  {% include "partials/monthly_mobile_inner.html" %}
+{% include "partials/monthly_mobile_inner.html" %}
 {% endblock %}

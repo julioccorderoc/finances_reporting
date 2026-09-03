@@ -1,37 +1,47 @@
 {# Filter form for /monthly. HTMX-driven: changing any filter swaps
-   #monthly-pivot and #monthly-chart without a full page reload, while
-   pushing the URL so state is shareable.
+   #monthly-pivot without a full page reload, while pushing the URL so
+   state is shareable.
+
+   Same field names and the same hx-* contract as before. The range
+   presets are radios inside .tbtn-sm labels rather than a <select>: a
+   radio still fires the form's ``change`` and still submits exactly one
+   ``range_preset`` value, and the checked one is drawn as the ink fill
+   by reports.css (:has), so it stays right after a swap the server never
+   re-renders this form for.
 #}
 <form
   id="monthly-filters"
-  class="bg-white border border-slate-200 rounded-lg p-4 space-y-3"
+  class="rpt-filters"
   hx-get="/_partial/monthly/pivot"
   hx-target="#monthly-pivot"
   hx-swap="outerHTML"
   hx-push-url="true"
   hx-trigger="change"
 >
-  <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-    <label class="text-xs flex flex-col gap-1">
-      <span class="text-slate-500">Range</span>
-      <select name="range_preset" class="border border-slate-300 rounded px-2 py-1 text-sm">
-        {% for opt in ['3m', '6m', '12m', 'ytd', 'all', 'custom'] %}
-          <option value="{{ opt }}" {% if filter.range_preset.value == opt %}selected{% endif %}>{{ opt }}</option>
-        {% endfor %}
-      </select>
+  <div class="rpt-field" role="radiogroup" aria-label="Range">
+    <span class="teyebrow">Range</span>
+    <div class="rpt-tabs" data-range-presets>
+      {% for opt in ['3m', '6m', '12m', 'ytd', 'all', 'custom'] %}
+        <label class="tbtn tbtn-sm rpt-tab">
+          <input type="radio" name="range_preset" value="{{ opt }}" class="rpt-tab-radio"{% if filter.range_preset.value == opt %} checked{% endif %}>{{ opt }}
+        </label>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="rpt-filters-grid">
+    <label class="rpt-field">
+      <span class="teyebrow">Since</span>
+      <input type="month" name="since" value="{{ filter.since or '' }}" class="rpt-input">
     </label>
-    <label class="text-xs flex flex-col gap-1">
-      <span class="text-slate-500">Since</span>
-      <input type="month" name="since" value="{{ filter.since or '' }}" class="border border-slate-300 rounded px-2 py-1 text-sm">
-    </label>
-    <label class="text-xs flex flex-col gap-1">
-      <span class="text-slate-500">Until</span>
-      <input type="month" name="until" value="{{ filter.until or '' }}" class="border border-slate-300 rounded px-2 py-1 text-sm">
+    <label class="rpt-field">
+      <span class="teyebrow">Until</span>
+      <input type="month" name="until" value="{{ filter.until or '' }}" class="rpt-input">
     </label>
     {% if accounts_options %}
-      <label class="text-xs flex flex-col gap-1">
-        <span class="text-slate-500">Accounts</span>
-        <select name="accounts" multiple size="3" class="border border-slate-300 rounded px-2 py-1 text-sm">
+      <label class="rpt-field">
+        <span class="teyebrow">Accounts</span>
+        <select name="accounts" multiple size="3" class="rpt-input rpt-input-multi">
           {% for opt in accounts_options %}
             <option value="{{ opt }}" {% if opt in filter.accounts %}selected{% endif %}>{{ opt }}</option>
           {% endfor %}
@@ -39,9 +49,9 @@
       </label>
     {% endif %}
     {% if currencies_options %}
-      <label class="text-xs flex flex-col gap-1">
-        <span class="text-slate-500">Currencies</span>
-        <select name="currencies" multiple size="3" class="border border-slate-300 rounded px-2 py-1 text-sm">
+      <label class="rpt-field">
+        <span class="teyebrow">Currencies</span>
+        <select name="currencies" multiple size="3" class="rpt-input rpt-input-multi">
           {% for opt in currencies_options %}
             <option value="{{ opt }}" {% if opt in filter.currencies %}selected{% endif %}>{{ opt }}</option>
           {% endfor %}
@@ -50,23 +60,17 @@
     {% endif %}
   </div>
 
-  <label class="text-xs flex items-center gap-2">
-    <input
-      type="checkbox"
-      name="include_bcv_fallback"
-      value="true"
-      {% if filter.include_bcv_fallback %}checked{% endif %}
-      class="border border-slate-300 rounded"
-    >
-    <span class="text-slate-500">Show BCV fallback overlay</span>
-  </label>
+  <div class="rpt-filters-foot">
+    <label class="rpt-check">
+      <input type="checkbox" name="include_bcv_fallback" value="true"{% if filter.include_bcv_fallback %} checked{% endif %} class="tcheck">
+      <span>Show BCV fallback overlay</span>
+    </label>
 
-  {# Preserve the active kind across filter changes. #}
-  <input type="hidden" name="kind" value="{{ filter.kind.value }}">
+    {# Preserve the active kind across filter changes. #}
+    <input type="hidden" name="kind" value="{{ filter.kind.value }}">
 
-  <div class="flex justify-end">
     {# Full navigation on purpose: resets range_preset to 6m, clears
        since/until/accounts/currencies, kind back to expense. #}
-    <a href="/monthly" data-clear-filters class="text-xs text-sky-700 hover:underline">Clear filters</a>
+    <a href="/monthly" data-clear-filters class="tlink">Clear filters</a>
   </div>
 </form>

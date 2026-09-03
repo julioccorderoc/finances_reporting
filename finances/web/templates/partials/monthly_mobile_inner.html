@@ -1,48 +1,55 @@
-{# Mobile single-month list inner content (HTMX swap target). #}
+{# Mobile single-month list inner content (HTMX swap target).
+
+   The Total tile stays INSIDE the swap target even though the page header
+   above carries the same figure: a partial swap re-renders this section
+   and nothing above it. It keeps fmt_money's ASCII form, which the
+   formatting sweep pins.
+#}
+{% from "_icons.html" import icon %}
 <section
   id="monthly-mobile"
-  class="space-y-3"
+  class="rpt-mobile"
   data-month="{{ mobile.month }}"
 >
-  <header class="flex items-center justify-between">
+  <header class="rpt-mobile-nav">
     {% if mobile.prev_month %}
       <a
-        class="px-2 py-1 text-sm border rounded bg-white border-slate-300 hover:bg-slate-50"
+        class="tbtn tbtn-sm rpt-tab"
         href="/monthly?layout=mobile&month={{ mobile.prev_month }}&kind={{ filter.kind.value }}"
         data-prev-month="{{ mobile.prev_month }}"
-      >&larr; {{ mobile.prev_month | fmt_month }}</a>
+      >{{ icon("chevron-left", 14) }}{{ mobile.prev_month | fmt_month }}</a>
     {% else %}
-      <span class="opacity-40 text-sm">&larr;</span>
+      <span class="tbtn tbtn-sm rpt-tab is-disabled" aria-hidden="true">{{ icon("chevron-left", 14) }}</span>
     {% endif %}
-    <span class="text-sm font-semibold tabular-nums">{{ mobile.month | fmt_month }}</span>
+    <span class="rpt-mobile-month">{{ mobile.month | fmt_month }}</span>
     {% if mobile.next_month %}
       <a
-        class="px-2 py-1 text-sm border rounded bg-white border-slate-300 hover:bg-slate-50"
+        class="tbtn tbtn-sm rpt-tab"
         href="/monthly?layout=mobile&month={{ mobile.next_month }}&kind={{ filter.kind.value }}"
         data-next-month="{{ mobile.next_month }}"
-      >{{ mobile.next_month | fmt_month }} &rarr;</a>
+      >{{ mobile.next_month | fmt_month }}{{ icon("chevron-right", 14) }}</a>
     {% else %}
-      <span class="opacity-40 text-sm">&rarr;</span>
+      <span class="tbtn tbtn-sm rpt-tab is-disabled" aria-hidden="true">{{ icon("chevron-right", 14) }}</span>
     {% endif %}
   </header>
 
-  <div class="rounded-lg border border-slate-200 bg-white p-3 flex items-center justify-between">
-    <span class="text-xs text-slate-500 uppercase tracking-wide">Total</span>
-    <span class="text-base font-semibold tabular-nums">
+  <div class="rpt-tile rpt-mobile-total">
+    <span class="teyebrow">Total</span>
+    <span class="rpt-figure">
       {{ mobile.month_total_usd | fmt_money }}
-      {% if mobile.month_fallback_usd and mobile.month_fallback_usd != 0 %}
-        <span class="text-xs text-amber-600 ml-1">(+{{ mobile.month_fallback_usd | fmt_number }} bcv)</span>
-      {% endif %}
+      {%- if mobile.month_fallback_usd and mobile.month_fallback_usd != 0 %}
+        <span class="rpt-bcv-note">+{{ mobile.month_fallback_usd | fmt_number }} bcv</span>
+      {%- endif %}
     </span>
   </div>
 
   {% if mobile.categories %}
-    <div class="grid grid-cols-1 gap-2">
+    <div class="rpt-mobile-list">
       {% for category in mobile.categories %}
         {% include "partials/monthly_mobile_card.html" %}
       {% endfor %}
     </div>
   {% else %}
-    <p class="text-sm text-slate-500">No transactions this month.</p>
+    <p class="rpt-empty-line">No transactions this month.</p>
   {% endif %}
 </section>
