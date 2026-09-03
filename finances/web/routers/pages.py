@@ -311,3 +311,36 @@ def monthly_page(
             "currencies_options": currencies_options,
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# /plans and /ahead — the placeholders (viewer reskin, 2026-09).
+#
+# The rail lists both so it is honest about the roadmap (REPO-RECONCILE
+# §B1). Each renders a SIGNAL empty state saying what has to exist before
+# the page can; neither reads the database, so neither takes a connection.
+# Literal template names and literal context dicts on purpose:
+# tests/web/test_template_contract.py parses these call sites statically.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/plans", include_in_schema=False)
+def plans_page(request: Request):
+    """Render /plans — an empty state until a plan table exists."""
+    templates = request.app.state.templates
+    return templates.TemplateResponse(
+        request,
+        "pages/plans.html",
+        {"title": "Plans"},
+    )
+
+
+@router.get("/ahead", include_in_schema=False)
+def ahead_page(request: Request):
+    """Render /ahead — an empty state until assumptions come from history."""
+    templates = request.app.state.templates
+    return templates.TemplateResponse(
+        request,
+        "pages/ahead.html",
+        {"title": "Ahead"},
+    )

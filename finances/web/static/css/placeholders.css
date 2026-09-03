@@ -3,3 +3,35 @@
  * Plain CSS on signal.css's tokens, prefixed `placeholder-`. Loaded on every
  * page from base.html; inert where nothing carries the prefix.
  */
+
+/* The empty state, in the shipped /triage idiom (.triage-empty in
+ * triage.css): a centred column, 48px above, 16px between the icon, the
+ * headline, the prose and the one link. Mirrored rather than shared so
+ * either sheet can move later without the other page noticing. */
+.placeholder-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-8) var(--space-7);
+  text-align: center;
+}
+
+/* The empty headline: Doto at 26px, the second of the page's two display
+ * elements (the header's answer is the other) — the same pair the empty
+ * triage queue shows (design_handoff_triage/NOTES.md, I8). Never under
+ * 22px: the dot grid stops resolving. */
+.placeholder-empty-headline {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--display-3-size);
+  font-weight: 500;
+}
+
+.placeholder-empty-body {
+  margin: 0;
+  max-width: 460px;
+  font-size: var(--body-size);
+  line-height: 1.55;
+  color: var(--text-secondary);
+}

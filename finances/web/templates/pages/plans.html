@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Plans{% endblock %}
+
+{# A placeholder, on purpose (REPO-RECONCILE §B1). The rail lists Plans so
+   it is honest about the roadmap, and this page says what has to exist
+   before it can: a SIGNAL empty state in the shipped /triage idiom (icon,
+   one Doto headline, prose) plus the one real thing the owner can do now.
+   No data, no dead controls. The answer in the header is the state. #}
+
+{% block content %}
+{% from "_macros.html" import page_header %}
+{% from "_icons.html" import icon %}
+
+{{ page_header("Where is the money going next?", "No plans yet") }}
+
+<section class="placeholder-empty" aria-labelledby="placeholder-headline">
+  {{ icon("target", 28) }}
+  <h2 class="placeholder-empty-headline" id="placeholder-headline">Plans need a plan table.</h2>
+  <p class="placeholder-empty-body">A plan is a monthly amount with a category behind it, and what you spent is that category's rows for the month. That table does not exist yet, and it only means something once Triage has sorted the rows it would read.</p>
+  <p class="placeholder-empty-body">When it exists, this page shows what you gave a job and what is left.</p>
+  <a class="tlink" href="/triage">Go to Triage</a>
+</section>
+{% endblock %}

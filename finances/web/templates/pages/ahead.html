@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Ahead{% endblock %}
+
+{# A placeholder, on purpose (REPO-RECONCILE §B1). The rail lists Ahead so
+   it is honest about the roadmap, and this page says what has to exist
+   before it can: a SIGNAL empty state in the shipped /triage idiom (icon,
+   one Doto headline, prose) plus the one real thing the owner can do now.
+   No data, no dead controls, no sliders. The answer in the header is the
+   state. #}
+
+{% block content %}
+{% from "_macros.html" import page_header %}
+{% from "_icons.html" import icon %}
+
+{{ page_header("What happens if nothing changes?", "Nothing to project yet") }}
+
+<section class="placeholder-empty" aria-labelledby="placeholder-headline">
+  {{ icon("route", 28) }}
+  <h2 class="placeholder-empty-headline" id="placeholder-headline">Ahead needs assumptions from history.</h2>
+  <p class="placeholder-empty-body">A forecast here runs on four assumptions: monthly income, monthly spend, the rate, and a cushion. Each can come from the ledger's own history rather than from you typing it, and that derivation does not exist yet.</p>
+  <p class="placeholder-empty-body">When it does, this page carries twelve months forward from it with every assumption shown.</p>
+  <a class="tlink" href="/monthly">See your months</a>
+</section>
+{% endblock %}
