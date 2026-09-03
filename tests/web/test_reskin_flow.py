@@ -552,8 +552,9 @@ def test_modal_is_the_signal_dialog_and_keeps_every_field(
     assert "prov-3" in body
     # The form: same endpoint, same target, same sentinels, same class the
     # <body> dirty-guard in base.html queries.
-    form = re.search(r"<form[^>]*class=\"tx-modal-form[^\"]*\"[^>]*>", body)
-    assert form, "the edit form lost its tx-modal-form hook"
+    form = re.search(r"<form[^>]*class=\"flow-modal-form\"[^>]*>", body)
+    assert form, "the edit form lost its flow-modal-form hook"
+    assert "tx-modal-form" not in body
     assert f'hx-post="/_partial/transactions/{txn_id}/edit"' in form.group(0)
     assert f"hx-target=\"[data-tx-id='{txn_id}']\"" in form.group(0)
     for needle in (
@@ -794,12 +795,12 @@ def test_flow_css_owns_the_row_grid() -> None:
 
 def test_flow_templates_use_no_app_css_families() -> None:
     """The .cards / .card-row / .tx-modal-* / .view-chip / .upload-* rules in
-    app.css are on borrowed time; nothing here may lean on them. Two names
-    are pinned by tests outside this track and survive as aliases that
-    flow.css defines itself: ``cards--selectable`` (test_bulk_ui) and
-    ``tx-modal-form``, the hook base.html's dirty guard queries. The
-    ``choice-chip(s)`` alias went with the chips (2026-09-03)."""
-    allowed = {"cards--selectable", "tx-modal-form"}
+    app.css are on borrowed time; nothing here may lean on them. The three
+    aliases that survived the reskin (``cards--selectable``,
+    ``choice-chip(s)``, ``tx-modal-form``) were renamed with their tests on
+    2026-09-03; nothing is allowed through any more, and base.html's
+    dirty guard queries ``form.flow-modal-form``."""
+    allowed: set[str] = set()
     legacy = re.compile(r"^(?:cards|card-row|tx-modal-|view-chip|upload-|choice-chip)")
     offenders: dict[str, list[str]] = {}
     for name in FLOW_TEMPLATES:
@@ -814,5 +815,8 @@ def test_flow_templates_use_no_app_css_families() -> None:
     assert not offenders, offenders
 
     css = FLOW_CSS.read_text(encoding="utf-8")
-    for alias in allowed:
-        assert f".{alias}" in css, f"flow.css must define the pinned alias .{alias}"
+    for gone in ("cards--selectable", "choice-chip", "tx-modal-form"):
+        assert f".{gone}" not in css, f"flow.css still styles the retired alias .{gone}"
+    base = (TEMPLATES_DIR / "base.html").read_text(encoding="utf-8")
+    assert "form.flow-modal-form" in base
+    assert "tx-modal-form" not in base

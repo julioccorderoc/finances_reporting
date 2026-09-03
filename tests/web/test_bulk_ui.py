@@ -3,7 +3,8 @@
 Markup contract (JS behaviour is covered by the manual gate):
 * per-row checkbox [data-bulk-checkbox] with the txn id as value,
 * header select-all [data-bulk-select-all],
-* the .cards grid gains the cards--selectable variant (checkbox track),
+* the .flow-rows grid gains the is-selectable variant (checkbox track) —
+  ``cards--selectable`` until 2026-09-03, renamed with the reskin,
 * action bar #bulk-bar with the shared picker + [data-bulk-apply]
   posting to /api/transactions/bulk-edit,
 * dashboard recent-activity cards stay checkbox-free (GUARD),
@@ -52,7 +53,8 @@ def test_list_partial_rows_have_checkboxes(
 
     assert "data-bulk-checkbox" in body
     assert "data-bulk-select-all" in body
-    assert "cards--selectable" in body
+    assert '<div class="flow-rows is-selectable">' in body
+    assert "cards--selectable" not in body
 
 
 def test_checkbox_value_is_txn_id(
