@@ -43,13 +43,14 @@ def test_transactions_filters_render_checkbox_chip_groups(
         assert f'<select name="{name}"' not in body
     # ...replaced by checkboxes with the SAME param names (unchecked by
     # default: the default filter constrains dates only, not these lists).
-    assert '<input type="checkbox" name="accounts" value="Provincial">' in body
-    assert '<input type="checkbox" name="kinds" value="expense">' in body
-    assert '<input type="checkbox" name="currencies" value="VES">' in body
-    assert '<input type="checkbox" name="sources" value="provincial">' in body
-    # Chips are styled via the shared classes.
-    assert 'class="choice-chips"' in body
-    assert 'class="choice-chip"' in body
+    assert '<input type="checkbox" class="tcheck" name="accounts" value="Provincial">' in body
+    assert '<input type="checkbox" class="tcheck" name="kinds" value="expense">' in body
+    assert '<input type="checkbox" class="tcheck" name="currencies" value="VES">' in body
+    assert '<input type="checkbox" class="tcheck" name="sources" value="provincial">' in body
+    # Since 2026-09-03 the checkboxes live in dropdown menus
+    # (tests/web/test_flow_filter_dropdowns.py); the chips are gone.
+    assert 'class="flow-dd-option"' in body
+    assert "choice-chip" not in body
 
 
 def test_transactions_filter_chips_reflect_checked_state_from_url(
@@ -67,14 +68,14 @@ def test_transactions_filter_chips_reflect_checked_state_from_url(
     )
     assert resp.status_code == 200
     body = resp.text
-    assert '<input type="checkbox" name="accounts" value="Provincial" checked>' in body
-    assert '<input type="checkbox" name="accounts" value="Cash USD" checked>' in body
+    assert '<input type="checkbox" class="tcheck" name="accounts" value="Provincial" checked>' in body
+    assert '<input type="checkbox" class="tcheck" name="accounts" value="Cash USD" checked>' in body
     assert (
-        '<input type="checkbox" name="accounts" value="Binance Spot" checked>'
+        '<input type="checkbox" class="tcheck" name="accounts" value="Binance Spot" checked>'
         not in body
     )
-    assert '<input type="checkbox" name="kinds" value="expense" checked>' in body
-    assert '<input type="checkbox" name="kinds" value="income" checked>' not in body
+    assert '<input type="checkbox" class="tcheck" name="kinds" value="expense" checked>' in body
+    assert '<input type="checkbox" class="tcheck" name="kinds" value="income" checked>' not in body
 
 
 def test_checkbox_repeated_params_still_narrow_the_list(

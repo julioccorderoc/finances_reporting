@@ -433,10 +433,10 @@ def test_filters_form_keeps_its_id_and_htmx_wiring(
         r'<input\s+type="date"\s+name="date_from"[^>]*class="flow-input"', body
     )
     assert re.search(r'<select name="needs_review" class="flow-input">', body)
-    # The chip groups keep the literal classes test_filters_polish pins;
-    # flow.css owns them now.
-    assert 'class="choice-chips"' in body
-    assert 'class="choice-chip"' in body
+    # The multi-selects are dropdowns since 2026-09-03
+    # (tests/web/test_flow_filter_dropdowns.py); nothing chip-shaped is left.
+    assert 'class="flow-dd"' in body
+    assert "choice-chip" not in body
 
 
 # ---------------------------------------------------------------------------
@@ -786,11 +786,10 @@ def test_flow_css_owns_the_row_grid() -> None:
     assert "border-top: 1px solid var(--border-subtle)" in row
 
     assert ".flow-rows.is-selectable" in css
-    # Selection is grey, never red.
-    chip = css[css.index(".choice-chip input:checked + span") :]
-    chip = chip[: chip.index("}")]
-    assert "var(--surface-selected)" in chip
-    assert "red" not in chip
+    # A set filter is a state, never the accent.
+    is_set = css[css.index(".flow-dd-summary.is-set") :]
+    is_set = is_set[: is_set.index("}")]
+    assert "red" not in is_set
 
 
 def test_flow_templates_use_no_app_css_families() -> None:
@@ -798,9 +797,9 @@ def test_flow_templates_use_no_app_css_families() -> None:
     app.css are on borrowed time; nothing here may lean on them. Two names
     are pinned by tests outside this track and survive as aliases that
     flow.css defines itself: ``cards--selectable`` (test_bulk_ui) and
-    ``choice-chip(s)`` (test_filters_polish). ``tx-modal-form`` is the
-    hook base.html's dirty guard queries."""
-    allowed = {"cards--selectable", "choice-chips", "choice-chip", "tx-modal-form"}
+    ``tx-modal-form``, the hook base.html's dirty guard queries. The
+    ``choice-chip(s)`` alias went with the chips (2026-09-03)."""
+    allowed = {"cards--selectable", "tx-modal-form"}
     legacy = re.compile(r"^(?:cards|card-row|tx-modal-|view-chip|upload-|choice-chip)")
     offenders: dict[str, list[str]] = {}
     for name in FLOW_TEMPLATES:
