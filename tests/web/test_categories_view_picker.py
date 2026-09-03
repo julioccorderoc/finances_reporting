@@ -128,8 +128,6 @@ def test_auto_only_and_retired_categories_never_appear(
     labels = {c.label for c in payload.categories}
     assert labels.isdisjoint(
         {
-            "Internal Transfer",
-            "External Transfer",
             "FX Diff",
             "Reconciliation",
             "Interest",
@@ -142,14 +140,36 @@ def test_auto_only_and_retired_categories_never_appear(
     assert chip_labels <= labels
 
 
-def test_groups_are_expense_then_income(web_db: sqlite3.Connection) -> None:
+def test_the_transfer_categories_are_in_the_list_and_never_on_a_chip(
+    web_db: sqlite3.Connection,
+) -> None:
+    """Migration 022 (owner decision 2026-09-03): "moved, not spent" is a
+    choice the owner makes by hand, from the list, never from a number key."""
     payload = picker_payload(web_db, today=TODAY)
 
-    assert [g.kind for g in payload.groups] == ["expense", "income"]
-    assert [g.label for g in payload.groups] == ["EXPENSE", "INCOME"]
-    expense, income = payload.groups
+    labels = {c.label for c in payload.categories}
+    assert {"Internal Transfer", "External Transfer"} <= labels
+    assert not any(c.category.kind == "transfer" for c in payload.chips)
+
+
+def test_groups_are_expense_then_income_then_moved(
+    web_db: sqlite3.Connection,
+) -> None:
+    payload = picker_payload(web_db, today=TODAY)
+
+    assert [g.kind for g in payload.groups] == ["expense", "income", "transfer"]
+    assert [g.label for g in payload.groups] == [
+        "EXPENSE",
+        "INCOME",
+        "MOVED, NOT SPENT",
+    ]
+    expense, income, moved = payload.groups
     assert "Groceries" in [c.label for c in expense.categories]
     assert "Salary" in [c.label for c in income.categories]
+    assert [c.label for c in moved.categories] == [
+        "External Transfer",
+        "Internal Transfer",
+    ]
     assert [c.label for c in expense.categories] == sorted(
         c.label for c in expense.categories
     )
@@ -207,14 +227,19 @@ def test_payload_is_stable_without_any_usage_history(
 # ---------------------------------------------------------------------------
 
 
-def test_a_kind_scoped_picker_offers_only_that_kind(
+def test_a_kind_scoped_picker_offers_that_kind_and_the_movement_categories(
     web_db: sqlite3.Connection,
 ) -> None:
+    """The scope mirrors ``category_fits``: the row's own kind, plus the
+    transfer-kind categories that may land on any income or expense row.
+    No income category reaches an expense row, and the chips stay scoped
+    to the row's kind alone."""
     payload = picker_payload(web_db, kind=TransactionKind.EXPENSE, today=TODAY)
 
     assert payload.categories
-    assert {c.kind for c in payload.categories} == {"expense"}
+    assert {c.kind for c in payload.categories} == {"expense", "transfer"}
     assert {chip.category.kind for chip in payload.chips} == {"expense"}
+    assert [g.kind for g in payload.groups if g.categories] == ["expense", "transfer"]
 
 
 def test_the_scoped_counts_describe_the_scoped_set(
@@ -235,4 +260,4 @@ def test_an_unscoped_picker_still_mixes_both_kinds(
     """The bulk sheet has no single row to scope to."""
     payload = picker_payload(web_db, today=TODAY)
 
-    assert {c.kind for c in payload.categories} == {"expense", "income"}
+    assert {c.kind for c in payload.categories} == {"expense", "income", "transfer"}

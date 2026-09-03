@@ -48,6 +48,17 @@ def test_parses_expense_and_income_tables() -> None:
     assert tests["Salary"] == "Employment pay."
 
 
+def test_parses_the_transfer_table_too() -> None:
+    """Migration 022 made the two transfer categories pickable, so their
+    sentences are on screen and must come from the doc like the rest."""
+    tests = category_tests()
+    assert "External Transfer" in tests
+    assert "Internal Transfer" in tests
+    # The adjustment pair is system-written and is not a picker sentence.
+    assert "FX Diff" not in tests
+    assert "Reconciliation" not in tests
+
+
 def test_strips_markdown_emphasis_from_the_sentence() -> None:
     leisure = category_tests()["Leisure"]
     assert "**" not in leisure

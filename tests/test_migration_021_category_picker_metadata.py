@@ -31,9 +31,12 @@ import pytest
 from finances.db.migrate import MIGRATIONS_DIR, apply_migrations
 from finances.db.repos import categories as categories_repo
 
+#: What is system-written after the whole chain has run. 021 marked every
+#: transfer and adjustment category; 022 gave the two transfer categories
+#: back to the picker (owner decision 2026-09-03 — money that moves
+#: transitionally is neither income nor spending, and the write path had
+#: always accepted the tag).
 AUTO_ONLY_NAMES = {
-    "Internal Transfer",
-    "External Transfer",
     "FX Diff",
     "Reconciliation",
     "Interest",
@@ -70,12 +73,16 @@ def test_auto_only_marks_the_never_hand_picked_set(migrated_db: sqlite3.Connecti
     assert {r["name"] for r in rows} == AUTO_ONLY_NAMES
 
 
-def test_every_transfer_and_adjustment_category_is_auto_only(
+def test_every_adjustment_category_is_auto_only(
     migrated_db: sqlite3.Connection,
 ) -> None:
-    """Kind-driven, so a future adjustment category inherits the rule."""
+    """Kind-driven, so a future adjustment category inherits the rule.
+
+    Transfer-kind categories left this set in 022 — see
+    ``test_migration_022_transfer_categories_pickable.py``.
+    """
     rows = migrated_db.execute(
-        "SELECT name FROM categories WHERE kind IN ('transfer', 'adjustment') AND auto_only = 0"
+        "SELECT name FROM categories WHERE kind = 'adjustment' AND auto_only = 0"
     ).fetchall()
     assert rows == []
 
@@ -90,11 +97,19 @@ def test_fees_is_pickable_but_never_a_chip(migrated_db: sqlite3.Connection) -> N
     assert row["chip_eligible"] == 0
 
 
-def test_fees_is_the_only_chip_exclusion(migrated_db: sqlite3.Connection) -> None:
+def test_the_chip_exclusions_are_fees_and_the_two_transfers(
+    migrated_db: sqlite3.Connection,
+) -> None:
+    """021 excluded Fees; 022 added the transfer categories, which are
+    pickable from the list but must never rank onto a numbered key."""
     rows = migrated_db.execute(
-        "SELECT name FROM categories WHERE chip_eligible = 0"
+        "SELECT name FROM categories WHERE chip_eligible = 0 ORDER BY name"
     ).fetchall()
-    assert [r["name"] for r in rows] == ["Fees"]
+    assert [r["name"] for r in rows] == [
+        "External Transfer",
+        "Fees",
+        "Internal Transfer",
+    ]
 
 
 def test_clothing_is_deactivated_not_deleted(migrated_db: sqlite3.Connection) -> None:

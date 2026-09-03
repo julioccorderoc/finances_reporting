@@ -42,12 +42,24 @@ def test_returns_pydantic_models_carrying_the_picker_fields(
 
 def test_excludes_auto_only_and_inactive(migrated_db: sqlite3.Connection) -> None:
     names = {c.name for c in categories_repo.list_pickable(migrated_db)}
-    # auto-only
-    assert names.isdisjoint(
-        {"Internal Transfer", "External Transfer", "FX Diff", "Reconciliation", "Interest"}
-    )
+    # auto-only (the transfer categories left this set in migration 022)
+    assert names.isdisjoint({"FX Diff", "Reconciliation", "Interest"})
     # retired
     assert names.isdisjoint({"Clothing", "Lifestyle", "Tools"})
+
+
+def test_the_transfer_categories_are_pickable_but_never_chips(
+    migrated_db: sqlite3.Connection,
+) -> None:
+    """Owner decision 2026-09-03: money that moves transitionally is
+    neither income nor spending, and the owner tags it by hand."""
+    by_name = {c.name: c for c in categories_repo.list_pickable(migrated_db)}
+
+    for name in ("Internal Transfer", "External Transfer"):
+        assert name in by_name, name
+        assert by_name[name].kind is TransactionKind.TRANSFER
+        assert by_name[name].auto_only is False
+        assert by_name[name].chip_eligible is False
 
 
 def test_keeps_fees_because_it_is_pickable_not_chippable(
@@ -57,9 +69,13 @@ def test_keeps_fees_because_it_is_pickable_not_chippable(
     assert fees.chip_eligible is False
 
 
-def test_only_expense_and_income_kinds_survive(migrated_db: sqlite3.Connection) -> None:
+def test_adjustment_kinds_never_survive(migrated_db: sqlite3.Connection) -> None:
     kinds = {c.kind for c in categories_repo.list_pickable(migrated_db)}
-    assert kinds == {TransactionKind.EXPENSE, TransactionKind.INCOME}
+    assert kinds == {
+        TransactionKind.EXPENSE,
+        TransactionKind.INCOME,
+        TransactionKind.TRANSFER,
+    }
 
 
 def test_ordered_by_kind_then_name(migrated_db: sqlite3.Connection) -> None:
