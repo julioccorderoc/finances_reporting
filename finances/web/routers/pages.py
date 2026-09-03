@@ -21,7 +21,6 @@ from fastapi.responses import HTMLResponse
 
 from finances.db.repos import accounts as accounts_repo
 from finances.db.repos import categories as categories_repo
-from finances.db.repos import saved_views as saved_views_repo
 from finances.web.deps import dismissed_pairs, get_conn
 from finances.web.settings import ENV_RELOAD_CHILD
 from finances.web.routers._monthly_filter_dep import monthly_filter_from_query
@@ -173,8 +172,6 @@ def transactions_page(
             # Bulk action bar (WP4): mixed kinds on this page → kind=None.
             "categories": categories_repo.list_all(conn),
             "top_categories": top_categories(conn, kind=None),
-            # Saved views chip row (Wave 2 Thing 2).
-            "views": saved_views_repo.list_all(conn),
         },
     )
 

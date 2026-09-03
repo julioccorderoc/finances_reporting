@@ -362,62 +362,6 @@ select.flow-input {
   justify-content: flex-end;
 }
 
-/* ── Saved views ────────────────────────────────────────────────────────── */
-
-.flow-views {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2) var(--space-3);
-}
-.flow-view-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.flow-view-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: var(--control-sm);
-  padding: 0 3px 0 9px;
-  background: var(--surface-raised);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-sm);
-  font-size: var(--caption-size);
-  color: var(--text-primary);
-}
-.flow-view-chip svg {
-  flex: 0 0 auto;
-  color: var(--ink-500);
-}
-.flow-view-chip a {
-  color: var(--text-primary);
-  text-decoration: none;
-  white-space: nowrap;
-}
-.flow-view-chip a:hover {
-  text-decoration: underline;
-}
-.flow-view-delete {
-  width: 20px;
-  height: 20px;
-}
-.flow-view-delete:hover:not(:disabled) {
-  color: var(--text-danger);
-}
-.flow-views-save {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  margin: 0 0 0 auto;
-}
-.flow-views-save .flow-input {
-  width: 220px;
-  height: var(--control-sm);
-  font-size: var(--caption-size);
-}
-
 /* ── Bulk bar ───────────────────────────────────────────────────────────── */
 
 .flow-body {
@@ -1037,13 +981,6 @@ select.flow-input {
   .flow-filter-grid,
   .flow-filter-groups {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .flow-views-save {
-    margin-left: 0;
-  }
-  .flow-views-save .flow-input {
-    width: auto;
-    flex: 1;
   }
   .flow-modal-over {
     padding: var(--space-3);
