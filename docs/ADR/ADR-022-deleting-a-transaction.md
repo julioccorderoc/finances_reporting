@@ -1,7 +1,9 @@
 # ADR-022: Deleting a Transaction Leaves a Tombstone the Ingest Honours
 
 **Date:** 2026-09-03
-**Status:** Proposed — waiting for the owner's yes (nothing implemented)
+**Status:** Accepted 2026-09-03 — the owner's answer was "Delete duplicated
+stuff"; implemented the same day (migration 023, `transactions_repo.delete`,
+the ingest skip, the Flow-modal control, the `doctor` check)
 **Amends:** [ADR-010](./ADR-010-deterministic-source-ref.md) — a `(source, source_ref)` can be *retired*, not only deduplicated
 **Related:** [ADR-002](./ADR-002-transfers-double-entry.md) (a pair sums to zero), [ADR-012](./ADR-012-local-web-viewer.md) (writes go through the repo APIs), [ADR-019](./ADR-019-bank-reversal-pairing.md) (a reversed charge is *paired*, not deleted)
 **Rule:** [rule-010](../architecture/rules/rule-010-deterministic-source-ref.md)
@@ -64,9 +66,15 @@ new `rows_skipped_deleted` in the ingest report. Backfill goes through the
 same path (rule-004), so it is honoured there too. The invariant holds:
 re-ingesting a statement after a delete still inserts 0 rows.
 
-`source = 'cash'` rows are exempt from the tombstone: nothing re-ingests
-them, and a tombstone would block re-entering a legitimately identical
-cash row (same day, amount and words hash the same).
+`source = 'cash_cli'` rows (`ingest.cash_cli.CASH_CLI_SOURCE` — the draft
+said `'cash'`, which is not a source the ledger uses) are exempt from the
+tombstone: nothing re-ingests them, and a tombstone would block
+re-entering a legitimately identical cash row (same day, amount and words
+hash the same).
+
+The counter is added where the two live importers report — `binance`'s
+stats dict and `provincial`'s `IngestReport`. Backfill honours the skip
+through the same repo call without a counter of its own.
 
 ### 2.3 What may be deleted
 

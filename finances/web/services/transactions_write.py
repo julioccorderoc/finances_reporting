@@ -26,7 +26,13 @@ from finances.db.repos import transactions as transactions_repo
 from finances.domain import rates as rates_engine
 from finances.domain import realized_rates
 from finances.domain.money import MOVEMENT_CATEGORY_KIND
-from finances.domain.models import Category, Transaction, TransactionKind
+from finances.format import fmt_native
+from finances.domain.models import (
+    Category,
+    Tombstone,
+    Transaction,
+    TransactionKind,
+)
 from finances.web.services.transactions_query import (
     TransactionCard,
     _project_card,
@@ -222,8 +228,47 @@ def apply_edit(
     )
 
 
+def delete_transaction(
+    conn: sqlite3.Connection, *, txn_id: int, reason: str | None = None
+) -> Tombstone:
+    """Remove a row from the ledger for good (ADR-022).
+
+    A thin pass-through to ``transactions_repo.delete`` — the viewer runs
+    no SQL of its own (rule-012) and adds no policy of its own either: the
+    refusals (a paired row, a reconciliation row) belong to the repo, so
+    the CLI and any future surface refuse the same things in the same
+    words. What the viewer does with the returned :class:`Tombstone` is
+    name the row in its toast.
+
+    Nothing is re-derived afterwards. A deleted row is an input to no
+    rate, no category and no pairing; the realized basis is rebuilt only
+    where a *rate* changed (see :func:`apply_edit`).
+    """
+    return transactions_repo.delete(conn, txn_id, reason=reason)
+
+
+def describe_tombstone(tomb: Tombstone) -> str:
+    """One line naming what a delete removed, for the toast.
+
+    The owner has just confirmed a destructive action against a row they
+    can no longer see; the toast is the only place left that can say what
+    it was.
+    """
+    label = (tomb.snapshot.get("description") or "row").strip()
+    if len(label) > 60:
+        label = label[:57].rstrip() + "…"
+    amount = Decimal(str(tomb.snapshot.get("amount", "0")))
+    # The viewer's own money words, not a repr: this is the last time the
+    # owner sees the row, and "−Bs. 800.00" is what every other surface
+    # would have called it.
+    money = fmt_native(amount, str(tomb.snapshot.get("currency", "")), signed=True)
+    return f"Deleted {label} — {money}"
+
+
 __all__ = [
     "TransactionEditRequest",
     "apply_edit",
     "category_fits",
+    "delete_transaction",
+    "describe_tombstone",
 ]

@@ -76,6 +76,8 @@
     x-data="{
       queueDirty: false,
       queueFilter: null,
+      listDirty: false,
+      deletedId: null,
       modalDismissed: false,
       triggersFrom(xhr) {
         const raw = xhr && xhr.getResponseHeader('HX-Trigger');
@@ -86,6 +88,36 @@
         } catch (err) {
           return { names: raw.split(',').map(s => s.trim()), toast: null, payload: {} };
         }
+      },
+      {# A delete (ADR-022) removes a row the page is still showing. The
+         response swaps nothing — the modal opens from two pages and htmx
+         will not send a request whose target is missing — so the row
+         leaves by a refresh here, on whatever surface has a list. Same
+         shape as the queue refresh below. #}
+      armListRefresh(t) {
+        if (!t || !t.names.includes('listDirty')) return;
+        this.listDirty = true;
+        this.deletedId = (t.payload.listDirty && t.payload.listDirty.id) || null;
+      },
+      refreshList() {
+        if (!this.listDirty) return;
+        this.listDirty = false;
+        const id = this.deletedId;
+        this.deletedId = null;
+        if (!document.getElementById('tx-list')) {
+          {# No list to re-fetch (the dashboard's recent activity). Drop the
+             one card that is now a lie; leave the rest of the page alone. #}
+          {# No double quotes in here: this whole block is the value of a
+             double-quoted x-data attribute, and one literal " ends it —
+             Alpine then fails to parse the page's entire scope. #}
+          const card = id && Array.from(document.querySelectorAll('article[data-tx-id]'))
+            .find(el => el.getAttribute('data-tx-id') === String(id));
+          if (card) card.remove();
+          return;
+        }
+        {# The URL is the filter's source of truth (WP4): refreshing
+           without it would answer a filtered view with every row. #}
+        htmx.ajax('GET', '/_partial/transactions/list' + window.location.search, { target: '#tx-list', swap: 'outerHTML' });
       },
       armQueueRefresh(t) {
         if (!t || !t.names.includes('queueDirty')) return;
@@ -155,6 +187,7 @@
         if (host) host.replaceChildren();
       });
       refreshQueue();
+      refreshList();
     "
     {# A modal-open request means the owner wants a dialog again. #}
     @htmx:before-request.window="
@@ -174,7 +207,9 @@
         $event.detail.shouldSwap = false;
         const t = triggersFrom($event.detail.xhr);
         armQueueRefresh(t);
+        armListRefresh(t);
         refreshQueue();
+        refreshList();
         showToast(t);
       }
     "
@@ -187,6 +222,7 @@
            from the server — the chips render outside the swapped region
            and their data-active goes stale the moment one is clicked. #}
         armQueueRefresh(t);
+        armListRefresh(t);
         if (t.names.includes('closeModal')) {
           window.dispatchEvent(new CustomEvent('close-modal'));
         }

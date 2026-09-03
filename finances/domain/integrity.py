@@ -456,6 +456,26 @@ CHECKS: tuple[IntegrityCheck, ...] = (
         """,
     ),
     IntegrityCheck(
+        name="tombstoned_row_is_back",
+        severity=Severity.ERROR,
+        description=(
+            "A row the owner deleted is on the books again. Deleting "
+            "retires its (source, source_ref) (ADR-022), and "
+            "`upsert_by_source_ref` — the one door every importer and the "
+            "backfill come through — skips a retired pair. A row here "
+            "means something wrote to `transactions` around the repo. "
+            "Find that write path; deleting the row again only hides it."
+        ),
+        sql="""
+            SELECT t.id
+              FROM transactions AS t
+              JOIN deleted_transactions AS d
+                ON d.source = t.source
+               AND d.source_ref = t.source_ref
+             ORDER BY t.id
+        """,
+    ),
+    IntegrityCheck(
         name="unpaired_p2p_sells",
         severity=Severity.WARNING,
         description=(

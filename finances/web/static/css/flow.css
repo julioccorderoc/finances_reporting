@@ -787,6 +787,14 @@ select.flow-input {
   flex: 1;
 }
 
+/* Delete (ADR-022). A ghost like Cancel, so the destructive action never
+ * competes with Save for the eye — but named in --text-danger on hover,
+ * so nobody reaches it thinking it is another way out. */
+.flow-modal-delete:hover:not(:disabled) {
+  background: var(--red-050);
+  color: var(--text-danger);
+}
+
 /* ── Pair candidates (inside the modal) ─────────────────────────────────── */
 
 .flow-pairs {

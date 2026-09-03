@@ -195,6 +195,27 @@
     <footer class="flow-modal-footer">
       <span class="flow-modal-legend"><kbd>1–8</kbd> pick · <kbd>↵</kbd> save · <kbd>esc</kbd> close</span>
       <span class="flow-modal-spacer"></span>
+      {# Delete (ADR-022 §2.4). A ghost, left of Cancel: the destructive
+         action is reachable but never the eye's first stop, and it asks
+         in plain words before it happens.
+
+         It posts on its own — NOT through the edit form — and targets
+         ITSELF with swap="none": this modal opens from /transactions and
+         from the dashboard's recent activity, and htmx will not send a
+         request whose hx-target matches nothing, so a #tx-list target
+         would be a dead button on the dashboard. The response's
+         HX-Trigger closes the modal, toasts what went, and asks the page
+         to refresh its list (base.html). No @click close — that would
+         abort the request mid-flight. #}
+      <button
+        type="button"
+        class="tbtn tbtn-ghost flow-modal-delete"
+        data-modal-delete
+        hx-post="/_partial/transactions/{{ txn.id }}/delete"
+        hx-target="this"
+        hx-swap="none"
+        hx-confirm="Delete this row from the ledger? It will not come back when the statement is imported again."
+      >Delete</button>
       <button
         type="button"
         class="tbtn tbtn-ghost"

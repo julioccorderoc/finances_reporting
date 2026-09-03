@@ -237,6 +237,36 @@ class TransactionEdit(BaseModel):
         return None if v is None else _require_aware(v)
 
 
+class Tombstone(BaseModel):
+    """What a delete left behind (ADR-022 §2.1).
+
+    A deleted row's ``(source, source_ref)`` is *retired*: dedup is keyed
+    on that pair (rule-010), so without this record the next import would
+    insert the row again, silently. ``upsert_by_source_ref`` skips any
+    incoming row whose pair is tombstoned.
+
+    ``snapshot`` is the deleted row in a JSON-ready shape (Decimals and
+    datetimes already stringified) — the record of what went, what the
+    viewer names in its toast, and what a future undo would re-insert.
+
+    A ``cash_cli`` delete returns one of these with nothing written to
+    ``deleted_transactions``: nothing re-ingests cash (ADR-022 §2.2).
+    """
+
+    model_config = ConfigDict(strict=False, extra="forbid")
+
+    source: str
+    source_ref: str | None
+    deleted_at: datetime
+    reason: str | None = None
+    snapshot: dict[str, Any]
+
+    @field_validator("deleted_at")
+    @classmethod
+    def _aware_deleted_at(cls, v: datetime) -> datetime:
+        return _require_aware(v)
+
+
 __all__ = [
     "Account",
     "AccountKind",
@@ -244,6 +274,7 @@ __all__ = [
     "EarnPosition",
     "Rate",
     "SavedView",
+    "Tombstone",
     "Transaction",
     "TransactionEdit",
     "TransactionKind",

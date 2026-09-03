@@ -329,6 +329,9 @@ class IngestReport:
     rows_seen: int = 0
     rows_inserted: int = 0
     rows_updated: int = 0
+    # Rows the statement still carries but the owner deleted (ADR-022).
+    # The tombstone is what keeps them from coming back on every import.
+    rows_skipped_deleted: int = 0
     reconciliation: ReconciliationReport | None = None
     reversals: ReconciliationReport | None = None
     warnings: list[str] = field(default_factory=list)
@@ -522,6 +525,7 @@ def ingest_csv(
                 result = txn_repo.upsert_by_source_ref(conn, txn)
                 report.rows_inserted += result["rows_inserted"]
                 report.rows_updated += result["rows_updated"]
+                report.rows_skipped_deleted += result["rows_skipped_deleted"]
 
             if run_pairing:
                 strategy = BankAnchoredP2pPairing(

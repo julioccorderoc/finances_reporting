@@ -17,13 +17,13 @@ from __future__ import annotations
 
 import sqlite3
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Iterable, Literal, Sequence
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
-from finances.config import BINANCE_DEFAULT_LOOKBACK_DAYS
+from finances.config import BINANCE_DEFAULT_LOOKBACK_DAYS, CARACAS_TZ
 from finances.db.repos import accounts as accounts_repo
 from finances.db.repos import categories as categories_repo
 from finances.db.repos import import_state as import_state_repo
@@ -471,6 +471,68 @@ def _resolve_time_window(
     return start_ms, now_ms
 
 
+def _tally(stats: dict[str, int], result: dict[str, Any]) -> None:
+    """Fold one upsert result into the run's counters.
+
+    ``rows_skipped_deleted`` counts rows the ledger refused to re-insert
+    because the owner deleted them (ADR-022). It is a normal outcome, not
+    an error: the tombstone is doing its job.
+    """
+    stats["rows_inserted"] += result["rows_inserted"]
+    stats["rows_updated"] += result["rows_updated"]
+    stats["rows_skipped_deleted"] += result["rows_skipped_deleted"]
+
+
+def _caracas_day(moment: datetime) -> date:
+    """The calendar day the owner lived, not the one UTC recorded.
+
+    The backfill dates a legacy row at Caracas midnight (``04:00Z``) and
+    Binance Pay carries a real timestamp, so half the known twins fall on
+    the next UTC day while being the same day here.
+    """
+    return moment.astimezone(CARACAS_TZ).date()
+
+
+def _pay_twin_exists(
+    conn: sqlite3.Connection, txn: Transaction, *, account_ids: list[int]
+) -> bool:
+    """Is this Pay event already on the books as a ``withdraw:`` row?
+
+    Binance reports one send twice — ``withdraw`` history and ``Pay``
+    history — under two references, so ``UNIQUE(source, source_ref)``
+    cannot see they are the same money (ten rows, 2,260.72 USDT double
+    counted; ``docs/plans/2026-09-03-ledger-actions-decisions.md`` §2).
+
+    Identity here is amount, currency and Caracas day. The account is not
+    part of it beyond "one of the Binance accounts": Pay history always
+    reports Spot, while the backfill placed five of the ten legacy rows on
+    Funding.
+    """
+    if not account_ids or txn.source_ref is None:
+        return False
+    day = _caracas_day(txn.occurred_at)
+    placeholders = ",".join("?" for _ in account_ids)
+    rows = conn.execute(
+        f"""
+        SELECT occurred_at FROM transactions
+         WHERE source = ?
+           AND source_ref LIKE 'withdraw:%'
+           AND account_id IN ({placeholders})
+           AND currency = ?
+           AND CAST(amount AS REAL) = CAST(? AS REAL)
+        """,
+        (SOURCE, *account_ids, txn.currency, format(txn.amount, "f")),
+    ).fetchall()
+    for row in rows:
+        raw = row["occurred_at"]
+        candidate = raw if isinstance(raw, datetime) else datetime.fromisoformat(str(raw))
+        if candidate.tzinfo is None:
+            candidate = candidate.replace(tzinfo=CARACAS_TZ)
+        if _caracas_day(candidate) == day:
+            return True
+    return False
+
+
 def _unpack_rows(response: Any) -> list[dict[str, Any]]:
     if response is None:
         return []
@@ -503,8 +565,7 @@ def _ingest_deposits(
         result = transactions_repo.upsert_by_source_ref(
             conn, row.to_transaction(spot_account_id=spot_id)
         )
-        stats["rows_inserted"] += result["rows_inserted"]
-        stats["rows_updated"] += result["rows_updated"]
+        _tally(stats, result)
 
 
 def _ingest_withdrawals(
@@ -527,8 +588,7 @@ def _ingest_withdrawals(
         result = transactions_repo.upsert_by_source_ref(
             conn, row.to_transaction(spot_account_id=spot_id)
         )
-        stats["rows_inserted"] += result["rows_inserted"]
-        stats["rows_updated"] += result["rows_updated"]
+        _tally(stats, result)
 
 
 def _ingest_p2p(
@@ -559,8 +619,7 @@ def _ingest_p2p(
             result = transactions_repo.upsert_by_source_ref(
                 conn, row.to_transaction(spot_account_id=spot_id)
             )
-            stats["rows_inserted"] += result["rows_inserted"]
-            stats["rows_updated"] += result["rows_updated"]
+            _tally(stats, result)
 
 
 def _ingest_converts(
@@ -587,8 +646,7 @@ def _ingest_converts(
             continue
         for leg in row.to_transactions(spot_account_id=spot_id):
             result = transactions_repo.upsert_by_source_ref(conn, leg)
-            stats["rows_inserted"] += result["rows_inserted"]
-            stats["rows_updated"] += result["rows_updated"]
+            _tally(stats, result)
 
 
 def _ingest_internal_transfers(
@@ -811,8 +869,7 @@ def _ingest_earn_rewards(
                 earn_account_id=earn_id, interest_category_id=interest_id
             ),
         )
-        stats["rows_inserted"] += result["rows_inserted"]
-        stats["rows_updated"] += result["rows_updated"]
+        _tally(stats, result)
 
 
 def _ingest_pay(
@@ -822,9 +879,18 @@ def _ingest_pay(
     start_ms: int,
     end_ms: int,
     spot_id: int,
+    twin_account_ids: list[int],
     stats: dict[str, int],
     errors: list[str],
 ) -> None:
+    """Ingest Binance Pay, minus the events already on the books.
+
+    Binance serves one send from two endpoints under two references —
+    ``withdraw:<id>`` and ``pay:<orderId>`` — so dedup on
+    ``(source, source_ref)`` cannot tell they are one event. Ten such
+    twins double-counted 2,260.72 USDT before this guard existed; without
+    it the next deep re-sync would write them again.
+    """
     try:
         response = client.pay_history(startTime=start_ms, endTime=end_ms)
     except Exception as exc:  # noqa: BLE001
@@ -836,11 +902,11 @@ def _ingest_pay(
         except Exception as exc:  # noqa: BLE001
             errors.append(f"pay: {exc}")
             continue
-        result = transactions_repo.upsert_by_source_ref(
-            conn, row.to_transaction(spot_account_id=spot_id)
-        )
-        stats["rows_inserted"] += result["rows_inserted"]
-        stats["rows_updated"] += result["rows_updated"]
+        txn = row.to_transaction(spot_account_id=spot_id)
+        if _pay_twin_exists(conn, txn, account_ids=twin_account_ids):
+            stats["rows_skipped_pay_twin"] += 1
+            continue
+        _tally(stats, transactions_repo.upsert_by_source_ref(conn, txn))
 
 
 def _ingest_earn_positions(
@@ -914,7 +980,15 @@ def sync_binance(
             conn, since=since, lookback_days=lookback_days
         )
 
-        stats = {"rows_inserted": 0, "rows_updated": 0}
+        stats = {
+            "rows_inserted": 0,
+            "rows_updated": 0,
+            # Rows the ledger refused to re-insert: deleted by the owner
+            # (ADR-022), and Pay events already on the books as a
+            # withdraw row. Both are normal outcomes, not errors.
+            "rows_skipped_deleted": 0,
+            "rows_skipped_pay_twin": 0,
+        }
         errors: list[str] = []
 
         spot_id = account_ids[_SPOT_ACCOUNT_NAME]
@@ -954,7 +1028,9 @@ def sync_binance(
                 )
                 _ingest_pay(
                     conn, client, start_ms=chunk_start, end_ms=chunk_end,
-                    spot_id=spot_id, stats=stats, errors=errors,
+                    spot_id=spot_id,
+                    twin_account_ids=sorted(account_ids.values()),
+                    stats=stats, errors=errors,
                 )
 
             snapshot_at = datetime.now(tz=UTC)

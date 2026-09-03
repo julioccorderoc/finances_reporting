@@ -32,7 +32,9 @@ from finances.domain.models import (
 )
 
 CASH_USD_ACCOUNT_NAME = "Cash USD"
-CASH_CLI_SOURCE = "cash_cli"
+# Defined in the repo (ADR-022 §2.2 makes it delete behaviour, which the
+# repo has to know) and re-exported here, where callers expect it.
+CASH_CLI_SOURCE = transactions_repo.CASH_CLI_SOURCE
 
 
 def ensure_cash_usd_account(conn: sqlite3.Connection) -> Account:

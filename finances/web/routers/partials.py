@@ -48,6 +48,8 @@ from finances.web.services.transactions_query import _project_card
 from finances.web.services.transactions_write import (
     TransactionEditRequest,
     apply_edit,
+    delete_transaction,
+    describe_tombstone,
 )
 from finances.web.services.triage_view import build_screen
 from finances.web.services.triage import (
@@ -389,6 +391,7 @@ def _hx_trigger_json(
     toast_message: str,
     queue_filter: str | None = None,
     resolved: int = 0,
+    deleted_id: int | None = None,
 ) -> str:
     """Build an ``HX-Trigger`` header value: named events + a success toast.
 
@@ -408,6 +411,11 @@ def _hx_trigger_json(
     payload: dict[str, object] = {name: True for name in events}
     if "queueDirty" in payload:
         payload["queueDirty"] = {"typeFilter": queue_filter}
+    if "listDirty" in payload:
+        # The id of the row that went, so a surface with no refreshable
+        # list (the dashboard's recent activity) can still drop the card
+        # it is showing rather than display a row that no longer exists.
+        payload["listDirty"] = {"id": deleted_id}
     if resolved:
         # The sitting counter is client state — the server knows how many
         # rows a write resolved, never when the sitting began.
@@ -579,6 +587,52 @@ def transactions_pair_confirm_partial(
         "closeModal", toast_message="Paired"
     )
     return response
+
+
+@router.post("/transactions/{txn_id}/delete", include_in_schema=False)
+def transactions_delete_partial(
+    txn_id: int,
+    reason: str | None = Form(default=None),
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Delete a row for good (ADR-022 §2.4).
+
+    The response swaps nothing. It carries three events instead:
+    ``closeModal`` dismisses the dialog the button was in, ``listDirty``
+    tells whatever surface is showing rows to fetch them again, and the
+    toast names what went — the only place left that can, now that the
+    row is gone.
+
+    Why not answer with the refreshed list: this modal opens from
+    /transactions AND from the dashboard's recent activity, and htmx
+    refuses to even send a request whose ``hx-target`` matches nothing.
+    A list-shaped response would make Delete a dead button on the
+    dashboard — silently, since no request is sent to fail. The refresh
+    is the same deferred pattern ``queueDirty`` already uses for triage,
+    and it reads the active filter off the URL.
+
+    A refusal (a paired row, a reconciliation row) comes back as 422 with
+    the repo's own words, which base.html's htmx error listener shows as
+    an error toast.
+    """
+    try:
+        tomb = delete_transaction(conn, txn_id=txn_id, reason=reason)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return Response(
+        status_code=200,
+        headers={
+            "HX-Trigger": _hx_trigger_json(
+                "closeModal",
+                "listDirty",
+                toast_message=describe_tombstone(tomb),
+                deleted_id=txn_id,
+            )
+        },
+    )
 
 
 @router.post("/transactions/{txn_id}/edit", include_in_schema=False)

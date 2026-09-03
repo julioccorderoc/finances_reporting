@@ -1,11 +1,24 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Final
 
-from finances.domain.models import Transaction, TransactionKind
+from finances.domain.models import Tombstone, Transaction, TransactionKind
+
+# The cash CLI's ``source``. It lives here, not in ``ingest.cash_cli``,
+# because the repo has to know it (a cash delete leaves no tombstone,
+# ADR-022 §2.2) and ``ingest`` already depends on ``repos`` — the other
+# direction would be a cycle. ``cash_cli`` re-exports it.
+CASH_CLI_SOURCE: Final[str] = "cash_cli"
+
+# Sources whose rows are the ledger's own corrections (ADR-018, ADR-020).
+# They are restated by the module that wrote them, never deleted by hand.
+_UNDELETABLE_SOURCES: Final[frozenset[str]] = frozenset(
+    {"reconciliation", "opening_balance"}
+)
 
 
 class _Unset:
@@ -135,11 +148,27 @@ def get_by_source_ref(
     return _row_to_transaction(row) if row else None
 
 
+def is_tombstoned(conn: sqlite3.Connection, source: str, source_ref: str) -> bool:
+    """Has the owner deleted this ``(source, source_ref)`` (ADR-022)?"""
+    row = conn.execute(
+        "SELECT 1 FROM deleted_transactions WHERE source = ? AND source_ref = ?",
+        (source, source_ref),
+    ).fetchone()
+    return row is not None
+
+
 def upsert_by_source_ref(conn: sqlite3.Connection, txn: Transaction) -> dict[str, Any]:
     """Insert-or-update on (source, source_ref) per ADR-010.
 
-    Returns {"rows_inserted": 0|1, "rows_updated": 0|1, "id": int}. A second
-    identical call returns rows_inserted=0.
+    Returns {"rows_inserted": 0|1, "rows_updated": 0|1,
+    "rows_skipped_deleted": 0|1, "id": int|None}. A second identical call
+    returns rows_inserted=0.
+
+    A ``(source, source_ref)`` the owner deleted (ADR-022) is *retired*:
+    the row is skipped, ``rows_skipped_deleted`` is 1 and ``id`` is None.
+    This is the one place the rule needs to live — every importer and the
+    backfill (rule-004) enter the ledger through here, so a delete holds
+    against a re-import without any query elsewhere having to know.
 
     The UPDATE branch overwrites statement-sourced fields (amount,
     description, dates...) but PRESERVES enrichment the statement cannot
@@ -149,6 +178,14 @@ def upsert_by_source_ref(conn: sqlite3.Connection, txn: Transaction) -> dict[str
     """
     if txn.source_ref is None:
         raise ValueError("upsert_by_source_ref requires a non-null source_ref")
+
+    if is_tombstoned(conn, txn.source, txn.source_ref):
+        return {
+            "rows_inserted": 0,
+            "rows_updated": 0,
+            "rows_skipped_deleted": 1,
+            "id": None,
+        }
 
     existing = get_by_source_ref(conn, txn.source, txn.source_ref)
     params = (
@@ -219,8 +256,100 @@ def upsert_by_source_ref(conn: sqlite3.Connection, txn: Transaction) -> dict[str
     return {
         "rows_inserted": 0 if existing else 1,
         "rows_updated": 1 if existing else 0,
+        "rows_skipped_deleted": 0,
         "id": row_id,
     }
+
+
+def delete(
+    conn: sqlite3.Connection, transaction_id: int, *, reason: str | None = None
+) -> Tombstone:
+    """Remove a row and retire its ``(source, source_ref)`` (ADR-022).
+
+    A plain ``DELETE`` is not enough for anything an importer wrote: dedup
+    is keyed on the pair (rule-010), so the next ``finances update`` or
+    statement drop would insert the row again. The tombstone is what makes
+    "re-ingest same day = 0 new rows" survive a delete —
+    :func:`upsert_by_source_ref` skips a tombstoned pair.
+
+    Refused (ADR-022 §2.3):
+
+    * a **paired** row (``transfer_id`` set) — deleting one leg leaves an
+      orphan and breaks rule-002's sum-to-zero. The pair has to be broken
+      first, and no surface does that yet;
+    * rows the reconciliation engine wrote (``reconciliation``,
+      ``opening_balance``) — they are the ledger's own corrections, and
+      removing one by hand re-opens what it closed. Restate them through
+      their own module instead (ADR-018, ADR-020).
+
+    ``cash_cli`` rows are deleted **without** a tombstone (§2.2): nothing
+    re-ingests them, and two legitimately identical cash entries hash to
+    the same ref, so a tombstone would block the second one.
+
+    Returns the :class:`Tombstone` either way, so the caller can name what
+    it removed. The write is one savepoint — a savepoint, not ``BEGIN``,
+    because ingest callers are already inside a transaction and a nested
+    ``BEGIN`` would raise.
+    """
+    txn = get_by_id(conn, transaction_id)
+    if txn is None:
+        raise LookupError(f"transaction id={transaction_id} not found")
+
+    if txn.transfer_id is not None:
+        raise ValueError(
+            "This row is one half of a transfer — the pair has to be broken "
+            "first"
+        )
+    if txn.source in _UNDELETABLE_SOURCES:
+        raise ValueError(
+            f"a '{txn.source}' row is the ledger's own correction, not an "
+            "import: restate it through the module that wrote it "
+            "(ADR-018 / ADR-020), never by deleting it"
+        )
+
+    snapshot = txn.model_dump(mode="json")
+    deleted_at = datetime.now(tz=UTC)
+    # Cash carries no tombstone; neither does a row with no ref, which
+    # nothing could re-insert anyway (upsert_by_source_ref refuses a null).
+    tombstoned = txn.source != CASH_CLI_SOURCE and txn.source_ref is not None
+
+    conn.execute("SAVEPOINT delete_transaction")
+    try:
+        if tombstoned:
+            conn.execute(
+                """
+                INSERT INTO deleted_transactions
+                    (source, source_ref, deleted_at, reason, snapshot)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(source, source_ref) DO UPDATE SET
+                    deleted_at = excluded.deleted_at,
+                    reason     = excluded.reason,
+                    snapshot   = excluded.snapshot
+                """,
+                (
+                    txn.source,
+                    txn.source_ref,
+                    deleted_at.isoformat(),
+                    reason,
+                    json.dumps(snapshot),
+                ),
+            )
+        # transaction_edits cascades (migration 009): the edit history of a
+        # deleted row goes with it.
+        conn.execute("DELETE FROM transactions WHERE id = ?", (transaction_id,))
+    except Exception:
+        conn.execute("ROLLBACK TO delete_transaction")
+        conn.execute("RELEASE delete_transaction")
+        raise
+    conn.execute("RELEASE delete_transaction")
+
+    return Tombstone(
+        source=txn.source,
+        source_ref=txn.source_ref,
+        deleted_at=deleted_at,
+        reason=reason,
+        snapshot=snapshot,
+    )
 
 
 def list_by_account(
