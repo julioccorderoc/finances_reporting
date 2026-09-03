@@ -28,7 +28,7 @@ GROUPS = ("accounts", "kinds", "currencies", "sources")
 
 def _group(body: str, name: str) -> str:
     m = re.search(
-        rf'<details class="flow-dd"[^>]*data-filter-group="{name}"[^>]*>.*?</details>',
+        rf'<details\s+class="flow-dd"[^>]*data-filter-group="{name}"[^>]*>.*?</details>',
         body,
         re.S,
     )
@@ -60,7 +60,7 @@ def test_each_group_is_a_details_dropdown_with_the_same_checkboxes(
             group,
         ), name
         # Closed by default; closes on Escape and on a click elsewhere.
-        assert not re.search(r'<details class="flow-dd"[^>]*\sopen', group)
+        assert not re.search(r'<details\s+class="flow-dd"[^>]*\sopen[\s>]', group)
         assert "@click.outside" in group
         assert "@keydown.escape" in group
         # The summary text is kept live by Alpine after a change.
@@ -78,7 +78,7 @@ def test_summary_reads_any_the_one_value_or_a_count(
     for name in GROUPS:
         group = _group(none, name)
         assert _summary_text(group) == "Any"
-        assert "is-set" not in group
+        assert '<summary class="flow-input flow-dd-summary"' in group
 
     one = client.get("/transactions", params=[("accounts", "Provincial")]).text
     group = _group(one, "accounts")

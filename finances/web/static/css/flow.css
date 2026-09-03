@@ -10,9 +10,8 @@
  * .tmoney, .prov-*, .tlink, .ticon, .tcheck) come from triage.css and are
  * not redefined here.
  *
- * Three names on this surface are not `flow-` and are here on purpose:
+ * Two names on this surface are not `flow-` and are here on purpose:
  *   .cards--selectable   tests/web/test_bulk_ui.py pins the literal;
- *   .choice-chip(s)      tests/web/test_filters_polish.py pins the literal;
  *   .tx-modal-form       base.html's dirty guard queries `form.tx-modal-form`.
  * flow.css defines each so nothing here leans on app.css, which is being
  * swept. Rename them together with those tests, not before.
@@ -337,10 +336,11 @@ select.flow-input {
   background-size: 13px 13px;
 }
 
+/* The four multi-selects, one row of four (two under 720px). */
 .flow-filter-groups {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-3) var(--space-5);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
 }
 .flow-fieldset {
   min-width: 0;
@@ -351,53 +351,76 @@ select.flow-input {
 .flow-fieldset > legend {
   display: block;
   padding: 0;
-  margin: 0 0 6px;
+  margin: 0 0 5px;
 }
 
-/* Checkbox chips: the input stays in the DOM (native form serialisation,
- * keyboard) but is visually hidden; the sibling span is the chip.
- * Selection is grey — a red chip in a filter bar reads as an error. */
-.flow-filters .choice-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.flow-filters .choice-chip {
+/* Multi-select dropdowns: a native <details>. The summary is the house
+ * field reading "Any", the one value or "N selected", with the same
+ * chevron the selects beside it draw; the menu is a raised panel of
+ * house checkboxes. A set filter is a state — ink and medium — never the
+ * accent. */
+.flow-dd {
   position: relative;
-  cursor: pointer;
 }
-.flow-filters .choice-chip input[type="checkbox"] {
-  position: absolute;
-  opacity: 0;
-  width: 1px;
-  height: 1px;
-  margin: 0;
-}
-.flow-filters .choice-chip span {
-  display: inline-flex;
+.flow-dd-summary {
+  display: flex;
   align-items: center;
-  height: var(--control-sm);
-  padding: 0 10px;
-  background: var(--surface-raised);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-sm);
-  color: var(--text-secondary);
-  font-size: var(--caption-size);
+  padding-right: 26px;
+  list-style: none;
+  cursor: pointer;
   user-select: none;
-  transition: var(--transition-control);
+  color: var(--text-secondary);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236d6d69' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 7px center;
+  background-size: 13px 13px;
 }
-.flow-filters .choice-chip:hover span {
+.flow-dd-summary::-webkit-details-marker {
+  display: none;
+}
+.flow-dd[open] > .flow-dd-summary {
   border-color: var(--border-strong);
-  color: var(--text-primary);
 }
-.flow-filters .choice-chip input:checked + span {
-  background: var(--surface-selected);
-  border-color: var(--border-default);
+.flow-dd-summary.is-set {
   color: var(--text-primary);
   font-weight: var(--weight-medium);
 }
-.flow-filters .choice-chip input:focus-visible + span {
-  box-shadow: var(--focus-ring);
+.flow-dd-value {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.flow-dd-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  min-width: 100%;
+  max-height: 264px;
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+}
+.flow-dd-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 28px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--body-sm-size);
+  color: var(--text-primary);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.flow-dd-option:hover {
+  background: var(--surface-hover);
+}
+.flow-dd-option:has(input:checked) {
+  font-weight: var(--weight-medium);
 }
 
 .flow-filters-foot {

@@ -3,12 +3,47 @@
    filter state is shareable.
 
    A raised panel with a hairline; labels are eyebrows; the controls are
-   the house field (.flow-input, 32px, radius 2, red border on focus); the
-   multi-selects are checkbox chips whose selected state is grey. The
-   chip classes keep their pre-reskin names (`choice-chips`/`choice-chip`)
-   because tests/web/test_filters_polish.py pins the literals; flow.css
-   defines them under .flow-filters.
+   the house field (.flow-input, 32px, radius 2, red border on focus). The
+   four multi-selects are dropdowns (owner, 2026-09-03): a native
+   <details> whose summary is the house field reading "Any", the one value
+   or "N selected", over a raised menu of house checkboxes. The repeated
+   param contract (accounts=…&accounts=…) is unchanged. Styles: .flow-dd*
+   in static/css/flow.css.
 #}
+{%- macro dropdown(name, label, options, selected) -%}
+  {%- set n = selected | length -%}
+  {%- set text = 'Any' if n == 0 else (selected[0] if n == 1 else (n ~ ' selected')) -%}
+  <fieldset class="flow-fieldset">
+    <legend class="teyebrow">{{ label }}</legend>
+    {# Alpine keeps the summary honest after a change — the form is never
+       re-rendered by a list swap. x-init seeds it from the same boxes the
+       server checked, so the text never flashes. #}
+    <details
+      class="flow-dd"
+      data-filter-group="{{ name }}"
+      x-data="{
+        text: '',
+        sync() {
+          const on = Array.from(this.$el.querySelectorAll('input:checked'));
+          this.text = on.length === 0 ? 'Any' : (on.length === 1 ? on[0].value : on.length + ' selected');
+        }
+      }"
+      x-init="sync()"
+      @change="sync()"
+      @click.outside="$el.open = false"
+      @keydown.escape="$el.open = false"
+    >
+      <summary class="flow-input flow-dd-summary{% if n %} is-set{% endif %}" x-bind:class="{ 'is-set': text !== 'Any' }">
+        <span class="flow-dd-value" x-text="text">{{ text }}</span>
+      </summary>
+      <div class="flow-dd-menu" role="group" aria-label="{{ label }}">
+        {%- for opt in options %}
+        <label class="flow-dd-option"><input type="checkbox" class="tcheck" name="{{ name }}" value="{{ opt }}"{% if opt in selected %} checked{% endif %}><span>{{ opt }}</span></label>
+        {%- endfor %}
+      </div>
+    </details>
+  </fieldset>
+{%- endmacro -%}
 <form
   id="tx-filters"
   class="flow-filters"
@@ -68,46 +103,10 @@
   </div>
 
   <div class="flow-filter-groups">
-    {% if accounts_options %}
-      <fieldset class="flow-fieldset">
-        <legend class="teyebrow">Accounts</legend>
-        <div class="choice-chips">
-          {% for opt in accounts_options %}
-            <label class="choice-chip"><input type="checkbox" name="accounts" value="{{ opt }}"{% if opt in filter.accounts %} checked{% endif %}><span>{{ opt }}</span></label>
-          {% endfor %}
-        </div>
-      </fieldset>
-    {% endif %}
-    {% if kinds_options %}
-      <fieldset class="flow-fieldset">
-        <legend class="teyebrow">Kinds</legend>
-        <div class="choice-chips">
-          {% for opt in kinds_options %}
-            <label class="choice-chip"><input type="checkbox" name="kinds" value="{{ opt }}"{% if opt in filter.kinds %} checked{% endif %}><span>{{ opt }}</span></label>
-          {% endfor %}
-        </div>
-      </fieldset>
-    {% endif %}
-    {% if currencies_options %}
-      <fieldset class="flow-fieldset">
-        <legend class="teyebrow">Currencies</legend>
-        <div class="choice-chips">
-          {% for opt in currencies_options %}
-            <label class="choice-chip"><input type="checkbox" name="currencies" value="{{ opt }}"{% if opt in filter.currencies %} checked{% endif %}><span>{{ opt }}</span></label>
-          {% endfor %}
-        </div>
-      </fieldset>
-    {% endif %}
-    {% if sources_options %}
-      <fieldset class="flow-fieldset">
-        <legend class="teyebrow">Sources</legend>
-        <div class="choice-chips">
-          {% for opt in sources_options %}
-            <label class="choice-chip"><input type="checkbox" name="sources" value="{{ opt }}"{% if opt in filter.sources %} checked{% endif %}><span>{{ opt }}</span></label>
-          {% endfor %}
-        </div>
-      </fieldset>
-    {% endif %}
+    {% if accounts_options %}{{ dropdown("accounts", "Accounts", accounts_options, filter.accounts) }}{% endif %}
+    {% if kinds_options %}{{ dropdown("kinds", "Kinds", kinds_options, filter.kinds) }}{% endif %}
+    {% if currencies_options %}{{ dropdown("currencies", "Currencies", currencies_options, filter.currencies) }}{% endif %}
+    {% if sources_options %}{{ dropdown("sources", "Sources", sources_options, filter.sources) }}{% endif %}
   </div>
 
   {# Hidden fields preserve sort + direction across filter changes. #}
