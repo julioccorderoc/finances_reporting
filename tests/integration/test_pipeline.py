@@ -719,3 +719,48 @@ def test_deliberate_regression_orphan_leg_is_flagged(mocker: Any) -> None:
         )
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# ADR-022 — a deleted row must not come back with the next statement
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+def test_deleted_row_survives_a_reimport_of_the_same_statement() -> None:
+    """The invariant a delete would otherwise break.
+
+    Dedup is ``UNIQUE(source, source_ref)`` (rule-010): delete a row the
+    statement contains and the next import inserts it again, silently. The
+    tombstone (ADR-022 §2.2) retires the pair, so re-importing the very
+    same CSV inserts nothing and the row stays gone.
+    """
+    conn = _open_fresh_db()
+    try:
+        csv_path = _FIXTURE_DIR / "provincial.csv"
+        first = ingest_csv(conn, csv_path, run_pairing=False)
+        assert first.rows_inserted > 0
+        after_first = txn_repo.count(conn)
+
+        victim = conn.execute(
+            "SELECT id, source, source_ref FROM transactions"
+            " WHERE source = 'provincial' AND transfer_id IS NULL"
+            " ORDER BY id LIMIT 1"
+        ).fetchone()
+        tomb = txn_repo.delete(conn, victim["id"], reason="not mine")
+        assert tomb.source_ref == victim["source_ref"]
+        assert txn_repo.count(conn) == after_first - 1
+
+        second = ingest_csv(conn, csv_path, run_pairing=False)
+
+        assert second.rows_inserted == 0
+        assert second.rows_skipped_deleted == 1
+        assert txn_repo.count(conn) == after_first - 1
+        assert (
+            txn_repo.get_by_source_ref(
+                conn, victim["source"], victim["source_ref"]
+            )
+            is None
+        )
+    finally:
+        conn.close()
