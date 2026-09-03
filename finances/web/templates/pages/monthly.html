@@ -1,22 +1,14 @@
 {% extends "base.html" %}
 {% block title %}Monthly{% endblock %}
 {% block content %}
-{% from "_macros.html" import page_header %}
 {# Category × month pivot over the chosen range, reskinned inside the
    SIGNAL shell (2026-09). Same services, same endpoints, same structure:
    the kind tabs, the filter form, the chart and the CSS-grid pivot are
-   what they were. The pivot's own redesign is the next design track. #}
-{% set kind_label = {"expense": "Expense", "income": "Income", "net": "Net"}.get(filter.kind.value, filter.kind.value) %}
-{% set row_count = pivot.rows | length %}
-{% set month_count = pivot.months | length %}
-{% set meta %}
-  <span class="tbadge" data-kind-badge>{{ kind_label }}</span>
-  <span>
-    {%- if pivot.months %}{{ pivot.months[0] | fmt_month }} – {{ pivot.months[-1] | fmt_month }} · {% endif -%}
-    {{ row_count }} categor{{ 'y' if row_count == 1 else 'ies' }} · {{ month_count }} month{{ '' if month_count == 1 else 's' }}
-  </span>
-{% endset %}
-{{ page_header("Where did it go?", pivot.totals.grand_total_usd | fmt_usd, meta) }}
+   what they were. The pivot's own redesign is the next design track.
+
+   The header is a partial (monthly_header.html) so the pivot swap can
+   carry it out of band along with the chart. #}
+{% include "partials/monthly_header.html" %}
 
 <div class="rpt-toolbar">
   {% include "partials/monthly_kind_tabs.html" %}

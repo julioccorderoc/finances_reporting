@@ -149,7 +149,7 @@ def test_an_htmx_pivot_swap_carries_the_page_header_out_of_band(
         "/_partial/monthly/pivot", params={"range_preset": "3m"}, headers=HX
     ).text
 
-    header = re.search(r'<div id="monthly-header"[^>]*>.*?</div>\s*</div>', swapped, re.S)
+    header = re.search(r'<div id="monthly-header"[^>]*>.*?</header>\s*</div>', swapped, re.S)
     assert header, "the pivot swap carries no header twin"
     assert 'hx-swap-oob="true"' in header.group(0)
     pivot = build_pivot(seeded_web_db, MonthlyFilter(range_preset="3m"), today=date.today())

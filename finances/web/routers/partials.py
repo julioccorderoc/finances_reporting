@@ -258,11 +258,12 @@ def monthly_pivot_partial(
 ):
     """Return only the pivot fragment (filter / range / kind change swap).
 
-    An htmx request also gets the chart, out of band: the filter form
-    targets ``#monthly-pivot`` alone, and the chart above it went stale
-    after every range change. The full page includes the chart itself, so
-    the twin is only rendered when htmx asked — two elements with one id
-    is the bug the rail badge guard already names.
+    An htmx request also gets the page header and the chart, out of band:
+    the filter form targets ``#monthly-pivot`` alone, and the total, the
+    meta line and the chart above it went stale after every range change.
+    The full page includes both itself, so the twins are only rendered
+    when htmx asked — two elements with one id is the bug the rail badge
+    guard already names.
     """
     pivot = build_pivot(conn, f)
     templates = request.app.state.templates
@@ -274,6 +275,7 @@ def monthly_pivot_partial(
             "filter": f,
             "chart": build_chart(conn, f),
             "chart_oob": _is_htmx(request),
+            "header_oob": _is_htmx(request),
         },
     )
     _push_page_url(request, response, "/monthly")

@@ -1,0 +1,26 @@
+{# The /monthly page header: the question, THE one Doto figure of the
+   view (the range's grand total) and the meta line (kind, range,
+   category and month counts).
+
+   A partial rather than inline in pages/monthly.html because it has to
+   follow the filters: the filter form swaps only #monthly-pivot, so the
+   pivot partial carries this file as an out-of-band twin on htmx
+   requests (`header_oob`), exactly as it carries the chart. The full page
+   includes it once, without the attribute.
+
+   Context: pivot, filter; optional header_oob.
+#}
+{% from "_macros.html" import page_header %}
+{% set kind_label = {"expense": "Expense", "income": "Income", "net": "Net"}.get(filter.kind.value, filter.kind.value) %}
+{% set row_count = pivot.rows | length %}
+{% set month_count = pivot.months | length %}
+{% set meta %}
+  <span class="tbadge" data-kind-badge>{{ kind_label }}</span>
+  <span>
+    {%- if pivot.months %}{{ pivot.months[0] | fmt_month }} – {{ pivot.months[-1] | fmt_month }} · {% endif -%}
+    {{ row_count }} categor{{ 'y' if row_count == 1 else 'ies' }} · {{ month_count }} month{{ '' if month_count == 1 else 's' }}
+  </span>
+{% endset %}
+<div id="monthly-header"{% if header_oob is defined and header_oob %} hx-swap-oob="true"{% endif %}>
+  {{ page_header("Where did it go?", pivot.totals.grand_total_usd | fmt_usd, meta) }}
+</div>

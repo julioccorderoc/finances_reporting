@@ -53,9 +53,13 @@
     </div>
   {% endfor %}
 </section>
-{# The chart's out-of-band twin, only on an htmx swap: the filter form
-   targets this section alone, and the chart above it must follow the
-   same filters. The full page includes the chart itself. #}
+{# The header's and the chart's out-of-band twins, only on an htmx swap:
+   the filter form targets this section alone, and the total, the meta
+   line and the chart above it must follow the same filters. The full
+   page includes both itself. #}
+{% if header_oob is defined and header_oob %}
+  {% include "partials/monthly_header.html" %}
+{% endif %}
 {% if chart_oob is defined and chart_oob %}
   {% include "partials/monthly_chart.html" %}
 {% endif %}
