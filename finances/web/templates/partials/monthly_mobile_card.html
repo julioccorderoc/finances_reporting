@@ -13,7 +13,7 @@
       {%- if category.needs_review_count > 0 %}<span class="rpt-dot" title="{{ category.needs_review_count }} needs review"></span>{% endif %}
     </span>
     <span class="rpt-mcard-amount">
-      {{ category.total_usd | fmt_money }}
+      {{ category.total_usd | fmt_usd }}
       {%- if category.fallback_usd and category.fallback_usd != 0 %} <span class="rpt-bcv-note">+{{ category.fallback_usd | fmt_number }} bcv</span>{% endif %}
     </span>
   </div>

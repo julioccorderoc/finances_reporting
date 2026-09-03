@@ -35,7 +35,7 @@
        borrowed for it (rule-005). The em dash is the missing figure. #}
     <span class="rpt-account-usd is-unpriced" title="No USDT/{{ card.currency }} P2P median to price this balance; BCV is never used">Unpriced &mdash; no P2P rate</span>
     {%- else %}
-    <span class="rpt-account-usd">{{ card.balance_usdt | fmt_money }} USDT</span>
+    <span class="rpt-account-usd">{{ card.balance_usdt | fmt_usd }} USDT</span>
     {%- endif %}
   </div>
 </a>

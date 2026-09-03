@@ -2,8 +2,7 @@
 
    The Total tile stays INSIDE the swap target even though the page header
    above carries the same figure: a partial swap re-renders this section
-   and nothing above it. It keeps fmt_money's ASCII form, which the
-   formatting sweep pins.
+   and nothing above it. Same figure, same formatter (fmt_usd).
 #}
 {% from "_icons.html" import icon %}
 <section
@@ -36,7 +35,7 @@
   <div class="rpt-tile rpt-mobile-total">
     <span class="teyebrow">Total</span>
     <span class="rpt-figure">
-      {{ mobile.month_total_usd | fmt_money }}
+      {{ mobile.month_total_usd | fmt_usd }}
       {%- if mobile.month_fallback_usd and mobile.month_fallback_usd != 0 %}
         <span class="rpt-bcv-note">+{{ mobile.month_fallback_usd | fmt_number }} bcv</span>
       {%- endif %}

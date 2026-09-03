@@ -18,7 +18,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
 from finances.db.repos import accounts as accounts_repo
-from finances.format import fmt_money
+from finances.format import fmt_usd
 from finances.reports import monthly as monthly_report
 from finances.web.services.net_worth import (
     NetWorth,
@@ -83,9 +83,9 @@ def _net_worth_hint(conn: sqlite3.Connection, nw: NetWorth) -> str:
         elif kind in _CASH_KINDS:
             cash += c.contribution_usdt
     return (
-        f"Bank {fmt_money(bank)} · "
-        f"Crypto {fmt_money(crypto)} · "
-        f"Cash {fmt_money(cash)}"
+        f"Bank {fmt_usd(bank)} · "
+        f"Crypto {fmt_usd(crypto)} · "
+        f"Cash {fmt_usd(cash)}"
     )
 
 
@@ -97,7 +97,7 @@ def _build_net_worth_tile(conn: sqlite3.Connection, today: date) -> KpiTile:
         hint = f"{hint} — missing: {', '.join(nw.missing_pairs)}"
     return KpiTile(
         label="Net worth",
-        value=fmt_money(nw.total_usdt),
+        value=fmt_usd(nw.total_usdt),
         hint=hint,
         severity=severity,
     )
@@ -127,13 +127,13 @@ def _build_month_kind_tile(
     )
     hint_parts: list[str] = []
     if fallback != 0:
-        hint_parts.append(f"BCV-only fallback {fmt_money(fallback)}")
+        hint_parts.append(f"BCV-only fallback {fmt_usd(fallback)}")
     if needs_review:
         hint_parts.append(f"{needs_review} need review")
     hint = " · ".join(hint_parts) if hint_parts else None
     return KpiTile(
         label=label,
-        value=fmt_money(total),
+        value=fmt_usd(total),
         hint=hint,
     )
 
