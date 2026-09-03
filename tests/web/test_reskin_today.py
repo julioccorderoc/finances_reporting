@@ -165,7 +165,7 @@ def test_month_tiles_show_the_figures_as_the_data_says(
     no sign flip, and the string is the service's own."""
     _seed_flagged_rows(web_db, 1)
     kpis = build_kpis(web_db, today=datetime.now(tz=UTC).date())
-    assert kpis.month_spend.value.startswith("-$")
+    assert kpis.month_spend.value.startswith("−$")  # U+2212, fmt_usd
 
     body = _page(web_client_factory())
     spend = body.split('data-kpi="month_spend"', 1)[1].split("</article>", 1)[0]

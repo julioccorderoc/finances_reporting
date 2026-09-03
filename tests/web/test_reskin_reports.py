@@ -201,9 +201,10 @@ def test_monthly_mobile_answer_is_the_month_total(
     assert 'id="monthly-mobile"' in html
     assert html.count("data-mobile-card") == len(mobile.categories)
     assert html.count('class="rpt-mcard-bar"') == len(mobile.categories)
-    # The Total tile inside the swap target keeps the ASCII form the
-    # formatting sweep pins (fmt_money), so a partial swap stays truthful.
-    assert fmt_money(mobile.month_total_usd) in html
+    # The Total tile inside the swap target carries the same SIGNAL figure
+    # as the header (fmt_usd), so a partial swap stays truthful.
+    assert fmt_usd(mobile.month_total_usd) in html
+    assert fmt_money(mobile.month_total_usd) not in html
 
 
 def test_kind_tabs_keep_their_contract_as_ink_filled_tabs(
@@ -385,7 +386,7 @@ def test_ves_account_card_shows_bolivares_and_its_usdt_line(
     native = fmt_native(provincial.balance_native, "VES")
     assert native.startswith("Bs. ")
     assert f'<span class="rpt-account-native">{native}</span>' in card_html
-    assert f'<span class="rpt-account-usd">{fmt_money(provincial.balance_usdt)} USDT</span>' in card_html
+    assert f'<span class="rpt-account-usd">{fmt_usd(provincial.balance_usdt)} USDT</span>' in card_html
     assert '<span class="rpt-account-inst">Provincial</span>' in card_html
 
 

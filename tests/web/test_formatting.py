@@ -25,7 +25,7 @@ from finances.domain.models import (
     Transaction,
     TransactionKind,
 )
-from finances.format import fmt_date, fmt_money, fmt_month, fmt_number
+from finances.format import fmt_date, fmt_money, fmt_month, fmt_number, fmt_usd
 from finances.web.app import create_app
 from finances.web.settings import WebSettings
 
@@ -141,7 +141,8 @@ def test_mobile_month_nav_and_total_formatted(
     assert resp.status_code == 200
     body = resp.text
     assert "Jan 2024" in body                # centre month label via fmt_month
-    assert "-$2,345.67" in body              # month total via fmt_money
+    assert "−$2,345.67" in body              # month total via fmt_usd (U+2212)
+    assert "-$2,345.67" not in body          # no ASCII-hyphen twin left behind
     assert "$-2,345.67" not in body          # sign never after the symbol
 
 
@@ -191,7 +192,8 @@ def test_accounts_page_usd_sign_before_symbol(
     resp = client.get("/accounts")
     assert resp.status_code == 200
     body = resp.text
-    assert "-$1,234.56" in body      # balance_usdt via fmt_money
+    assert "−$1,234.56" in body      # balance_usdt via fmt_usd (U+2212)
+    assert "-$1,234.56" not in body
     assert "$-1,234.56" not in body
 
 
@@ -203,8 +205,11 @@ def test_accounts_page_usd_sign_before_symbol(
 def test_dashboard_money_is_shared_formatter() -> None:
     from finances.web.services import dashboard
 
-    # Single source of truth: no module-private formatter left behind.
-    assert dashboard.fmt_money is fmt_money
+    # Single source of truth: no module-private formatter left behind, and
+    # since the reskin the tiles use the SIGNAL figure (fmt_usd), not the
+    # ASCII-hyphen fmt_money.
+    assert dashboard.fmt_usd is fmt_usd
+    assert not hasattr(dashboard, "fmt_money")
     assert not hasattr(dashboard, "_format_money")
 
 
@@ -220,8 +225,11 @@ def test_kpi_tiles_sign_before_symbol_and_grouped(
         source_ref="fmt-kpi-1",
     )
     kpis = build_kpis(web_db, today=datetime.now(tz=UTC).date())
-    # >1M, negative, grouped, sign BEFORE the symbol.
-    assert kpis.month_spend.value == "-$1,234,567.89"
+    # >1M, negative, grouped, sign BEFORE the symbol — and U+2212.
+    assert kpis.month_spend.value == "−$1,234,567.89"
     for tile in (kpis.net_worth, kpis.month_spend, kpis.month_income):
         assert "$-" not in tile.value
+        assert "$−" not in tile.value
+        assert "-$" not in tile.value
         assert "$-" not in (tile.hint or "")
+        assert "-$" not in (tile.hint or "")
