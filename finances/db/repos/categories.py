@@ -90,11 +90,14 @@ def list_pickable(conn: sqlite3.Connection) -> list[Category]:
     re-deriving it, so "why is Fees in the list but not on a chip?" has a
     single answer in the data.
 
-    Transfer and adjustment categories are all ``auto_only`` and so never
-    come back here. That is deliberate for the triage picker, where a
-    transfer is confirmed as a *pair* rather than declared by tagging one
-    leg; :func:`list_for_kind` still offers them for the surfaces that
-    let the owner say "this moved, it was not spent".
+    Adjustment categories and ``Interest`` are ``auto_only`` and never
+    come back here. The two transfer categories DO, since migration 022
+    (owner decision 2026-09-03): a transfer-kind tag on an income or
+    expense row is the owner saying "this moved, it was not spent", the
+    write path has always accepted it, and money that enters
+    transitionally has to be filable from the queue. They stay
+    ``chip_eligible = 0`` so the pairing that writes ``Internal Transfer``
+    constantly never ranks it onto a number key.
     """
     rows = conn.execute(
         f"SELECT id, kind, name, active, {_PICKER_COLUMNS} FROM categories"

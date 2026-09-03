@@ -292,8 +292,11 @@
             /* And a kind the category can legally land on. The bulk
              * endpoint writes through the repo rather than apply_edit, so
              * it would happily file an income row under Fees; the count
-             * and the write agree here instead. */
-            return !kind || el.dataset.kind === kind;
+             * and the write agree here instead. A transfer-kind category
+             * is "moved, not spent" and fits any income or expense row
+             * (category_fits is asymmetric on purpose), so it never
+             * narrows the set. */
+            return !kind || kind === "transfer" || el.dataset.kind === kind;
           })
           .map(function (el) {
             return Number(el.dataset.txnId);

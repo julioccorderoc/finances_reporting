@@ -23,8 +23,8 @@ Three flags on `categories`, since migration 021:
 | Flag | Means |
 |---|---|
 | `active = 0` | **Retired.** Nothing new should land here. Never deleted — existing rows keep the id, and reviving one is a flag flip. |
-| `auto_only = 1` | **System-written.** Real rows land here constantly; a human just never chooses it. All transfer and adjustment kinds, plus `Interest`. |
-| `chip_eligible = 0` | Pickable, but kept off the eight numbered chips — its usage count reflects rules, not choices. `Fees` only. |
+| `auto_only = 1` | **System-written.** Real rows land here constantly; a human just never chooses it. The adjustment kinds, plus `Interest`. (The two transfer categories left this set in migration 022.) |
+| `chip_eligible = 0` | Pickable, but kept off the eight numbered chips — its usage count reflects rules or pairing, not choices. `Fees`, and since 022 the two transfer categories. |
 
 **Pickable = `active = 1 AND auto_only = 0`.** A chip additionally needs
 `chip_eligible = 1`.
@@ -61,13 +61,27 @@ Three flags on `categories`, since migration 021:
 | **Other Income** | Everything else. |
 | **Interest** | Binance Earn rewards. **Auto-only** — `auto_only = 1` (migration 021); still `active = 0` from migration 011 until the Wave 2 picker cutover. Not retired: rows land here every day. |
 
-## Transfer + adjustment — never picked by hand
+## Transfer
+
+Pickable by hand since migration 022 (owner decision 2026-09-03), under
+the picker's third group, **Moved, not spent**, and never on a numbered
+chip. A transfer-kind category on an income or expense row is you saying
+the money moved rather than being earned or spent: `finances.domain.money`
+excludes such rows from every spending and income figure, and the row's
+`kind` stays what the bank said — it is the audit trail. A properly paired
+transfer (shared `transfer_id`, rule-002) needs no tag at all; Triage
+confirms those as pairs.
+
+| Category | Test |
+|---|---|
+| **External Transfer** | Money passing through to or from someone else that is neither income nor spending: a deposit you forward on, money you hold for someone, an outbound transfer that is not a purchase. |
+| **Internal Transfer** | Between your own accounts when the other leg is not in the ledger: an ATM withdrawal to cash, a top-up from an account the ledger does not track. When both legs are here, confirm the pair instead. |
+
+## Adjustment — system-written only
 
 | Category | Meaning |
 |---|---|
-| **Internal Transfer** | Between the owner's own accounts. Double-entry, shared `transfer_id`, sums to zero (rule-002). |
-| **External Transfer** | Money leaving to a third party that is *not* spending. |
-| **FX Diff** / **Reconciliation** | System-written only (EPIC-006). |
+| **FX Diff** / **Reconciliation** | System-written only (EPIC-006). Never picked by hand. |
 
 ## Edge rulings
 
@@ -114,3 +128,8 @@ is a flag flip.
 - **018** — `Fees` pickable again (reversal cleanup, ADR-019).
 - **021** — `auto_only` / `chip_eligible` / `icon` added, so `active` stops
   carrying three meanings at once. `Clothing` retired into `Purchases`.
+- **022** — `Internal Transfer` / `External Transfer` pickable again, from
+  the list only, never a chip. Owner decision 2026-09-03: money that moves
+  transitionally has to be taggable from the queue; the write path had
+  always accepted it. Their tests moved into the `## Transfer` table above,
+  which the picker now reads like the other two.

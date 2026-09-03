@@ -6,6 +6,31 @@ a place the shipped code deliberately does something other than what
 
 ---
 
+## 2026-09-03 — the transfer categories are offered again (reverses a Wave 2 note)
+
+**Deviation, owner-decided.** Wave 2 recorded *"Transfer categories are not
+offered by the new picker"*: `Internal Transfer` / `External Transfer` were
+`auto_only`, on the reasoning that a transfer is confirmed as a pair, never
+declared by tagging one leg. The owner's ledger has rows the pairing can
+never reach — money that enters or leaves transitionally, a withdrawal to
+cash whose other leg is not in the ledger — and they are neither income nor
+spending. The write path had always accepted the tag (`category_fits` is
+asymmetric on purpose, and `finances.domain.money` acts on it); the picker
+was the only surface refusing it.
+
+Migration 022 flips the two back to `auto_only = 0`, `chip_eligible = 0`.
+The picker scopes them onto every income and expense row as a third group,
+`MOVED, NOT SPENT`, after `EXPENSE` and `INCOME`; they never rank onto a
+numbered chip; the bulk sheet's kind filter lets a movement pick land on any
+selected row. Adjustment categories and `Interest` stay system-written. The
+row's `kind` is untouched — it is the audit trail — and a properly paired
+transfer still needs no tag. Their disambiguating sentences come from the
+doc's new `## Transfer` table, machine-read like the other two.
+
+Left open, on purpose: money someone lends the owner (and its repayment)
+still has no category. That is a taxonomy decision, not a picker one; a
+prompt for it lives at `docs/plans/2026-09-03-borrowed-money-prompt.md`.
+
 ## Wave 3 — accessibility, cleanup, and the criteria walk
 
 Built 2026-08-23. Three new deviations, and the report they came out of is

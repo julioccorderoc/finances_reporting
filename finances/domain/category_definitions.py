@@ -13,10 +13,11 @@ So the sentences are parsed out of the doc and cached for the process
 
     | **Groceries** | Food consumed at home. Supermarkets, ... |
 
-Only the ``## Expense`` and ``## Income`` sections are read. The
-transfer/adjustment table lists *meanings* for categories no human ever
-picks, and its rows name two categories at once — nothing in a picker
-needs it.
+The ``## Expense``, ``## Income`` and ``## Transfer`` sections are read
+(the third since migration 022 made the two transfer categories
+pickable). The adjustment table lists *meanings* for categories no human
+ever picks, and its one row names two categories at once — nothing in a
+picker needs it.
 """
 
 from __future__ import annotations
@@ -31,8 +32,9 @@ from finances.config import PROJECT_ROOT
 DEFINITIONS_PATH = PROJECT_ROOT / "docs" / "architecture" / "category-definitions.md"
 
 #: Sections whose tables define a pickable category. Anything else in the
-#: file (history, edge rulings, the retired table) is prose for humans.
-_PICKABLE_SECTIONS = ("Expense", "Income")
+#: file (history, edge rulings, the adjustment and retired tables) is prose
+#: for humans.
+_PICKABLE_SECTIONS = ("Expense", "Income", "Transfer")
 
 _HEADING_RE = re.compile(r"^##\s+(?P<title>.+?)\s*$")
 _ROW_RE = re.compile(r"^\|\s*\*\*(?P<name>[^*|]+)\*\*\s*\|\s*(?P<test>.+?)\s*\|\s*$")

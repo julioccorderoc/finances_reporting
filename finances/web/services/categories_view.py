@@ -31,11 +31,21 @@ from pydantic import BaseModel, ConfigDict
 from finances.db.repos import categories as categories_repo
 from finances.domain.models import TransactionKind
 from finances.domain.category_definitions import definition_for
+from finances.domain.money import MOVEMENT_CATEGORY_KIND
 from finances.web.services.category_stats import top_categories
 
-#: Group order in the expanded list. Transfer and adjustment kinds are
-#: ``auto_only`` and never reach the picker, so two groups is the whole set.
-GROUP_ORDER = ("expense", "income")
+#: Group order in the expanded list, and the eyebrow each group wears.
+#: The transfer group is last and is worded as what it means to the owner:
+#: a transfer-kind category on an income or expense row says the money
+#: moved rather than being earned or spent (``finances.domain.money``).
+#: Pickable since migration 022; never on a chip. Adjustment kinds are
+#: ``auto_only`` and never reach the picker.
+GROUP_ORDER = ("expense", "income", "transfer")
+GROUP_LABELS = {
+    "expense": "EXPENSE",
+    "income": "INCOME",
+    "transfer": "MOVED, NOT SPENT",
+}
 
 CHIP_COUNT = 8
 USAGE_MONTHS = 12
@@ -85,6 +95,19 @@ class PickerPayload(BaseModel):
     other_count: int
 
 
+def _in_scope(category, kind: TransactionKind | None) -> bool:
+    """Whether ``category`` may be offered on a row of ``kind``.
+
+    The same predicate as ``transactions_write.category_fits``, so the
+    picker never offers what the save would refuse: the row's own kind,
+    or a movement (transfer-kind) category, which fits any income or
+    expense row. ``None`` (the bulk sheet) takes everything pickable.
+    """
+    if kind is None:
+        return True
+    return category.kind is kind or category.kind is MOVEMENT_CATEGORY_KIND
+
+
 def _to_picker_category(category) -> PickerCategory:
     assert category.id is not None
     return PickerCategory(
@@ -114,6 +137,8 @@ def picker_payload(
     the ledger had accumulated 65 such contradictions, six of them income
     rows filed under ``Fees``. An unscoped picker on an expense row would
     put ``Salary`` on keyboard shortcut 2: a 422 waiting for a keystroke.
+    The scope mirrors that guard exactly (:func:`_in_scope`): the row's
+    own kind, plus the transfer-kind categories it accepts on any row.
     The bulk sheet passes ``None``, having no single row to scope to.
 
     Every count in the payload describes the SCOPED set, so "Search 17
@@ -126,10 +151,13 @@ def picker_payload(
     pickable = [
         _to_picker_category(c)
         for c in categories_repo.list_pickable(conn)
-        if kind is None or c.kind is kind
+        if _in_scope(c, kind)
     ]
     by_id = {c.id: c for c in pickable}
 
+    # Chips stay scoped to the row's own kind: ``chips_only`` also drops
+    # everything with ``chip_eligible = 0``, which is how a movement
+    # category never ranks onto a number key.
     ranked = top_categories(
         conn, kind=kind, limit=chip_count, months=months, chips_only=True, today=today
     )
@@ -141,11 +169,11 @@ def picker_payload(
 
     groups = tuple(
         PickerGroup(
-            kind=kind,
-            label=kind.upper(),
-            categories=tuple(c for c in pickable if c.kind == kind),
+            kind=group_kind,
+            label=GROUP_LABELS[group_kind],
+            categories=tuple(c for c in pickable if c.kind == group_kind),
         )
-        for kind in GROUP_ORDER
+        for group_kind in GROUP_ORDER
     )
 
     return PickerPayload(

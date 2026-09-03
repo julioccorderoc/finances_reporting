@@ -170,11 +170,16 @@ def test_every_seeded_icon_is_one_the_macro_can_draw(
 
 
 def test_clothing_rows_fold_into_purchases(tmp_path: Path) -> None:
-    """Applied to a DB that already holds Clothing rows, 021 moves them."""
+    """Applied to a DB that already holds Clothing rows, 021 moves them.
+
+    Stages the pre-021 chain only: anything after 021 assumes its columns
+    exist (022 flips ``auto_only``), so "everything except 021" stopped
+    being the pre-021 state the day a later migration landed.
+    """
     staged = tmp_path / "migrations"
     staged.mkdir()
     for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
-        if path.name.startswith("021_"):
+        if path.name >= "021_":
             continue
         shutil.copy(path, staged / path.name)
 
