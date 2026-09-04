@@ -59,6 +59,17 @@ def test_parses_the_transfer_table_too() -> None:
     assert "Reconciliation" not in tests
 
 
+def test_borrowed_has_a_sentence_that_separates_it_from_the_neighbours() -> None:
+    """Migration 025's category is only useful if the picker can tell the
+    owner which of the three movement categories he is looking at, and
+    which way the money is owed."""
+    borrowed = category_tests()["Borrowed"]
+
+    assert "lent" in borrowed.lower()
+    # It must name the mirror image it is NOT: money he lends out.
+    assert "Lending" in borrowed
+
+
 def test_strips_markdown_emphasis_from_the_sentence() -> None:
     leisure = category_tests()["Leisure"]
     assert "**" not in leisure

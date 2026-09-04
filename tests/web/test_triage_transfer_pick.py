@@ -51,7 +51,9 @@ def test_an_expense_row_is_offered_both_transfer_categories(
         m.group(1)
         for m in re.finditer(r'data-label="([^"]+)"[^>]*data-kind="transfer"', modal)
     }
-    assert labels == {"Internal Transfer", "External Transfer"}
+    # Borrowed joined them in migration 025 (owner decision 2026-09-04):
+    # money lent TO him, and what he pays back, are movement too.
+    assert labels == {"Internal Transfer", "External Transfer", "Borrowed"}
     # Still scoped: no income category leaks onto an expense row.
     assert _rows(modal, "income") == []
 

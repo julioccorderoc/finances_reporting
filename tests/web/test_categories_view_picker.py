@@ -167,6 +167,7 @@ def test_groups_are_expense_then_income_then_moved(
     assert "Groceries" in [c.label for c in expense.categories]
     assert "Salary" in [c.label for c in income.categories]
     assert [c.label for c in moved.categories] == [
+        "Borrowed",
         "External Transfer",
         "Internal Transfer",
     ]

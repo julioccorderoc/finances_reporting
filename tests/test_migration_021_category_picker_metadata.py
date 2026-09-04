@@ -100,12 +100,14 @@ def test_fees_is_pickable_but_never_a_chip(migrated_db: sqlite3.Connection) -> N
 def test_the_chip_exclusions_are_fees_and_the_two_transfers(
     migrated_db: sqlite3.Connection,
 ) -> None:
-    """021 excluded Fees; 022 added the transfer categories, which are
-    pickable from the list but must never rank onto a numbered key."""
+    """021 excluded Fees; 022 added the transfer categories and 025
+    `Borrowed`, all pickable from the list but never ranking onto a
+    numbered key."""
     rows = migrated_db.execute(
         "SELECT name FROM categories WHERE chip_eligible = 0 ORDER BY name"
     ).fetchall()
     assert [r["name"] for r in rows] == [
+        "Borrowed",
         "External Transfer",
         "Fees",
         "Internal Transfer",
