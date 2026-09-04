@@ -26,7 +26,12 @@ from finances.web.services.transactions_query import (
     _row_to_transaction,
 )
 
+# What the wrong-side row would have to be. A sell is looking for money
+# arriving in the bank, a buy for money leaving it — so the reason has to
+# name the side being looked for, or the picker tells the owner a deposit
+# is "not a deposit".
 _SAME_SIGN_REASON = "same sign — not a deposit"
+_SAME_SIGN_REASON_BUY = "same sign — not a debit"
 
 # Both income and expense kinds are returned deliberately: a deposit
 # recorded under the wrong kind must stay visible to the human, who is
@@ -124,13 +129,14 @@ def find_pair_candidates(
         # rejects a pair that shares one. Surface that up front instead of
         # letting the click 422.
         pairable = (txn.amount < 0) != sell_is_negative
+        blocked = _SAME_SIGN_REASON if sell_is_negative else _SAME_SIGN_REASON_BUY
 
         candidates.append(
             PairCandidate(
                 card=card,
                 drift_ratio=drift,
                 pairable=pairable,
-                blocked_reason=None if pairable else _SAME_SIGN_REASON,
+                blocked_reason=None if pairable else blocked,
             )
         )
 

@@ -140,6 +140,9 @@ def test_a_deposit_cannot_be_the_other_leg_of_a_buy(
     by_ref = {c.card.description: c for c in result.candidates}
     assert by_ref["debit-exact"].pairable is True
     assert by_ref["dep-wrong-side"].pairable is False
+    # The reason is on screen next to a row the owner can see: calling a
+    # deposit "not a deposit" is the picker arguing with itself.
+    assert by_ref["dep-wrong-side"].blocked_reason == "same sign — not a debit"
 
 
 # ---------------------------------------------------------------------------
