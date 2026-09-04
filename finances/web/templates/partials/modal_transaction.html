@@ -106,10 +106,15 @@
         </dl>
       </section>
 
-      {# 3. Manual pairing — unpaired outgoing Binance rows only. -------- #}
-      {% if txn.transfer_id is none and txn.source == 'binance' and txn.amount < 0 %}
+      {# 3. Manual pairing — unpaired Binance rows, either direction.
+            A sell (money out) looks for the deposit that paid for it; a buy
+            (money in) looks for the debit that bought it. An incoming row
+            with no user_rate is not a P2P trade at all — an ordinary
+            deposit, an Earn move — so it is offered nothing to pair with. #}
+      {% if txn.transfer_id is none and txn.source == 'binance'
+            and (txn.amount < 0 or txn.user_rate is not none) %}
       <section class="flow-modal-section">
-        <span class="teyebrow">Pair with deposit</span>
+        <span class="teyebrow">Pair with {% if txn.amount < 0 %}deposit{% else %}debit{% endif %}</span>
         <div
           hx-get="/_partial/transactions/{{ txn.id }}/pair-candidates"
           hx-trigger="load"

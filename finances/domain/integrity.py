@@ -536,6 +536,25 @@ CHECKS: tuple[IntegrityCheck, ...] = (
              ORDER BY sell.id
         """,
     ),
+    IntegrityCheck(
+        name="stale_pair_pre_image",
+        severity=Severity.ERROR,
+        description=(
+            "Pre-images (migration 024) describing a pairing the row is no "
+            "longer in. transfers.unpair consumes the pre-image as it "
+            "breaks a pair, so one left behind means the pair was broken "
+            "some other way — and the next unpair of this row would restore "
+            "it to a kind and a rate it had in another life."
+        ),
+        sql="""
+            SELECT p.transaction_id AS id
+              FROM transfer_pairings AS p
+              JOIN transactions AS t ON t.id = p.transaction_id
+             WHERE t.transfer_id IS NULL
+                OR t.transfer_id <> p.transfer_id
+             ORDER BY p.transaction_id
+        """,
+    ),
 )
 
 

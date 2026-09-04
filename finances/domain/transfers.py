@@ -63,6 +63,33 @@ SQL_BINANCE_CANDIDATES = """
     ORDER BY occurred_at ASC, id ASC
 """
 
+# The same movement read backwards: buying USDT debits the bank and credits
+# the exchange. Mirrors SQL_BANK_DEPOSITS sign for sign — an unpaired bank
+# row with money leaving.
+SQL_BANK_DEBITS = """
+    SELECT id, account_id, occurred_at, amount, currency
+    FROM transactions
+    WHERE source = :bank_source
+      AND kind = 'expense'
+      AND transfer_id IS NULL
+      AND CAST(amount AS REAL) < 0
+    ORDER BY occurred_at ASC, id ASC
+"""
+
+# ... and the exchange half of it. Same kind breadth and same user_rate
+# requirement as the sell query, sign reversed: without a rate there is
+# nothing to convert the dollars into bolivars with, so nothing to score.
+SQL_BINANCE_BUY_CANDIDATES = """
+    SELECT id, account_id, occurred_at, amount, currency, user_rate, description
+    FROM transactions
+    WHERE source = :binance_source
+      AND kind IN ('expense', 'income', 'transfer')
+      AND transfer_id IS NULL
+      AND CAST(amount AS REAL) > 0
+      AND user_rate IS NOT NULL
+    ORDER BY occurred_at ASC, id ASC
+"""
+
 # The fiat a P2P order was priced in survives only in the description that
 # ``finances.ingest.binance`` writes:
 #
@@ -744,12 +771,24 @@ def find_unreconciled(conn: sqlite3.Connection) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 class BankAnchoredP2pPairing:
-    """Strategy: pair a bank P2P deposit with the Binance-side sell.
+    """Strategy: pair a bank P2P row with the Binance side of the trade.
 
-    A bank row (income, positive amount) and a Binance row (negative
-    amount, non-null ``user_rate``) whose dates are within
-    ±``window_days`` are eligible when the bolivar-equivalents agree
-    within ``amount_tolerance_ratio``.
+    Both directions, because a P2P trade has two:
+
+    * **sell** — a bank deposit (income, positive) against a Binance row
+      with a negative amount and a non-null ``user_rate``;
+    * **buy** — a bank debit (expense, negative) against a Binance row with
+      a positive amount and a rate. Money leaving the bank, USDT arriving.
+
+    Dates must be within ±``window_days`` and the bolivar-equivalents must
+    agree within ``amount_tolerance_ratio``. Signs keep the directions
+    apart on their own: ``create_transfer`` refuses a same-sign pair, so a
+    deposit is never scored against a buy.
+
+    The buy direction landed 2026-09-04. Until then the two ``P2P BUY
+    USDT @`` rows in the ledger could not be paired by any path — not by
+    this strategy, not by the manual picker — and each read as income the
+    owner never earned.
 
     Every eligible (deposit, sell) pair is scored, then claimed greedily
     in order of *closest date, then tightest drift, then id* — a global
@@ -791,34 +830,48 @@ class BankAnchoredP2pPairing:
         self._amount_tolerance_ratio = amount_tolerance_ratio
 
     def match(self) -> list[MatchProposal]:
-        bank_rows = self._conn.execute(
-            SQL_BANK_DEPOSITS,
-            {"bank_source": self._bank_source},
-        ).fetchall()
-        sell_rows = self._conn.execute(
-            SQL_BINANCE_CANDIDATES,
-            {"binance_source": self._binance_source},
-        ).fetchall()
-
-        scored = self._score_candidates(bank_rows, sell_rows)
+        params = {
+            "bank_source": self._bank_source,
+            "binance_source": self._binance_source,
+        }
+        # Two directions, one assignment. A sell is money arriving in the
+        # bank; a buy is money leaving it. Signs are what keep them apart:
+        # create_transfer infers the from/to leg from them and refuses a
+        # same-sign pair, so a deposit can never be scored against a buy.
+        scored = self._score_candidates(
+            self._conn.execute(SQL_BANK_DEPOSITS, params).fetchall(),
+            self._conn.execute(SQL_BINANCE_CANDIDATES, params).fetchall(),
+            direction="sell",
+        ) + self._score_candidates(
+            self._conn.execute(SQL_BANK_DEBITS, params).fetchall(),
+            self._conn.execute(SQL_BINANCE_BUY_CANDIDATES, params).fetchall(),
+            direction="buy",
+        )
+        scored.sort()
 
         # Claim greedily down the sorted list. Because the sort key ends in
-        # (sell id, bank id) the assignment is total-ordered, so identical
-        # inputs always produce an identical result.
+        # (exchange id, bank id) the assignment is total-ordered, so identical
+        # inputs always produce an identical result. The claimed sets are
+        # shared across both directions: a row belongs to at most one pair,
+        # whichever way the money went.
         used_banks: set[int] = set()
-        used_sells: set[int] = set()
+        used_exchange: set[int] = set()
         proposals: list[MatchProposal] = []
-        for _gap, _drift, sell_id, bank_id in scored:
-            if bank_id in used_banks or sell_id in used_sells:
+        for _gap, _drift, exchange_id, bank_id, direction in scored:
+            if bank_id in used_banks or exchange_id in used_exchange:
                 continue
             used_banks.add(bank_id)
-            used_sells.add(sell_id)
+            used_exchange.add(exchange_id)
             proposals.append(
                 MatchProposal(
                     strategy=self.name,
                     details={
                         "bank_transaction_id": bank_id,
-                        "binance_transaction_id": sell_id,
+                        "binance_transaction_id": exchange_id,
+                        # Which way the money went. A report that cannot tell
+                        # a buy from a sell reads as if the pairer did the
+                        # same thing twice.
+                        "direction": direction,
                     },
                 )
             )
@@ -828,39 +881,52 @@ class BankAnchoredP2pPairing:
     def _score_candidates(
         self,
         bank_rows: list[sqlite3.Row],
-        sell_rows: list[sqlite3.Row],
-    ) -> list[tuple[int, Decimal, int, int]]:
-        """Every eligible (deposit, sell) pairing, best fit first.
+        exchange_rows: list[sqlite3.Row],
+        *,
+        direction: str = "sell",
+    ) -> list[tuple[int, Decimal, int, int, str]]:
+        """Every eligible (bank row, exchange row) pairing, best fit first.
 
-        Sorted by day gap, then drift ratio, then sell id, then bank id.
+        Sorted by day gap, then drift ratio, then exchange id, then bank id.
+        Amounts are compared in magnitude, so the arithmetic is the same
+        whichever way the money went: the caller decides that by which two
+        row sets it hands in.
         """
-        scored: list[tuple[int, Decimal, int, int]] = []
+        scored: list[tuple[int, Decimal, int, int, str]] = []
 
         for bank in bank_rows:
-            bank_amount = _to_decimal(bank["amount"])
+            bank_amount = abs(_to_decimal(bank["amount"]))
             if bank_amount == 0:
                 continue
             bank_day = self._parse_datetime(bank["occurred_at"]).date()
             bank_currency = bank["currency"]
 
-            for sell in sell_rows:
-                rate = _to_decimal_or_none(sell["user_rate"])
+            for trade in exchange_rows:
+                rate = _to_decimal_or_none(trade["user_rate"])
                 if rate is None or rate <= 0:
                     continue
-                if not self._fiat_is_compatible(sell["description"], bank_currency):
+                if not self._fiat_is_compatible(trade["description"], bank_currency):
                     continue
 
-                sell_day = self._parse_datetime(sell["occurred_at"]).date()
-                day_gap = self._day_gap(bank_day, sell_day)
+                trade_day = self._parse_datetime(trade["occurred_at"]).date()
+                day_gap = self._day_gap(bank_day, trade_day)
                 if day_gap > self._window_days:
                     continue
 
-                expected = abs(_to_decimal(sell["amount"])) * rate
+                expected = abs(_to_decimal(trade["amount"])) * rate
                 drift_ratio = abs(bank_amount - expected) / bank_amount
                 if drift_ratio > self._amount_tolerance_ratio:
                     continue
 
-                scored.append((day_gap, drift_ratio, int(sell["id"]), int(bank["id"])))
+                scored.append(
+                    (
+                        day_gap,
+                        drift_ratio,
+                        int(trade["id"]),
+                        int(bank["id"]),
+                        direction,
+                    )
+                )
 
         scored.sort()
         return scored
