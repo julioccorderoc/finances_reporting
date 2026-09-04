@@ -166,6 +166,12 @@
 
           </form>
         {% endif %}
+
+        {# Where «Became cash» reveals its one field. Deliberately outside
+           #triage-decision-form: the panel carries a form of its own, and a
+           browser drops a nested one silently — the Record button would
+           post nothing with every server-side test still green. #}
+        <div id="became-cash-host"></div>
       </div>
     </div>
 
@@ -179,6 +185,18 @@
               hx-swap="innerHTML"
               {% else %}disabled{% endif %}
       >{{ icon("archive", 16) }}Park</button>
+      {# The other answer to "what was this for?" — nothing, it left the
+         ledger as bills. Reveals a field rather than acting on click: the
+         number it needs is one the owner is recalling, not confirming. #}
+      {% if can_become_cash %}
+      <button type="button"
+              class="tbtn tbtn-ghost"
+              data-became-cash-btn
+              hx-get="/_partial/triage/{{ card.id }}/became-cash"
+              hx-target="#became-cash-host"
+              hx-swap="innerHTML"
+      >Became cash…</button>
+      {% endif %}
       <span class="tmodal-legend">
         <kbd>←→</kbd> move · <kbd>↵</kbd> save · <kbd>esc</kbd> close
       </span>

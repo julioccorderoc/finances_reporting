@@ -39,7 +39,7 @@ from finances.db.repos import categories as categories_repo
 from finances.db.repos import transaction_edits as transaction_edits_repo
 from finances.db.repos import transactions as transactions_repo
 from finances.domain import cash_conversion, transfers, triage_admin
-from finances.domain.models import TransactionKind
+from finances.domain.models import Transaction, TransactionKind
 from finances.config import CARACAS_TZ
 from finances.format import fmt_date, fmt_number
 from finances.web.deps import dismissed_pairs as _dismissed_pairs, get_conn
@@ -614,6 +614,9 @@ def transactions_became_cash_panel(
         {
             "txn": txn,
             "suggested_usd": cash_conversion_view.suggested_usd(conn, txn),
+            "post_url": f"/_partial/transactions/{txn_id}/became-cash",
+            "hx_target": "this",
+            "hx_swap": "none",
         },
     )
 
@@ -1329,6 +1332,11 @@ def _render_modal(
                 conn, kind=txn.kind if txn is not None else None
             ),
             "day_rates": day_rates,
+            # Only a real row can have become cash: a pair item's subject
+            # is a proposal, not a single row with an other side to name.
+            "can_become_cash": (
+                txn is not None and cash_conversion_view.can_convert(conn, txn)
+            ),
         },
     )
 
@@ -1355,6 +1363,32 @@ def triage_pair_modal_partial(
 ):
     """Open the run on a proposed — or manually chosen — pair."""
     return _render_modal(request, conn, f"pair:{deposit_id}:{sell_id}")
+
+
+def _convertible_or_refuse(
+    conn: sqlite3.Connection, txn_id: int
+) -> Transaction:
+    """The row, or the reason it cannot have become cash.
+
+    Both triage routes check before doing anything: the hidden button is a
+    courtesy, and a crafted POST never sees a template. Same predicate the
+    Flow routes use, so the two surfaces cannot disagree about what is
+    convertible.
+    """
+    txn = transactions_repo.get_by_id(conn, txn_id)
+    if txn is None:
+        raise HTTPException(
+            status_code=404, detail=f"transaction id={txn_id} not found"
+        )
+    if not cash_conversion_view.can_convert(conn, txn):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "this row cannot have become cash: it is money arriving, "
+                "already paired, or already cash"
+            ),
+        )
+    return txn
 
 
 def _advance_after_write(
@@ -1578,6 +1612,76 @@ def _set_parked(
         )
 
     transactions_repo.update(conn, id=txn_id, parked=parked)
+
+
+@router.get("/triage/{txn_id}/became-cash", include_in_schema=False)
+def triage_became_cash_panel(
+    request: Request,
+    txn_id: int,
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """The same one-field panel Flow reveals, wired to the run.
+
+    Only the panel's post target differs from
+    :func:`transactions_became_cash_panel` — the question it asks is the
+    same one, so it is the same template and the same guard.
+    """
+    txn = _convertible_or_refuse(conn, txn_id)
+
+    templates = request.app.state.templates
+    return templates.TemplateResponse(
+        request,
+        "partials/became_cash_panel.html",
+        {
+            "txn": txn,
+            "suggested_usd": cash_conversion_view.suggested_usd(conn, txn),
+            "post_url": f"/_partial/triage/{txn_id}/became-cash",
+            "hx_target": "#triage-modal-host",
+            "hx_swap": "innerHTML",
+        },
+    )
+
+
+@router.post("/triage/{txn_id}/became-cash", include_in_schema=False)
+def triage_became_cash(
+    request: Request,
+    txn_id: int,
+    usd_received: str = Form(...),
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Record the conversion, then advance — this is a triage decision.
+
+    The write is the Flow route's write, unchanged. The answer is not:
+    saying "this became cash" resolves the row the same way sorting it
+    does, so the run must hand back the next dialog rather than closing
+    on the owner mid-sitting.
+    """
+    _convertible_or_refuse(conn, txn_id)
+    before = _queue_items(request, conn)
+
+    try:
+        amount = Decimal(usd_received)
+    except InvalidOperation as exc:
+        raise HTTPException(
+            status_code=422, detail=f"{usd_received!r} is not an amount"
+        ) from exc
+
+    try:
+        result = cash_conversion.convert_to_cash(
+            conn, transaction_id=txn_id, usd_received=amount
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return _advance_after_write(
+        request,
+        conn,
+        before=before,
+        resolved_id=f"txn:{txn_id}",
+        toast_message=cash_conversion_view.describe_conversion(result),
+    )
 
 
 @router.post("/triage/{txn_id}/park", include_in_schema=False)

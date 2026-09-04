@@ -12,6 +12,15 @@
    Context:
      txn            Transaction   the outgoing row
      suggested_usd  Decimal|None  what the ledger prices it at, or None
+     post_url       str           where Record posts
+     hx_target      str           what that response replaces
+     hx_swap        str           how
+
+   The last three are the only difference between the two callers. Flow
+   answers with events and swaps nothing; triage answers with the next
+   dialog and swaps it into the run (ADR-012 Amendment 2026-07-26). The
+   field, the arithmetic and the refusals are the same question either way,
+   so they are the same template.
 
    House classes only (.flow-* / .tbtn-* in flow.css and triage.css). The
    vendored CSS has no build step, so a new class here would render as
@@ -41,12 +50,14 @@
   <form
     id="became-cash-form"
     class="flow-modal-form"
-    hx-post="/_partial/transactions/{{ txn.id }}/became-cash"
-    {# hx-swap="none": the response is events, not markup. The modal opens
-       from /transactions AND from the dashboard, and a list-shaped answer
-       would make this a dead control on the second one. #}
-    hx-target="this"
-    hx-swap="none"
+    hx-post="{{ post_url }}"
+    {# Flow passes hx-swap="none": its response is events, not markup. The
+       modal opens from /transactions AND from the dashboard, and a
+       list-shaped answer would make this a dead control on the second one.
+       Triage passes the modal host, because there the response IS the next
+       dialog. #}
+    hx-target="{{ hx_target }}"
+    hx-swap="{{ hx_swap }}"
   >
     <label class="flow-field">
       <span class="teyebrow">Dollars received</span>
