@@ -1,0 +1,114 @@
+{# The Set balance preview (ADR-018 amendment, 2026-09-03).
+   Context: ``preview`` (services.reconcile_view.ReconcilePreview).
+
+   A raised panel under the account card. It states the difference, then
+   argues against writing it: every row in the last 60 days that could
+   produce a false gap, each one a link into its own modal. Only after
+   that — and only with a written reason — is there a button that writes.
+
+   The note is required on the server too (write_adjustment raises on a
+   blank one); ``required`` here is the courtesy, not the guard.
+#}
+{% from "_icons.html" import icon %}
+{% set reason_icons = {
+  "unpaired": "arrow-left-right",
+  "twins": "git-compare-arrows",
+  "uncategorised": "tag",
+  "approximate": "clock",
+} %}
+
+<section class="rpt-reconcile-preview" data-reconcile-preview aria-label="Reconcile {{ preview.account_name }}">
+  <div class="rpt-reconcile-figures">
+    <div class="rpt-reconcile-figure">
+      <span class="teyebrow">Ledger</span>
+      <span class="rpt-reconcile-amount">{{ preview.ledger_plain }} {{ preview.currency }}</span>
+    </div>
+    <div class="rpt-reconcile-figure">
+      <span class="teyebrow">You say</span>
+      <span class="rpt-reconcile-amount">{{ preview.actual_plain }} {{ preview.currency }}</span>
+    </div>
+    <div class="rpt-reconcile-figure rpt-reconcile-figure-delta">
+      <span class="teyebrow">Difference</span>
+      <span class="rpt-reconcile-amount" data-reconcile-delta>{{ preview.delta | fmt_native(preview.currency) }}</span>
+    </div>
+  </div>
+
+  {% if preview.matches %}
+    <p class="rpt-reconcile-note-line" data-reconcile-matches>
+      {{ icon("circle-check", 14) }}
+      The ledger already agrees with that figure. Nothing to write.
+    </p>
+  {% else %}
+    {% if preview.reasons %}
+      <div class="rpt-reconcile-reasons">
+        <p class="rpt-reconcile-lead">
+          Before you plug it — these could be the difference. Since
+          {{ preview.since | fmt_date }}, on this account.
+        </p>
+        {% for reason in preview.reasons %}
+          <div class="rpt-reconcile-reason" data-reason="{{ reason.key }}">
+            <div class="rpt-reconcile-reason-head">
+              <span class="rpt-reconcile-reason-icon">{{ icon(reason_icons.get(reason.key, "circle-alert"), 14) }}</span>
+              <span class="rpt-reconcile-reason-label">{{ reason.label }}</span>
+              <span class="rpt-reconcile-reason-count">{{ reason.rows | length }}</span>
+            </div>
+            <p class="rpt-reconcile-reason-hint">{{ reason.hint }}</p>
+            <ul class="rpt-reconcile-rows">
+              {% for row in reason.rows %}
+                <li class="rpt-reconcile-row">
+                  <button type="button"
+                          class="rpt-reconcile-open"
+                          hx-get="{{ row.modal_url }}"
+                          hx-target="#tx-modal-host"
+                          hx-swap="innerHTML">
+                    <span class="rpt-reconcile-row-date">{{ row.occurred_at | fmt_date_short }}</span>
+                    <span class="rpt-reconcile-row-name">{{ row.description }}</span>
+                    <span class="rpt-reconcile-row-amount">{{ row.amount_native | fmt_native(row.currency) }}</span>
+                  </button>
+                </li>
+              {% endfor %}
+            </ul>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="rpt-reconcile-note-line" data-reconcile-clean>
+        {{ icon("circle-check", 14) }}
+        Nothing in the last {{ preview.window_days }} days looks like it
+        could explain this — no unpaired legs, no twins, nothing
+        uncategorised, nothing priced from a distant rate.
+      </p>
+    {% endif %}
+
+    {# The write. Dated today, never the ledger's start (ADR-020 owns that
+       and has its own CLI). The note is what makes the row explicable a
+       year from now — doctor lists every plug, and a plug with no reason
+       is sediment. #}
+    <form class="rpt-reconcile-write"
+          hx-post="/_partial/accounts/{{ preview.account_id }}/reconcile"
+          hx-target="#account-slot-{{ preview.account_id }}"
+          hx-swap="outerHTML">
+      <input type="hidden" name="actual" value="{{ preview.actual_plain }}">
+      <div class="tfield">
+        <label class="tfield-label" for="reconcile-note-{{ preview.account_id }}">Why can this gap not be explained?</label>
+        <span class="tinput">
+          <input id="reconcile-note-{{ preview.account_id }}"
+                 name="note"
+                 type="text"
+                 required
+                 autocomplete="off"
+                 placeholder="e.g. Spot transfers older than Binance's six-month window">
+        </span>
+        <span class="tfield-hint">
+          Stored on the row. <code>finances doctor</code> lists every plug,
+          and reports before today stay wrong on purpose (ADR-018 §2.1).
+        </span>
+      </div>
+      <div class="rpt-reconcile-write-actions">
+        <button type="submit" class="tbtn tbtn-primary tbtn-sm">
+          Write adjustment
+        </button>
+      </div>
+    </form>
+  {% endif %}
+</section>

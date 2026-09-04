@@ -23,6 +23,7 @@ from finances.reports import monthly as monthly_report
 from finances.web.services.net_worth import (
     NetWorth,
     compute_net_worth,
+    usdt_value,
 )
 from finances.web.services.transactions_query import (
     TransactionCard,
@@ -50,8 +51,39 @@ class KpiTile(BaseModel):
     severity: _Severity = "normal"
 
 
+class PlugSummary(BaseModel):
+    """How much of the ledger rests on an assertion rather than a record.
+
+    A reconciliation adjustment (ADR-018) closes a position to a figure the
+    owner read off a custodian, because the history that would explain it
+    is gone. It corrects the balance and it is *not evidence*. ADR-020 §1.2
+    is the case for keeping the total in view: three plugs sized against a
+    balance a duplicate sync had corrupted left every check green while
+    income was overstated by 10,462.71 USDC.
+
+    Opening positions (``source='opening_balance'``, ADR-020) are also
+    ``kind='adjustment'`` and are deliberately excluded — "the books began
+    mid-story" is a different claim from "this drifted and I plugged it".
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    count: int
+    total_usd: Decimal
+    """Sum of the plugs' **magnitudes** in USDT, not their net.
+
+    Two opposite plugs net to nothing while both remain assertions; the
+    figure answers "how much of this ledger is asserted", so it adds
+    absolute values."""
+    unpriced: int
+    """Plugs in a currency the rate chain cannot price (rule-005 bars BCV
+    from a headline). Counted, never silently valued at zero."""
+    since: date | None
+    drill_url: str
+
+
 class KpiTiles(BaseModel):
-    """The four headline KPI tiles."""
+    """The four headline KPI tiles, plus the plug line under them."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -59,6 +91,7 @@ class KpiTiles(BaseModel):
     month_spend: KpiTile
     month_income: KpiTile
     needs_review: KpiTile
+    plugs: PlugSummary
 
 
 _BANK_KINDS = frozenset({"bank"})
@@ -152,8 +185,52 @@ def _build_needs_review_tile(conn: sqlite3.Connection) -> KpiTile:
     )
 
 
+SQL_RECONCILIATION_PLUGS = """
+    SELECT id, occurred_at, amount, currency
+      FROM transactions
+     WHERE kind = 'adjustment' AND source = 'reconciliation'
+     ORDER BY occurred_at, id
+"""
+
+
+def build_plug_summary(conn: sqlite3.Connection, *, today: date) -> PlugSummary:
+    """Count, total and date the reconciliation plugs the ledger carries."""
+    rows = conn.execute(SQL_RECONCILIATION_PLUGS).fetchall()
+
+    total = Decimal("0")
+    unpriced = 0
+    since: date | None = None
+
+    for row in rows:
+        raw = row["amount"]
+        amount = raw if isinstance(raw, Decimal) else Decimal(str(raw))
+        priced = usdt_value(
+            conn,
+            currency=row["currency"],
+            amount_native=abs(amount),
+            as_of_date=today,
+        )
+        if priced is None:
+            unpriced += 1
+        else:
+            total += priced
+
+        occurred = _parse_dt(row["occurred_at"])
+        if occurred is not None and (since is None or occurred.date() < since):
+            since = occurred.date()
+
+    return PlugSummary(
+        count=len(rows),
+        total_usd=total,
+        unpriced=unpriced,
+        since=since,
+        drill_url="/transactions?kinds=adjustment",
+    )
+
+
 def build_kpis(conn: sqlite3.Connection, *, today: date) -> KpiTiles:
     return KpiTiles(
+        plugs=build_plug_summary(conn, today=today),
         net_worth=_build_net_worth_tile(conn, today),
         month_spend=_build_month_kind_tile(
             conn, today=today, kind="expense", label="This month spend"

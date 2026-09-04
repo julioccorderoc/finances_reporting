@@ -1,40 +1,13 @@
 {% extends "base.html" %}
 {% block title %}Accounts{% endblock %}
 {% block content %}
-{% from "_macros.html" import page_header %}
 {% from "_icons.html" import icon %}
-{# Active accounts first, then inactive. Click any card to drill into its
-   transactions. The answer is the sum of every ACTIVE card's
-   USDT-equivalent when all of them price; otherwise it is a count, and
-   the meta says how many could not be priced. USDT-equivalent uses the
-   Binance P2P median (rule-005, never BCV). #}
-{% set ns = namespace(total=0, priced=true, active=0, unpriced=0, inactive=0) %}
-{% for card in cards %}
-  {% if card.active %}
-    {% set ns.active = ns.active + 1 %}
-    {% if card.balance_usdt is none %}
-      {% set ns.priced = false %}
-      {% set ns.unpriced = ns.unpriced + 1 %}
-    {% else %}
-      {% set ns.total = ns.total + card.balance_usdt %}
-    {% endif %}
-  {% else %}
-    {% set ns.inactive = ns.inactive + 1 %}
-  {% endif %}
-{% endfor %}
-{% if not cards %}
-  {% set answer = "No accounts" %}
-{% elif ns.priced %}
-  {% set answer = ns.total | fmt_usd %}
-{% else %}
-  {% set answer = ns.active ~ " account" ~ ("" if ns.active == 1 else "s") %}
-{% endif %}
-{% set meta %}
-  {%- if ns.unpriced %}<span class="tbadge tbadge-warning tbadge-dot" data-unpriced-count>{{ ns.unpriced }} unpriced</span>{% endif %}
-  {%- if ns.inactive %}<span class="tbadge">{{ ns.inactive }} inactive</span>{% endif %}
-  <span>USDT-equivalent via P2P median, never BCV</span>
-{% endset %}
-{{ page_header("What do I hold?", answer, meta) }}
+{# Click any card to drill into its transactions; the control under each
+   one reconciles that account's position to a custodian figure (ADR-018).
+   The page answer lives in its own partial: writing a plug moves the
+   total, and the write's response swaps only one card, so the header
+   comes back with it out-of-band. #}
+{% include "partials/accounts_header.html" %}
 
 {% if cards %}
   <section class="rpt-accounts" id="account-cards">

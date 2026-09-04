@@ -22,8 +22,10 @@ from urllib.parse import urlencode
 from pydantic import BaseModel, ConfigDict
 
 from finances.db.repos import accounts as accounts_repo
+from finances.domain.reconciliation_adjustments import position_balance
 from finances.reports.balances import get_balances
 from finances.web.services.net_worth import usdt_value
+from finances.web.services.reconcile_view import plain
 
 
 class AccountCard(BaseModel):
@@ -40,6 +42,17 @@ class AccountCard(BaseModel):
     balance_usdt: Decimal | None
     active: bool
     drill_url: str
+    reconcile_currency: str
+    """The account's declared asset — what Set balance reconciles.
+
+    Not ``currency`` above, which comes from ``v_account_balances`` and
+    folds an account's assets together (Binance Spot's "USDT" figure
+    includes its USDC). A plug is written per ``(account, currency)``, so
+    the control has to name the position, not the account's headline."""
+    reconcile_ledger: Decimal
+    """The position balance the plug will be measured against."""
+    reconcile_ledger_plain: str
+    """``reconcile_ledger`` as an ``<input value>`` — no exponent, 2dp."""
 
 
 def build_account_cards(
@@ -62,6 +75,12 @@ def build_account_cards(
             as_of_date=today,
         )
         drill_url = "/transactions?" + urlencode({"accounts": account.name})
+        # ADR-018's Set balance control measures a POSITION, so it carries
+        # its own figure rather than the card's — see the field docstrings.
+        reconcile_currency = account.currency.upper()
+        reconcile_ledger = position_balance(
+            conn, account_id=account.id, currency=reconcile_currency
+        )
         cards.append(
             AccountCard(
                 id=account.id,
@@ -73,6 +92,9 @@ def build_account_cards(
                 balance_usdt=balance_usdt,
                 active=account.active,
                 drill_url=drill_url,
+                reconcile_currency=reconcile_currency,
+                reconcile_ledger=reconcile_ledger,
+                reconcile_ledger_plain=plain(reconcile_ledger),
             )
         )
 

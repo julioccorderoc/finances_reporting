@@ -91,6 +91,7 @@ def record_adjustment(
     currency: str,
     actual: Decimal,
     occurred_at: datetime,
+    note: str | None = None,
 ) -> AdjustmentResult | None:
     """Bring one position to the custodian's figure. Returns None if it agrees.
 
@@ -103,6 +104,13 @@ def record_adjustment(
     Only call this for a gap with no remaining source. A gap an unrun ingest
     would close is a sync that has not happened, and adjusting it
     double-counts the moment those rows arrive.
+
+    ``note`` is the owner's reason for believing the gap unrecoverable. It
+    lands in ``notes``, never in ``description``: rule-012 requires the
+    description to name the ledger figure, the custodian figure and the
+    date, and a free-text sentence spliced into it would make that
+    machine-unreadable. The CLI passes nothing; the viewer's Set balance
+    surface requires it (ADR-018 amendment, 2026-09-03).
     """
     currency = currency.upper()
     ledger = position_balance(conn, account_id=account_id, currency=currency)
@@ -136,6 +144,7 @@ def record_adjustment(
             source=SOURCE,
             source_ref=source_ref,
             needs_review=False,
+            notes=note,
         ),
     )
     assert inserted.id is not None  # insert() always populates id

@@ -3,6 +3,12 @@
    Wrap inside `.rpt-accounts` for the auto-fit grid layout. One balance
    per account, exactly as the data gives it — the Binance accounts hold
    USDT and USDC mixed and this never invents per-asset rows.
+
+   The slot, not the anchor, is the grid item. The whole card used to BE
+   the drill link; ADR-018's Set balance control is a form, and a <form>
+   inside an <a> is invalid HTML that browsers re-parent — which detaches
+   the htmx attributes from the fields they were written for. So the
+   anchor keeps the head and the money, and the control sits beside it.
 #}
 {% set kind_labels = {
   "bank": "bank",
@@ -12,6 +18,8 @@
   "cash": "cash",
   "other": "other",
 } %}
+{% from "_icons.html" import icon %}
+<div class="rpt-account-slot" data-account-slot data-account-id="{{ card.id }}" id="account-slot-{{ card.id }}">
 <a class="rpt-account{% if not card.active %} is-inactive{% endif %}" href="{{ card.drill_url }}" data-account-card data-account="{{ card.name }}" data-account-kind="{{ card.kind }}" data-active="{{ 'true' if card.active else 'false' }}">
   <div class="rpt-account-head">
     <div class="rpt-account-id">
@@ -39,3 +47,45 @@
     {%- endif %}
   </div>
 </a>
+
+  {# Set balance (ADR-018 amendment, 2026-09-03). The figure is the
+     POSITION — this account's holding of its own asset — because that is
+     what an adjustment is written against. The currency is stated, never
+     typed: a plug in the wrong asset is a new hole, not a closed one.
+     Submitting an unchanged figure is the honest default and answers
+     "nothing to reconcile". #}
+  <form class="rpt-reconcile"
+        hx-post="/_partial/accounts/{{ card.id }}/reconcile/preview"
+        hx-target="#reconcile-panel-{{ card.id }}"
+        hx-swap="innerHTML">
+    <label class="rpt-reconcile-label" for="actual-{{ card.id }}">
+      Set balance
+      <span class="rpt-reconcile-currency">{{ card.reconcile_currency }}</span>
+    </label>
+    {%- if card.reconcile_ledger != card.balance_native or card.reconcile_currency != card.currency %}
+    {# Two numbers a few pixels apart read as a bug unless the page says
+       which is which: the figure above sums every asset the account
+       holds, this one is the position an adjustment is written against. #}
+    <span class="rpt-reconcile-mixed" data-mixed-assets>
+      Position only &mdash; the figure above sums this account's other assets too.
+    </span>
+    {%- endif %}
+    <div class="rpt-reconcile-controls">
+      <span class="tinput tinput-sm tinput-mono">
+        <input id="actual-{{ card.id }}"
+               name="actual"
+               type="text"
+               inputmode="decimal"
+               autocomplete="off"
+               value="{{ card.reconcile_ledger_plain }}"
+               aria-label="Balance {{ card.name }} reports for {{ card.reconcile_currency }}">
+      </span>
+      <button type="submit" class="tbtn tbtn-sm">
+        {{ icon("scale", 14) }}
+        Check
+      </button>
+    </div>
+  </form>
+
+  <div class="rpt-reconcile-panel" id="reconcile-panel-{{ card.id }}"></div>
+</div>

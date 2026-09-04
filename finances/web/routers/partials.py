@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Sequence
-from datetime import date, datetime, time
+from datetime import UTC, date, datetime, time
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -35,15 +35,18 @@ from finances.db.repos import categories as categories_repo
 from finances.db.repos import transaction_edits as transaction_edits_repo
 from finances.db.repos import transactions as transactions_repo
 from finances.domain import triage_admin
+from finances.config import CARACAS_TZ
 from finances.format import fmt_date, fmt_number
 from finances.web.deps import dismissed_pairs as _dismissed_pairs, get_conn
 from finances.web.routers._monthly_filter_dep import monthly_filter_from_query
 from finances.web.routers._tx_filter_dep import filter_from_query
 from finances.web.services.category_stats import top_categories
-from finances.web.services.dashboard import build_sync_status
+from finances.web.services.dashboard import build_kpis, build_sync_status
 from finances.web.services import uploads as uploads_svc
 from finances.web.services.categories_view import picker_payload
+from finances.web.services.accounts_view import build_account_cards
 from finances.web.services.pairing import find_pair_candidates
+from finances.web.services import reconcile_view
 from finances.web.services.transactions_query import _project_card
 from finances.web.services.transactions_write import (
     TransactionEditRequest,
@@ -124,6 +127,22 @@ def _push_page_url(request: Request, response, page_path: str) -> None:
         return
     query = request.url.query
     response.headers["HX-Push-Url"] = f"{page_path}?{query}" if query else page_path
+
+
+@router.get("/dashboard/kpis", include_in_schema=False)
+def dashboard_kpis_partial(
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Return ONLY the tiles + the plug line — no base.html shell.
+
+    Fetched on ``kpisDirty``, which /accounts fires after writing a
+    reconciliation adjustment (ADR-018). That write moves net worth and the
+    unexplained total at once, and Today may be open in another tab.
+    """
+    kpis = build_kpis(conn, today=datetime.now(tz=UTC).date())
+    templates = request.app.state.templates
+    return templates.TemplateResponse(request, "partials/kpi_tiles.html", {"kpis": kpis})
 
 
 @router.get("/dashboard/sync-status", include_in_schema=False)
@@ -1304,3 +1323,107 @@ def rates_chart_partial(
             "range_options": [7, 30, 90, 365],
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# Set balance — ADR-018's viewer surface (amendment, 2026-09-03).
+# ---------------------------------------------------------------------------
+
+
+def _parse_actual(raw: str) -> Decimal:
+    try:
+        return Decimal(raw.strip())
+    except (InvalidOperation, AttributeError) as exc:
+        raise HTTPException(
+            status_code=422, detail=f"{raw!r} is not a number"
+        ) from exc
+
+
+@router.post("/accounts/{account_id}/reconcile/preview", include_in_schema=False)
+def account_reconcile_preview_partial(
+    request: Request,
+    account_id: int,
+    actual: str = Form(...),
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """The gap, and what could explain it before the owner plugs it.
+
+    Read-only. It exists because a plug absorbs whatever is wrong upstream
+    without distinguishing missing history from a bug — the failure ADR-020
+    §1.2 records and the ten Binance Pay twins repeated. The panel argues
+    against itself first and only then offers a button.
+    """
+    amount = _parse_actual(actual)
+    try:
+        preview = reconcile_view.build_preview(
+            conn,
+            account_id=account_id,
+            actual=amount,
+            today=datetime.now(tz=CARACAS_TZ).date(),
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    templates = request.app.state.templates
+    return templates.TemplateResponse(
+        request, "partials/reconcile_panel.html", {"preview": preview}
+    )
+
+
+@router.post("/accounts/{account_id}/reconcile", include_in_schema=False)
+def account_reconcile_partial(
+    request: Request,
+    account_id: int,
+    actual: str = Form(...),
+    note: str = Form(default=""),
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Write the adjustment and answer with the re-rendered card.
+
+    Dated *now*, in Caracas — never the ledger's start, which is ADR-020's
+    opening-position claim and has its own CLI. A blank note is a 422: the
+    CLI states its reason in a shell history, a click states it nowhere,
+    and ``finances doctor`` lists every plug forever after.
+
+    ``kpisDirty`` rides along so a Today page open in another tab refetches
+    its tiles — the plug changes net worth and the unexplained-total line.
+    """
+    amount = _parse_actual(actual)
+    try:
+        result = reconcile_view.write_adjustment(
+            conn,
+            account_id=account_id,
+            actual=amount,
+            note=note,
+            now=datetime.now(tz=CARACAS_TZ),
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    # Rebuilt AFTER the write, so both the card and the page answer show the
+    # reconciled position.
+    cards = build_account_cards(conn, today=date.today())
+    card = next((c for c in cards if c.id == account_id), None)
+    if card is None:  # pragma: no cover - write_adjustment already looked it up
+        raise HTTPException(status_code=404, detail=f"account id={account_id} not found")
+
+    if result is None:
+        message = f"{card.name} {card.reconcile_currency}: already matches — nothing written"
+    else:
+        message = (
+            f"{card.name} {result.currency}: adjustment "
+            f"{result.delta:+f} written, dated today"
+        )
+
+    templates = request.app.state.templates
+    response = templates.TemplateResponse(
+        request,
+        "partials/account_slot_swap.html",
+        {"card": card, "cards": cards, "header_oob": True},
+    )
+    response.headers["HX-Trigger"] = _hx_trigger_json(
+        "kpisDirty", toast_message=message
+    )
+    return response

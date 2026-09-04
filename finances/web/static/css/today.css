@@ -326,3 +326,56 @@
   border: 1px dashed var(--border-default);
   border-radius: var(--radius-md);
 }
+
+/* ── The plugs (ADR-018 amendment, 2026-09-03) ──────────────────────────── */
+
+/* Wraps the tiles + the plug line into one refetchable block, so a
+   reconciliation written on /accounts can replace both at once. */
+.today-kpis {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* Quieter than a tile on purpose: this is a standing disclosure, not a
+   task. It is the same weight as the caption under a section head, and it
+   only exists at all while there are plugs to disclose. */
+.today-plugs {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  column-gap: var(--space-15);
+  row-gap: 2px;
+  padding: var(--space-2) var(--space-25);
+  background: var(--surface-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  text-decoration: none;
+  color: inherit;
+  transition: var(--transition-control);
+}
+.today-plugs:hover {
+  border-color: var(--border-default);
+  background: var(--surface-raised);
+}
+.today-plugs-icon {
+  display: inline-flex;
+  align-self: center;
+  color: var(--text-tertiary);
+}
+.today-plugs-text {
+  font-size: var(--body-sm-size);
+  line-height: var(--body-sm-line);
+  color: var(--text-secondary);
+}
+.today-plugs-text strong {
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
+}
+.today-plugs-hint {
+  grid-column: 2;
+  font-size: var(--caption-size);
+  line-height: var(--caption-line);
+  color: var(--text-tertiary);
+}

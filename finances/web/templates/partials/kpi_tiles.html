@@ -51,3 +51,22 @@
     <span class="today-needs-arrow">{{ icon("arrow-right", 14) }}</span>
   </a>
 </section>
+
+{# The plugs (ADR-018 §2, amendment 2026-09-03). An adjustment corrects a
+   balance by asserting the record is incomplete — it is not evidence, and
+   a residual that disappears into the total is how three plugs sized
+   against a corrupted balance once left every check green. So the figure
+   stays on the front page for as long as the rows exist, and doctor lists
+   the same ones. Absent entirely when there are none: a zero would be a
+   permanent line about nothing. #}
+{% if kpis.plugs.count %}
+  <a class="today-plugs" href="{{ kpis.plugs.drill_url }}" data-plug-summary data-plug-count="{{ kpis.plugs.count }}">
+    <span class="today-plugs-icon">{{ icon("scale", 14) }}</span>
+    <span class="today-plugs-text">
+      <strong>{{ kpis.plugs.count }} adjustment{{ '' if kpis.plugs.count == 1 else 's' }}</strong>
+      &middot; {{ kpis.plugs.total_usd | fmt_usd }} unexplained since {{ kpis.plugs.since | fmt_date }}
+      {%- if kpis.plugs.unpriced %}, plus {{ kpis.plugs.unpriced }} no rate can price{% endif %}
+    </span>
+    <span class="today-plugs-hint">Balances include them; income and expense never do.</span>
+  </a>
+{% endif %}

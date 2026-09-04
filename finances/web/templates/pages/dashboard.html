@@ -19,8 +19,17 @@
   {{ page_header("Where do I stand?", kpis.net_worth.value, meta) }}
 
   <div class="today-sections">
-    {# 1. This month's spend and income, and what needs you. #}
-    {% include "partials/kpi_tiles.html" %}
+    {# 1. This month's spend and income, what needs you, and the plugs.
+       Refetches on ``kpisDirty``, which /accounts fires after writing a
+       reconciliation adjustment — that write moves net worth AND the
+       unexplained total, and this page may be open in another tab. #}
+    <div class="today-kpis"
+         id="kpi-tiles"
+         hx-get="/_partial/dashboard/kpis"
+         hx-trigger="kpisDirty from:body"
+         hx-swap="innerHTML">
+      {% include "partials/kpi_tiles.html" %}
+    </div>
 
     {# 2. The main object: income vs expenses per month. #}
     {% include "partials/flows_chart.html" %}

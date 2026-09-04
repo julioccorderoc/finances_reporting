@@ -476,6 +476,24 @@ CHECKS: tuple[IntegrityCheck, ...] = (
         """,
     ),
     IntegrityCheck(
+        name="reconciliation_adjustments",
+        severity=Severity.WARNING,
+        description=(
+            "Reconciliation plugs the ledger is carrying (ADR-018). Each is "
+            "a difference the owner could not explain, closed to a custodian "
+            "figure and dated the day it was done — reports before that date "
+            "stay wrong. They are listed, never counted as errors: writing "
+            "one is legitimate, carrying one silently is not. Opening "
+            "positions (source='opening_balance', ADR-020) are a different "
+            "claim and are not listed here."
+        ),
+        sql="""
+            SELECT id FROM transactions
+             WHERE kind = 'adjustment' AND source = 'reconciliation'
+             ORDER BY occurred_at, id
+        """,
+    ),
+    IntegrityCheck(
         name="unpaired_p2p_sells",
         severity=Severity.WARNING,
         description=(

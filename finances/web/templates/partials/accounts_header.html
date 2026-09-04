@@ -1,0 +1,42 @@
+{# The Accounts page answer. Context: ``cards``.
+
+   Its own partial because a write on one card moves the total, and the
+   total renders OUTSIDE the swapped card — the same shape as the monthly
+   header, and the same bug if it is left behind (a card that disagrees
+   with the figure above it). ``header_oob`` makes it an out-of-band twin.
+
+   The answer is the sum of every ACTIVE card's USDT-equivalent when all of
+   them price; otherwise it is a count, and the meta says how many could
+   not be priced. USDT-equivalent uses the Binance P2P median (rule-005,
+   never BCV).
+#}
+{% from "_macros.html" import page_header %}
+{% set ns = namespace(total=0, priced=true, active=0, unpriced=0, inactive=0) %}
+{% for card in cards %}
+  {% if card.active %}
+    {% set ns.active = ns.active + 1 %}
+    {% if card.balance_usdt is none %}
+      {% set ns.priced = false %}
+      {% set ns.unpriced = ns.unpriced + 1 %}
+    {% else %}
+      {% set ns.total = ns.total + card.balance_usdt %}
+    {% endif %}
+  {% else %}
+    {% set ns.inactive = ns.inactive + 1 %}
+  {% endif %}
+{% endfor %}
+{% if not cards %}
+  {% set answer = "No accounts" %}
+{% elif ns.priced %}
+  {% set answer = ns.total | fmt_usd %}
+{% else %}
+  {% set answer = ns.active ~ " account" ~ ("" if ns.active == 1 else "s") %}
+{% endif %}
+{% set meta %}
+  {%- if ns.unpriced %}<span class="tbadge tbadge-warning tbadge-dot" data-unpriced-count>{{ ns.unpriced }} unpriced</span>{% endif %}
+  {%- if ns.inactive %}<span class="tbadge">{{ ns.inactive }} inactive</span>{% endif %}
+  <span>USDT-equivalent via P2P median, never BCV</span>
+{% endset %}
+<div id="accounts-header"{% if header_oob is defined and header_oob %} hx-swap-oob="true"{% endif %}>
+  {{ page_header("What do I hold?", answer, meta) }}
+</div>
