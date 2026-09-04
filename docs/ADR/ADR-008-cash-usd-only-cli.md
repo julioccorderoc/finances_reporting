@@ -44,3 +44,45 @@ For v1, support **USD-cash** entries only, via `finances cash add`, an interacti
 **Context:** ADR-008 named the CLI because in April the CLI was the only interface. The viewer now exists, and `finances cash add` — a flag-driven Typer command run from a terminal, expense-only — had become the single manual write in a system the owner otherwise operates through a browser. Cash coming *in* (money repaid in dollars, a sale, change returned) had no path at all and was ending up as a reconciliation plug, which ADR-018 exists to make rare rather than routine.
 
 **Amendment:** The `Cash USD` account is written by the cash module — `finances/ingest/cash_cli.py`, now `add_cash_expense` **and** `add_cash_income` — called from the CLI **or** from the viewer's Add-transaction dialog. Two front doors, one write path: same account, same `source='cash_cli'`, same UUIDv4 `source_ref` (rule-010), the sign applied by kind in one place. No importer ever writes here, and the viewer does not gain a second INSERT path beside the module. Every other account stays import-only — it mirrors an outside record (a statement, an exchange API), and a hand-typed row on one of those does not correct the mirror, it makes the ledger disagree with the thing it mirrors, with the next ingest unable to tell the hand-written row from a missed one. The dialog nonetheless lists **every** active account and disables all but `Cash USD`, each closed option naming what feeds it, so the boundary is visible rather than implied; the server refuses a closed account independently, so the disabled attribute is a courtesy and never the guard. A second hand-writable account requires a real case and a new ADR (owner decision, 2026-09-03).
+
+## Amendment 2026-09-04 — Transfer Pairing Also Writes the Cash Account
+
+**Context:** The 2026-09-03 amendment said `Cash USD` is written by the cash
+module, "called from the CLI **or** from the viewer's Add-transaction dialog",
+and that "the viewer does not gain a second INSERT path beside the module."
+Read literally, that closed the door on recording a *conversion* — money the
+owner changed into dollar bills — which is not a hand-typed cash entry at
+all. It is a double-entry transfer whose receiving leg happens to be cash,
+and the ledger already holds two of them: rows 859/5740 and 863/5741, written
+by the backfill in 2025. Until now the only way to add a third was a script.
+
+**Amendment:** `Cash USD` is written by the cash module **and by transfer
+pairing** — from the CLI or the viewer, never by an importer.
+`finances.domain.cash_conversion.convert_to_cash` is the pairing half: it
+inserts the cash leg and pairs it to an existing outgoing row through
+`transfers.create_transfer` (rule-002).
+
+**Why the conversion leg does not route through `cash_cli`:** that module
+stamps `source='cash_cli'` and a UUIDv4 `source_ref`, which is right for a
+hand-typed entry — two genuinely identical cash expenses must both be
+recordable — and wrong for a leg *derived from a row that already exists*. A
+conversion leg gets `source='internal'` and the deterministic ref
+`cash:<anchor source>:<anchor id>`, matching the 2025 rows and rule-010.
+Forcing it through `cash_cli` would buy a literal reading of "one write path"
+at the cost of a non-idempotent ref and a shape unlike its own precedent.
+
+**Invariants:**
+
+- Only an **outgoing**, **unpaired**, **non-cash** row may become a
+  conversion. The domain re-checks all three; the hidden footer control is a
+  courtesy, never the guard.
+- Reconciliation and opening-balance rows are refused — a plug is not a
+  payment that became cash (ADR-018 / ADR-020, and ADR-022 §2.3).
+- The cash leg is born `kind='transfer'`, so unpairing leaves an orphan
+  half-transfer rather than a phantom income row inflating every report.
+- **Every conversion is reversible**, by ADR-022's 2026-09-04 amendment. This
+  is a condition of the feature, not a bonus: the dollars received are typed
+  from memory, and a surface that writes an unmakeable pair from a number the
+  owner is recalling is a trap.
+- Bs-cash remains out of scope. A conversion's *receiving* leg is dollars by
+  definition; the bolívares left through a bank, which the statement records.

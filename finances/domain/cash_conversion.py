@@ -143,9 +143,6 @@ def convert_to_cash(
 
     conn.execute("SAVEPOINT convert_to_cash")
     try:
-        if rate is not None:
-            txn_repo.update(conn, id=anchor.id, user_rate=rate)
-
         cash_leg = txn_repo.insert(
             conn,
             Transaction(
@@ -164,11 +161,19 @@ def convert_to_cash(
         )
         assert cash_leg.id is not None
 
+        # Pair BEFORE writing the rate, not after. ``_promote_to_transfer``
+        # records the anchor's pre-image, and a rate set first would be
+        # captured as the row's *prior* rate -- so unpairing would put back
+        # the very figure it was meant to undo. Cross-currency legs are not
+        # summed at pairing time (create_transfer defers that to validate),
+        # so nothing here needs the rate yet.
         pair = transfers.create_transfer(
             conn,
             anchor_transaction_id=anchor.id,
             counterpart_transaction_id=cash_leg.id,
         )
+        if rate is not None:
+            txn_repo.update(conn, id=anchor.id, user_rate=rate)
     except Exception:
         conn.execute("ROLLBACK TO convert_to_cash")
         raise

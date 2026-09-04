@@ -60,6 +60,7 @@ def test_records_the_pre_image_of_one_leg(in_memory_db: sqlite3.Connection) -> N
         "transaction_id",
         "prior_kind",
         "prior_needs_review",
+        "prior_user_rate",
         "created_at",
     }
 

@@ -300,3 +300,75 @@ def test_unpair_clears_a_leg_the_pairing_itself_created(
     created = transactions_repo.get_by_id(seeded_db, created_id)
     assert created is not None
     assert created.transfer_id is None
+
+
+def test_unpair_puts_back_the_rate_the_pairing_wrote(
+    seeded_db: sqlite3.Connection,
+) -> None:
+    """A conversion sets a struck rate. Cancelling it must take that back.
+
+    Found in the browser, not here: unpair restored ``kind`` and
+    ``needs_review`` and left ``user_rate`` behind, so a cancelled conversion
+    left the row priced at exactly the figure the owner had just rejected —
+    forever, and invisibly, because nothing on the row says where it came
+    from.
+
+    The pre-image is "what the row was when it was paired". An edit made
+    *after* pairing is reverted too; that is the honest reading, and
+    ``transaction_edits`` keeps the trail either way.
+    """
+    from finances.domain import cash_conversion
+
+    anchor_id = _row(
+        seeded_db,
+        account_id=1,
+        amount="-36000",
+        currency="VES",
+        source="provincial",
+        source_ref="hash:52809099a320229b",
+    )
+    result = cash_conversion.convert_to_cash(
+        seeded_db, transaction_id=anchor_id, usd_received=Decimal("40")
+    )
+    priced = transactions_repo.get_by_id(seeded_db, anchor_id)
+    assert priced is not None and priced.user_rate == Decimal("900.0000")
+
+    transfers.unpair(seeded_db, transfer_id=result.transfer_id)
+
+    anchor = transactions_repo.get_by_id(seeded_db, anchor_id)
+    assert anchor is not None
+    assert anchor.user_rate is None
+
+
+def test_unpair_keeps_a_rate_that_predates_the_pairing(
+    seeded_db: sqlite3.Connection,
+) -> None:
+    """Only what the pairing changed comes back — not the owner's own rate."""
+    anchor_id = _row(
+        seeded_db,
+        account_id=1,
+        amount="-36000",
+        currency="VES",
+        source="provincial",
+        source_ref="hash:52809099a320229b",
+    )
+    transactions_repo.update(seeded_db, id=anchor_id, user_rate=Decimal("880"))
+    counterpart = _row(
+        seeded_db,
+        account_id=3,
+        amount="40.91",
+        currency="USDT",
+        kind=TransactionKind.INCOME,
+        source_ref="pay:counterpart",
+    )
+    pair = transfers.create_transfer(
+        seeded_db,
+        anchor_transaction_id=anchor_id,
+        counterpart_transaction_id=counterpart,
+    )
+
+    transfers.unpair(seeded_db, transfer_id=pair.transfer_id)
+
+    anchor = transactions_repo.get_by_id(seeded_db, anchor_id)
+    assert anchor is not None
+    assert anchor.user_rate == Decimal("880")

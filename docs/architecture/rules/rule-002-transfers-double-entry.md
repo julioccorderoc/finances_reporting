@@ -1,0 +1,6 @@
+
+**Pairs are breakable, and only because the pre-image is recorded (ADR-022 amendment 2026-09-04).** `finances.domain.transfers.unpair` is the only path that may break a pair. It works from `transfer_pairings` (migration 024), which `_promote_to_transfer` writes at promotion time holding each leg's `kind`, `needs_review` and `user_rate` as they were a moment earlier. Unpair replays that, clears `transfer_id` on **every** leg of the transfer — including one the pairing itself inserted, which carries no pre-image and would otherwise keep pointing at a transfer that no longer exists — and consumes the pre-image.
+
+**It never deletes.** Breaking a pair leaves two ordinary rows; removing either is a separate act through `transactions_repo.delete`, under ADR-022's tombstone rules. Deletion stays in one place.
+
+**Absence of a pre-image is a refusal, not a licence to guess.** Pairs made before migration 024 (270 of them) and pairs an importer authored have none, and are refused. An `earn-redeem` or `convert` leg was born `kind='transfer'`; deriving `expense` back from a negative sign would invent history. The ledger's own corrections (`reconciliation`, `opening_balance`) are refused outright — restate them through their module (ADR-018 / ADR-020).

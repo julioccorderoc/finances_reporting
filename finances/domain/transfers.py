@@ -200,7 +200,9 @@ def _promote_to_transfer(
     Only the flag is cleared. ``category_id`` is left as-is so a
     category the owner set by hand survives the promotion.
 
-    Both overwritten columns are recorded in ``transfer_pairings`` first
+    The overwritten columns are recorded in ``transfer_pairings`` first --
+    ``user_rate`` alongside them, because a pairing may write one (a cash
+    conversion sets the struck price) and unpairing has to take that back
     (migration 024). Without that pre-image :func:`unpair` could only guess
     them back from the amount's sign, which is wrong for every leg an
     importer created as a transfer to begin with — and ADR-022's delete
@@ -209,8 +211,9 @@ def _promote_to_transfer(
     conn.execute(
         """
         INSERT INTO transfer_pairings
-            (transfer_id, transaction_id, prior_kind, prior_needs_review, created_at)
-        SELECT ?, id, kind, needs_review, ?
+            (transfer_id, transaction_id, prior_kind, prior_needs_review,
+             prior_user_rate, created_at)
+        SELECT ?, id, kind, needs_review, user_rate, ?
         FROM transactions WHERE id = ?
         -- DO NOTHING, never DO UPDATE: promoting an already-promoted row
         -- (same tid, both-anchors mode run twice) would otherwise record
@@ -528,9 +531,17 @@ def unpair(conn: sqlite3.Connection, *, transfer_id: str) -> list[Transaction]:
 
     ADR-022 refuses to delete a paired row -- *"the pair has to be broken
     first, and no surface does that yet"*. This is that surface. It replays
-    the pre-image ``_promote_to_transfer`` recorded (migration 024): ``kind``
-    and ``needs_review`` go back to what they were, ``transfer_id`` goes to
-    NULL, and the pre-image is consumed so it cannot be replayed twice.
+    the pre-image ``_promote_to_transfer`` recorded (migration 024):
+    ``kind``, ``needs_review`` and ``user_rate`` go back to what they were,
+    ``transfer_id`` goes to NULL, and the pre-image is consumed so it cannot
+    be replayed twice.
+
+    The rate matters as much as the kind. A cash conversion writes the price
+    it was struck at; without putting that back, a cancelled conversion left
+    the row priced at exactly the figure the owner had just rejected. The
+    pre-image is *what the row was when it was paired*, so a rate edited
+    after pairing is reverted too -- the honest reading, and
+    ``transaction_edits`` keeps the trail either way.
 
     **It never deletes.** Both rows stay. A leg that should not exist is then
     an ordinary unpaired row, and ADR-022's delete -- with its tombstone
@@ -546,7 +557,7 @@ def unpair(conn: sqlite3.Connection, *, transfer_id: str) -> list[Transaction]:
     it changed.
     """
     pre_image = conn.execute(
-        "SELECT transaction_id, prior_kind, prior_needs_review "
+        "SELECT transaction_id, prior_kind, prior_needs_review, prior_user_rate "
         "FROM transfer_pairings WHERE transfer_id = ?",
         (transfer_id,),
     ).fetchall()
@@ -585,11 +596,12 @@ def unpair(conn: sqlite3.Connection, *, transfer_id: str) -> list[Transaction]:
         for row in pre_image:
             conn.execute(
                 "UPDATE transactions SET kind = ?, needs_review = ?, "
-                "transfer_id = NULL, updated_at = CURRENT_TIMESTAMP "
-                "WHERE id = ?",
+                "user_rate = ?, transfer_id = NULL, "
+                "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (
                     row["prior_kind"],
                     int(row["prior_needs_review"]),
+                    row["prior_user_rate"],
                     int(row["transaction_id"]),
                 ),
             )

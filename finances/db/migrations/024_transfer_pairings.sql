@@ -11,6 +11,11 @@
 -- owner's edit history, shown in the modal. A machine promotion is not an
 -- edit the owner made.
 --
+-- `prior_user_rate` is here because a conversion writes a struck rate on the
+-- row it is pairing (ADR-015). Without it, cancelling a conversion left the
+-- row priced at exactly the figure the owner had just rejected -- forever,
+-- and invisibly, since nothing on the row says where the rate came from.
+--
 -- One row per LEG, keyed on transaction_id: a transaction belongs to at most
 -- one transfer at a time, so a second pre-image for the same leg would make
 -- the replay ambiguous. ON DELETE CASCADE keeps a deleted row from stranding
@@ -28,6 +33,7 @@ CREATE TABLE IF NOT EXISTS transfer_pairings (
                                REFERENCES transactions(id) ON DELETE CASCADE,
     prior_kind         TEXT    NOT NULL,   -- kind before the promotion
     prior_needs_review INTEGER NOT NULL,   -- needs_review before the promotion
+    prior_user_rate    TEXT,               -- user_rate before the promotion, if any
     created_at         TEXT    NOT NULL    -- UTC ISO-8601
 );
 
