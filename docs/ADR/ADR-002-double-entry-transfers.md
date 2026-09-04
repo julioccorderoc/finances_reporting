@@ -130,3 +130,39 @@ convenience, not evidence.
 **Unchanged:** `create_transfer` remains the sole writer of `kind='transfer'`
 (rule-002), the Provincial leg remains the anchor, and each pair is still two
 rows sharing one `transfer_id`.
+
+## Amendment 2026-09-04 — The Pairer Reads a Trade Both Ways
+
+**Status:** Accepted (owner decision 2026-09-04)
+
+`BankAnchoredP2pPairing` only ever matched a bank *deposit* against a Binance
+*sell*. A P2P **buy** is the same movement of money read backwards — bolívars
+leave the bank, USDT arrives — and nothing paired it: not this strategy, and
+not the manual picker, whose modal gated on `amount < 0`. The two `P2P BUY
+USDT @` rows in the ledger were therefore unpairable by any path, each reading
+as income the owner never earned.
+
+**The buy direction is now matched too**: an unpaired bank debit against an
+unpaired Binance credit carrying a `user_rate`, same ±`window_days`, same
+tolerance, the same denomination guard. The scoring compares magnitudes, so
+one implementation serves both readings; the caller decides the direction by
+which two row sets it hands in.
+
+**One assignment, not two passes.** Both directions are scored, then claimed
+from a single greedy sweep with shared claimed-sets, so a row belongs to at
+most one pair whichever way the money went. Signs keep the directions apart
+without extra rules: `create_transfer` refuses a same-sign pair, so a deposit
+is never scored against a buy.
+
+**Proposals name their direction** (`details["direction"]`), because a
+reconciliation report that cannot tell a buy from a sell reads as if the pairer
+did the same thing twice.
+
+**The manual picker follows.** The modal opens it on incoming Binance rows as
+well, but only where a `user_rate` exists to score against — an ordinary USDC
+deposit is money arriving, not a trade against the bank — and the label names
+the side of the bank it is looking for.
+
+**Unchanged:** the bank leg is still the anchor, `create_transfer` is still the
+sole writer of `kind='transfer'`, and the strategy still claims only that N
+trades consumed N bank rows.

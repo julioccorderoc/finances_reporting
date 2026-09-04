@@ -76,6 +76,7 @@ confirms those as pairs.
 |---|---|
 | **External Transfer** | Money passing through to or from someone else that is neither income nor spending: a deposit you forward on, money you hold for someone, an outbound transfer that is not a purchase. |
 | **Internal Transfer** | Between your own accounts when the other leg is not in the ledger: an ATM withdrawal to cash, a top-up from an account the ledger does not track. When both legs are here, confirm the pair instead. |
+| **Borrowed** | Money someone lent *you*, and what you later pay them back. Neither income (you owe it) nor spending (you are returning it). What you still owe is what came in minus what went back. Money *you* lend out is `Lending` / `Loan Repayment`, not this; money you merely hold or forward for someone is `External Transfer`. |
 
 ## Adjustment — system-written only
 
@@ -133,3 +134,10 @@ is a flag flip.
   transitionally has to be taggable from the queue; the write path had
   always accepted it. Their tests moved into the `## Transfer` table above,
   which the picker now reads like the other two.
+- **025** — `Borrowed` added, transfer-kind, from the list only, never a
+  chip. Owner decision 2026-09-04: money lent *to* him had no home, so a
+  loan read as income and repaying it read as spending — June carried
+  $7.94 of each that never happened (rows 1871/1869, Hugo). `Lending` /
+  `Loan Repayment` deliberately keep their expense/income kinds in the
+  same decision: money he lends out still counts as spending the month it
+  leaves, and its return as income.
