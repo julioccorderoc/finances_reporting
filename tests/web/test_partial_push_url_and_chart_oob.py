@@ -176,3 +176,64 @@ def test_a_plain_pivot_render_and_the_full_page_carry_one_chart_at_most(
     assert page.count('id="monthly-chart"') == 1
     assert page.count('id="monthly-chart-data"') == 1
     assert "hx-swap-oob" not in page
+
+
+# ---------------------------------------------------------------------------
+# The Flow headline is the same bug as the Monthly one, found 2026-09-04.
+# ---------------------------------------------------------------------------
+
+
+def test_an_htmx_list_swap_carries_the_page_header_out_of_band(
+    seeded_web_db: sqlite3.Connection, web_client_factory
+) -> None:
+    """"7 rows" over five of them — Flow had Monthly's bug all along.
+
+    The filter form, the sort chips, the pager and the per-page select all
+    swap ``#tx-list`` alone, and the Doto figure sits above it. Narrow the
+    window and the headline kept the count from page load, disagreeing
+    with the "N matches" line a few pixels below it. The Add-transaction
+    dialog corrects the headline out of band; every ordinary filter change
+    left it stale, which is the same lie arriving by a commoner route.
+    """
+    from finances.web.services.transactions_query import (
+        TransactionsFilter,
+        count_matching,
+    )
+
+    client: TestClient = web_client_factory()
+
+    narrow = {"date_from": "2000-01-01", "date_to": "2000-01-02"}
+    swapped = client.get(
+        "/_partial/transactions/list", params=narrow, headers=HX
+    ).text
+
+    header = re.search(
+        r'<div id="transactions-header"[^>]*>.*?</header>\s*</div>', swapped, re.S
+    )
+    assert header, "the list swap carries no header twin"
+    assert 'hx-swap-oob="true"' in header.group(0)
+
+    total = count_matching(
+        seeded_web_db, TransactionsFilter(**{k: v for k, v in narrow.items()})
+    )
+    assert f"{total} row" in header.group(0)
+    # The window it now describes, not the one the page opened on.
+    assert "Jan 1, 2000" in header.group(0) or "Sat, Jan 1" in header.group(0)
+
+
+def test_a_plain_list_render_and_the_full_page_carry_one_header_at_most(
+    seeded_web_db: sqlite3.Connection, web_client_factory
+) -> None:
+    """Two elements with one id is the bug the rail badge guard names."""
+    client: TestClient = web_client_factory()
+
+    plain = client.get(
+        "/_partial/transactions/list", params={"date_from": "2000-01-01"}
+    ).text
+    assert 'id="transactions-header"' not in plain
+
+    page = client.get("/transactions", params={"date_from": "2000-01-01"}).text
+    assert page.count('id="transactions-header"') == 1
+    assert page.count('class="page-answer"') == 1
+    assert page.count("data-add-transaction") == 1
+    assert "hx-swap-oob" not in page

@@ -326,7 +326,11 @@ def test_sort_chips_are_house_buttons_and_the_active_one_is_ink(
 
     assert 'class="tbtn tbtn-sm flow-sort is-active"' in body  # Date, the default
     assert 'class="tbtn tbtn-sm flow-sort"' in body  # Amount
-    assert re.search(r'<span class="flow-count">\s*[\d,]+ matches\s*</span>', body)
+    # id="tx-count" is the out-of-band target a hand-written entry corrects
+    # (partials/transaction_added.html) — part of the contract, not decoration.
+    assert re.search(
+        r'<span class="flow-count" id="tx-count">\s*[\d,]+ matches\s*</span>', body
+    )
     assert 'hx-vals=\'{"sort": "amount_native", "direction": "desc", "page": "1"}\'' in body
 
 
@@ -393,7 +397,9 @@ def test_empty_state_offers_a_way_back(
         params={"date_from": "2000-01-01", "q": "nothing-matches-this"},
     ).text
 
-    empty = re.search(r'<div class="flow-empty">.*?</div>', body, re.S)
+    # id="tx-empty" is what an added row deletes out-of-band, so the list
+    # never shows a card under "No rows match these filters".
+    empty = re.search(r'<div class="flow-empty" id="tx-empty">.*?</div>', body, re.S)
     assert empty, body
     assert 'data-icon="search"' in empty.group(0)
     assert "No rows match these filters" in empty.group(0)
