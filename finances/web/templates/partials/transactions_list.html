@@ -29,7 +29,9 @@
         hx-vals='{"sort": "{{ value }}", "direction": "{{ next_dir }}", "page": "1"}'
       >{{ label }}{% if active %} {{ '↓' if page.filter.direction == 'desc' else '↑' }}{% endif %}</button>
     {% endfor %}
-    <span class="flow-count">{{ page.total | fmt_number(0) }} match{{ '' if page.total == 1 else 'es' }}</span>
+    {# Identified so a hand-written entry can correct it out-of-band without
+       re-rendering the whole list (partials/transaction_added.html). #}
+    <span class="flow-count" id="tx-count">{{ page.total | fmt_number(0) }} match{{ '' if page.total == 1 else 'es' }}</span>
     {# Rows per page, beside the count it changes. Inside #tx-list so
        every swap re-renders it with the size in force; form="tx-filters"
        makes it part of the filter form's serialisation (the form's own
@@ -76,7 +78,7 @@
       {% endfor %}
     {% else %}
       {# Nothing matches (not nothing exists): one line and a way back. #}
-      <div class="flow-empty">
+      <div class="flow-empty" id="tx-empty">
         {{ icon("search", 28) }}
         <span>No rows match these filters</span>
         <a href="/transactions" class="flow-link">Clear filters</a>
@@ -113,3 +115,18 @@
     </nav>
   {% endif %}
 </div>
+
+{# The page headline, out of band. The filter form, the sort chips, the
+   pager and the per-page select all swap #tx-list alone, and the Doto
+   figure sits above it — so narrowing the window left the headline saying
+   "7 rows" over five of them, disagreeing with the "N matches" line a few
+   pixels below. Same twin, same rule as the monthly pivot.
+
+   Only when htmx asked: the full page includes this list AND renders the
+   header itself, and two elements with one id is the bug the rail badge
+   guard already names. #}
+{% if header_oob is defined and header_oob %}
+  {% with total = page.total, filter = page.filter %}
+    {% include "partials/transactions_header.html" %}
+  {% endwith %}
+{% endif %}

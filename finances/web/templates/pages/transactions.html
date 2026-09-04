@@ -1,18 +1,15 @@
 {% extends "base.html" %}
 {% block title %}Transactions{% endblock %}
 {% block content %}
-  {% from "_macros.html" import page_header %}
-
   {# The question, then THE one Doto figure of the view: how many rows the
-     current filter matches at render time. The live count that survives
-     list swaps is the "N matches" line inside #tx-list. #}
-  {% set answer %}{{ page.total | fmt_number(0) }} row{{ '' if page.total == 1 else 's' }}{% endset %}
-  {% set meta %}
-    {%- if filter.date_from or filter.date_to -%}
-      <span class="flow-window">{{ filter.date_from | fmt_date if filter.date_from else '…' }} – {{ filter.date_to | fmt_date if filter.date_to else '…' }}</span>
-    {%- endif -%}
-  {% endset %}
-  {{ page_header("What happened?", answer, meta) }}
+     current filter matches at render time — plus Add transaction, the one
+     thing you can DO to this ledger by hand (ADR-008 amendment 2026-09-03).
+     In its own partial because a hand-written entry moves the figure from
+     outside it; the live count that survives list swaps is the "N matches"
+     line inside #tx-list. #}
+  {% with total = page.total %}
+    {% include "partials/transactions_header.html" %}
+  {% endwith %}
 
   {# Drop a bank statement straight in (WP3) — collapsed by default so the
      page still opens on the ledger, not on an import form. #}

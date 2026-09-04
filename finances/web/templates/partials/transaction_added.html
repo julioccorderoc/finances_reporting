@@ -1,0 +1,46 @@
+{# The answer to a hand-written entry, whether or not the list shows it.
+
+   Everything the surface has to be told, in one response. The card itself
+   only when ``card`` is given — a row the current filter excludes must not
+   be pushed into a filtered list, and then this partial is nothing but the
+   out-of-band corrections:
+
+     1. the card, ``afterend`` of ``#tx-list .flow-head`` (targeting
+        ``.flow-rows`` with ``afterbegin`` put it ABOVE the column headings —
+        the head is that container's first child);
+     2. the match count and the page's headline figure, both corrected
+        out-of-band because both render outside the swapped region;
+     3. the empty state, deleted — only when it was there, since htmx logs
+        a missing-target error for an OOB delete that hits nothing;
+     4. the dialog, emptied.
+
+   (4) is why the modal is NOT closed by an ``HX-Trigger: closeModal``
+   header here, the way the edit and delete flows close theirs. htmx fires
+   HX-Trigger events BEFORE the swap, and dispatches a kebab-case twin of
+   every camelCase name — so ``closeModal`` also fires ``close-modal``,
+   base.html empties the modal host, and the submitting form is detached
+   from the document while htmx is still resolving this response. htmx
+   looks OOB targets up from the requesting element's root node, and a
+   detached form's root node is not the document: every OOB above was
+   silently dropped, leaving a row pushed under a count that had not moved.
+   Emptying the host as an OOB swap puts the close INSIDE the swap, in
+   order, and the header still carries the toast.
+
+   Position: the card goes to the top. That is right for the default sort
+   (date descending) and approximate for any other; the next filter, sort
+   or page action re-renders the list from the database and settles it.
+
+   Context: ``card`` (or none), ``total``, ``filter``, ``list_was_empty``.
+#}
+{%- if card %}
+{% set bulk_select = true %}
+{% include "partials/card_transaction.html" %}
+<span class="flow-count" id="tx-count" hx-swap-oob="true">{{ total | fmt_number(0) }} match{{ '' if total == 1 else 'es' }}</span>
+{%- if list_was_empty %}
+<div id="tx-empty" hx-swap-oob="delete"></div>
+{%- endif %}
+{%- endif %}
+{% with header_oob = true %}
+  {% include "partials/transactions_header.html" %}
+{% endwith %}
+<div id="tx-modal-host" hx-swap-oob="innerHTML"></div>

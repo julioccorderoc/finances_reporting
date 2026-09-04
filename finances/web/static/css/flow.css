@@ -698,6 +698,94 @@ select.flow-input {
   color: var(--text-tertiary);
 }
 
+/* ── Add transaction (ADR-008 amendment) ────────────────────────────────
+ *
+ * The one dialog in this viewer that creates rather than edits. It reuses
+ * the modal shell and .flow-field wholesale; what is here is only the
+ * three things a creation form needs and an edit form does not: a two-up
+ * row for date + amount, the direction toggle, and the currency sitting
+ * inside the amount field as a fact rather than a choice. */
+
+.flow-entry-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+/* Two segments sharing one hairline box, the live one on the raised
+ * surface — a state, not a call to action, so no red fill. */
+.flow-entry-kinds {
+  display: inline-flex;
+  align-self: start;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.flow-entry-kind {
+  display: inline-flex;
+  align-items: center;
+  height: var(--control-md);
+  padding: 0 14px;
+  font-size: var(--body-sm-size);
+  color: var(--text-secondary);
+  background: var(--paper-050);
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+.flow-entry-kind + .flow-entry-kind {
+  border-left: 1px solid var(--border-default);
+}
+.flow-entry-kind:hover {
+  color: var(--text-primary);
+}
+.flow-entry-kind.is-on {
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+/* The radio itself carries the state and the keyboard; the label draws it.
+ * Kept in the layout (not display:none) so it stays focusable and the
+ * focus ring lands on something real. */
+.flow-entry-kind input {
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+}
+.flow-entry-kind:focus-within {
+  box-shadow: var(--focus-ring-flush);
+}
+
+/* The currency is the account's, so it sits INSIDE the field rather than
+ * beside it as something to pick. */
+.flow-entry-amount {
+  position: relative;
+  display: block;
+}
+.flow-entry-amount .flow-input {
+  padding-right: 48px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.flow-entry-currency {
+  position: absolute;
+  top: 0;
+  right: 10px;
+  height: var(--control-md);
+  display: flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  pointer-events: none;
+}
+
+@media (max-width: 640px) {
+  .flow-entry-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .flow-textarea {
   box-sizing: border-box;
   width: 100%;

@@ -1,0 +1,217 @@
+{# Add a transaction by hand (ADR-008 amendment 2026-09-03).
+
+   Built for every account, open for one. The select below lists EVERY
+   active account and disables all but ``Cash USD``, each closed option
+   naming what does feed it — because a greyed row with no reason reads as
+   a bug, and because the shape is the one the ledger grows into if a
+   second account ever becomes hand-writable.
+
+   The disabled attribute is a courtesy. ``transaction_add.add_transaction``
+   refuses a closed account on the server with the same sentence, so a
+   crafted POST gets 422 and writes nothing.
+
+   Context:
+     accounts     list[EntryAccount]  every active account, cash first
+     cash_id      int                 the one writable account's id
+     today        date                Caracas today, the date default
+     picker       PickerPayload       scoped to ``expense`` on open
+     picker_columns / picker_keys     the CatPicker contract
+
+   The dialog is the house one (.flow-modal-* in static/css/flow.css). The
+   submit button sits in the footer, outside the form, and associates by
+   ``form=`` id — same as the edit modal, so the save stays a real form
+   submission htmx binds to.
+
+   No 1-8 category shortcuts here, deliberately: this dialog has an amount
+   field, and a digit typed into it must stay a digit.
+#}
+{% from "_icons.html" import icon %}
+
+<div
+  class="flow-modal-over"
+  data-new-transaction-modal
+  x-data="{
+    kind: 'expense',
+    {# Single quotes, never ``| tojson``: tojson does not escape the double
+       quote, and one of those inside this double-quoted attribute ends it
+       — silently, with every server-side test still green. #}
+    currency: '{{ cash_currency }}',
+    categoryId: null,
+    categoryLabel: null,
+    dirty: false,
+    {# The CatPicker contract (triage_catpicker.html): the enclosing scope
+       owns the selection, the partial only reports choices. #}
+    pickedCategory() { return this.categoryId; },
+    pickCategory(id, label) {
+      this.categoryId = id;
+      this.categoryLabel = label;
+      this.dirty = true;
+    },
+    {# Changing the kind invalidates the pick: the picker is scoped, and
+       Groceries on an income row is a 422 the server will refuse. #}
+    setKind(next) {
+      this.kind = next;
+      this.categoryId = null;
+      this.categoryLabel = null;
+    },
+    accountChanged(select) {
+      const option = select.options[select.selectedIndex];
+      this.currency = option ? option.dataset.currency : this.currency;
+      this.dirty = true;
+    },
+    {# Its own dirty flag rather than base.html's modalDirty(), which reads
+       the edit form's set_* sentinels — fields this dialog does not have.
+       A half-typed entry is worth one confirm. #}
+    requestClose() {
+      if (this.dirty && !window.confirm('Discard this entry?')) return;
+      window.dispatchEvent(new CustomEvent('close-modal'));
+    }
+  }"
+  x-init="$nextTick(() => { const c = $el.querySelector('.flow-modal'); if (c) c.focus(); })"
+  @click.self="requestClose()"
+  @keydown.escape.window="requestClose()"
+>
+  <div class="flow-modal" role="dialog" aria-modal="true" aria-label="Add transaction" tabindex="-1">
+    <header class="flow-modal-header">
+      <div class="flow-modal-title">
+        <span class="teyebrow">New entry</span>
+        <span class="flow-modal-name">Add transaction</span>
+        <span class="flow-modal-when">Cash is the only account without an outside record — so it is the only one you write yourself</span>
+      </div>
+      <button type="button" class="ticon" aria-label="Close" @click="requestClose()">{{ icon("x", 14) }}</button>
+    </header>
+
+    <div class="flow-modal-body">
+      <form
+        id="new-tx-form"
+        class="flow-modal-form"
+        hx-post="/_partial/transactions"
+        {# After the column headings, not before them: .flow-head is the
+           first child of .flow-rows, so `afterbegin` on that container put
+           the new row ABOVE the headings. #}
+        hx-target="#tx-list .flow-head"
+        hx-swap="afterend"
+        @input="dirty = true"
+      >
+        <input type="hidden" name="category_id" :value="categoryId === null ? '' : categoryId">
+
+        {# 1. Which account. Every one of them, one of them open. #}
+        <label class="flow-field">
+          <span class="teyebrow">Account</span>
+          <select
+            name="account_id"
+            class="flow-input"
+            data-account-select
+            @change="accountChanged($event.target)"
+          >
+            {%- for account in accounts %}
+            <option value="{{ account.id }}" data-currency="{{ account.currency }}"{% if account.id == cash_id %} selected{% endif %}{% if not account.writable %} disabled{% endif %}>{{ account.name }}{% if account.hint %} — {{ account.hint }}{% endif %}</option>
+            {%- endfor %}
+          </select>
+          <span class="flow-hint">
+            The others mirror an outside record. A row typed into one of them
+            would not correct the statement — it would make the ledger
+            disagree with it (rule-008).
+          </span>
+        </label>
+
+        {# 2. Money out or money in. The sign is this control's, never the
+              amount field's — cash_cli applies it. #}
+        <div class="flow-field">
+          <span class="teyebrow">Direction</span>
+          <div class="flow-entry-kinds" role="radiogroup" aria-label="Direction">
+            {%- for value, label in [("expense", "Money out"), ("income", "Money in")] %}
+            <label class="flow-entry-kind" :class="kind === '{{ value }}' ? 'is-on' : ''">
+              <input
+                type="radio"
+                name="kind"
+                value="{{ value }}"
+                {% if value == 'expense' %}checked{% endif %}
+                hx-get="/_partial/transactions/new/categories"
+                hx-target="#new-tx-categories"
+                hx-swap="innerHTML"
+                hx-trigger="change"
+                hx-params="kind"
+                @change="setKind('{{ value }}')"
+              >
+              <span>{{ label }}</span>
+            </label>
+            {%- endfor %}
+          </div>
+        </div>
+
+        {# 3. When, and how much. The currency is the account's; there is no
+              control for it, because there is no choice. #}
+        <div class="flow-entry-grid">
+          <label class="flow-field">
+            <span class="teyebrow">Date</span>
+            <input
+              type="date"
+              name="occurred_at"
+              class="flow-input"
+              value="{{ today.isoformat() }}"
+              max="{{ today.isoformat() }}"
+              required
+            >
+          </label>
+
+          <label class="flow-field">
+            <span class="teyebrow">Amount</span>
+            <span class="flow-entry-amount">
+              <input
+                type="text"
+                name="amount"
+                class="flow-input"
+                inputmode="decimal"
+                autocomplete="off"
+                placeholder="0.00"
+                required
+              >
+              <span class="flow-entry-currency" data-entry-currency x-text="currency">{{ cash_currency }}</span>
+            </span>
+            <span class="flow-hint">Always positive — “money out” is what makes it an expense.</span>
+          </label>
+        </div>
+
+        {# 4. What it was. #}
+        <label class="flow-field">
+          <span class="teyebrow">Description</span>
+          <input
+            type="text"
+            name="description"
+            class="flow-input"
+            autocomplete="off"
+            placeholder="e.g. empanadas at the corner"
+            required
+          >
+        </label>
+
+        {# 5. Category, scoped to the direction above and re-fetched when it
+              changes. #}
+        <div class="flow-field">
+          <span class="teyebrow">Category</span>
+          <div id="new-tx-categories">
+            {% include "partials/new_transaction_picker.html" %}
+          </div>
+        </div>
+
+        <label class="flow-field">
+          <span class="teyebrow">Note</span>
+          <textarea
+            name="notes"
+            rows="2"
+            class="flow-textarea"
+            placeholder="Private note — survives re-ingest"
+          ></textarea>
+        </label>
+      </form>
+    </div>
+
+    <footer class="flow-modal-footer">
+      <span class="flow-modal-legend"><kbd>esc</kbd> close</span>
+      <span class="flow-modal-spacer"></span>
+      <button type="button" class="tbtn tbtn-ghost" @click="requestClose()">Cancel</button>
+      <button type="submit" form="new-tx-form" class="tbtn tbtn-primary" data-new-tx-save>Add</button>
+    </footer>
+  </div>
+</div>

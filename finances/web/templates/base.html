@@ -189,10 +189,21 @@
       refreshQueue();
       refreshList();
     "
-    {# A modal-open request means the owner wants a dialog again. #}
+    {# A request that swaps INTO a modal host means the owner wants a dialog
+       again. Keyed off the target, not off '/modal' in the path: the
+       Add-transaction dialog is served from /_partial/transactions/new,
+       which the path test never matched — so once that dialog had been
+       dismissed, this flag stayed true and the button was dead for the
+       rest of the page's life. No server-side test can see that.
+
+       This still leaves an in-flight triage save dismissed if Escape lands
+       during it: the reset happens before the request, the dismissal
+       after it, and the before-swap guard below reads the later value. #}
     @htmx:before-request.window="
+      const target = $event.detail && $event.detail.target;
       const path = $event.detail && $event.detail.requestConfig && $event.detail.requestConfig.path;
-      if (typeof path === 'string' && path.indexOf('/modal') !== -1) {
+      if ((target && ['tx-modal-host', 'triage-modal-host'].includes(target.id)) ||
+          (typeof path === 'string' && path.indexOf('/modal') !== -1)) {
         modalDismissed = false;
       }
     "
@@ -309,7 +320,9 @@
        htmx:response-error listener raises error toasts. SUCCESS toasts
        auto-dismiss after 4 s; error toasts do not. A four-second error is
        invisible to someone typing into a form, which is how a screen full
-       of 500s went unnoticed on 2026-07-26. #}
+       of 500s went unnoticed on 2026-07-26. A success toast carrying a
+       LINK also stays, for the same reason at a smaller scale: an offer
+       that expires before it can be taken is not an offer. #}
     <div
       id="toast-host"
       class="toast-host"
@@ -319,10 +332,19 @@
         const t = {
           id: nextId++,
           level: ($event.detail && $event.detail.level === 'error') ? 'error' : 'success',
-          message: ($event.detail && $event.detail.message) || 'Done'
+          message: ($event.detail && $event.detail.message) || 'Done',
+          {# Optional. A toast that reports something this page cannot show
+             carries the way to it — a hand-written row the current filter
+             excludes is written, and saying so without a link is a dead
+             end. Absent on every other toast, where x-show hides it. #}
+          href: ($event.detail && $event.detail.href) || null,
+          hrefLabel: ($event.detail && $event.detail.hrefLabel) || 'Show it'
         };
         toasts.push(t);
-        if (t.level === 'success') {
+        {# A toast carrying a link stays, like an error does: the link IS
+           the point of it, and 2.6 s is not long enough to read a sentence
+           and reach for the way out of it. #}
+        if (t.level === 'success' && !t.href) {
           setTimeout(() => { toasts = toasts.filter(x => x.id !== t.id) }, 2600);
         }
       "
@@ -334,11 +356,12 @@
           role="status"
         >
           <span x-text="t.message"></span>
+          <a class="toast-link" :href="t.href" x-show="t.href" x-text="t.hrefLabel"></a>
           <button
             type="button"
             class="toast-dismiss"
             aria-label="Dismiss"
-            x-show="t.level === 'error'"
+            x-show="t.level === 'error' || t.href"
             @click="toasts = toasts.filter(x => x.id !== t.id)"
           >&times;</button>
         </div>

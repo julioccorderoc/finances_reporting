@@ -2,14 +2,17 @@
 
 Single cash account in v1 is ``Cash USD`` (kind=cash, currency=USD). This
 module exposes the business primitives the Typer ``cash`` subcommand calls
-into; the subcommand itself lives in :mod:`finances.cli.main`.
+into (the subcommand lives in :mod:`finances.cli.main`) **and** the ones
+the viewer's Add-transaction dialog calls into
+(:mod:`finances.web.services.transaction_add`). Same functions, two front
+doors — ADR-008 amendment 2026-09-03. No importer writes here.
 
 Invariants:
 
 * Every inserted row has ``source='cash_cli'`` and a UUIDv4 ``source_ref``
   (rule-010 — cash entries have no stable external ID).
 * Expenses are stored with a **negative** ``amount`` so they decrease the
-  ``Cash USD`` balance in ``v_account_balances``.
+  ``Cash USD`` balance in ``v_account_balances``; income positive.
 * Inserts flow through :func:`transactions_repo.upsert_by_source_ref` (rule-010
   forbids raw ``INSERT`` into ``transactions``).
 """
@@ -91,6 +94,51 @@ def suggest_recent_categories(
     ]
 
 
+def _add_cash_row(
+    conn: sqlite3.Connection,
+    *,
+    kind: TransactionKind,
+    amount: Decimal | str | int,
+    description: str,
+    occurred_at: datetime,
+    category_id: int | None,
+    notes: str | None,
+    source_ref: str | None,
+) -> Transaction:
+    """The single manual write in this system. Both public writers route here.
+
+    ``amount`` is always the positive USD value that changed hands; the sign
+    is a property of ``kind``, applied here and nowhere else — an expense
+    decreases the balance, income increases it (see
+    ``docs/architecture`` and the expense-sign convention the reports assume).
+    """
+    amt = amount if isinstance(amount, Decimal) else Decimal(str(amount))
+    if amt <= 0:
+        raise ValueError(
+            "amount must be a positive number of USD; the sign is applied internally"
+        )
+    account = ensure_cash_usd_account(conn)
+    assert account.id is not None  # ensure_cash_usd_account always sets id
+    ref = source_ref if source_ref is not None else str(uuid.uuid4())
+    txn = Transaction(
+        account_id=account.id,
+        occurred_at=occurred_at,
+        kind=kind,
+        amount=amt if kind is TransactionKind.INCOME else -amt,
+        currency="USD",
+        description=description,
+        category_id=category_id,
+        source=CASH_CLI_SOURCE,
+        source_ref=ref,
+        needs_review=False,
+        notes=notes,
+    )
+    result = transactions_repo.upsert_by_source_ref(conn, txn)
+    persisted = transactions_repo.get_by_id(conn, result["id"])
+    assert persisted is not None  # just-inserted row must be fetchable
+    return persisted
+
+
 def add_cash_expense(
     conn: sqlite3.Connection,
     *,
@@ -98,6 +146,7 @@ def add_cash_expense(
     description: str,
     occurred_at: datetime,
     category_id: int | None = None,
+    notes: str | None = None,
     source_ref: str | None = None,
 ) -> Transaction:
     """Record a USD cash expense on the ``Cash USD`` account.
@@ -106,36 +155,57 @@ def add_cash_expense(
     applied internally so the balance decreases by the expected amount.
     ``source_ref`` defaults to a fresh UUIDv4 per rule-010.
     """
-    amt = amount if isinstance(amount, Decimal) else Decimal(str(amount))
-    if amt <= 0:
-        raise ValueError(
-            "amount must be a positive number of USD; expense sign is applied internally"
-        )
-    account = ensure_cash_usd_account(conn)
-    assert account.id is not None  # ensure_cash_usd_account always sets id
-    ref = source_ref if source_ref is not None else str(uuid.uuid4())
-    txn = Transaction(
-        account_id=account.id,
-        occurred_at=occurred_at,
+    return _add_cash_row(
+        conn,
         kind=TransactionKind.EXPENSE,
-        amount=-amt,
-        currency="USD",
+        amount=amount,
         description=description,
+        occurred_at=occurred_at,
         category_id=category_id,
-        source=CASH_CLI_SOURCE,
-        source_ref=ref,
-        needs_review=False,
+        notes=notes,
+        source_ref=source_ref,
     )
-    result = transactions_repo.upsert_by_source_ref(conn, txn)
-    persisted = transactions_repo.get_by_id(conn, result["id"])
-    assert persisted is not None  # just-inserted row must be fetchable
-    return persisted
+
+
+def add_cash_income(
+    conn: sqlite3.Connection,
+    *,
+    amount: Decimal | str | int,
+    description: str,
+    occurred_at: datetime,
+    category_id: int | None = None,
+    notes: str | None = None,
+    source_ref: str | None = None,
+) -> Transaction:
+    """Record USD cash coming IN on the ``Cash USD`` account.
+
+    The twin of :func:`add_cash_expense`, added with the viewer's
+    Add-transaction dialog (ADR-008 amendment 2026-09-03). Same account,
+    same ``source``, same UUIDv4 ``source_ref``; the amount is stored
+    positive because that is what increases the balance.
+
+    Cash that comes in is real and previously had nowhere to go: money
+    repaid in dollars, a sale, change returned. Without this it either
+    vanished or turned into a reconciliation plug, which ADR-018 exists to
+    make rare, not routine.
+    """
+    return _add_cash_row(
+        conn,
+        kind=TransactionKind.INCOME,
+        amount=amount,
+        description=description,
+        occurred_at=occurred_at,
+        category_id=category_id,
+        notes=notes,
+        source_ref=source_ref,
+    )
 
 
 __all__ = [
     "CASH_CLI_SOURCE",
     "CASH_USD_ACCOUNT_NAME",
     "add_cash_expense",
+    "add_cash_income",
     "ensure_cash_usd_account",
     "suggest_recent_categories",
 ]

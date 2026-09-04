@@ -1,0 +1,14 @@
+{# The Add-transaction dialog's category picker, scoped to one kind.
+
+   Its own partial because the kind control re-fetches it: an expense row
+   must not be offered Salary, and an income row must not be offered
+   Groceries — ``transaction_add.add_transaction`` refuses both, so an
+   unscoped picker would put a 422 on a keyboard shortcut (the same
+   reasoning as ``categories_view.picker_payload``'s own docstring).
+
+   Context: ``picker`` (PickerPayload), ``picker_columns``, ``picker_keys``.
+   The enclosing Alpine scope in modal_transaction_new.html supplies
+   ``pickedCategory()`` / ``pickCategory()``, which is the contract
+   triage_catpicker.html declares.
+#}
+{% include "partials/triage_catpicker.html" %}

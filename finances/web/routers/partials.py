@@ -17,6 +17,8 @@ from collections.abc import Sequence
 from datetime import UTC, date, datetime, time
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from typing import Literal
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 from fastapi import (
     APIRouter,
@@ -30,11 +32,14 @@ from fastapi import (
     UploadFile,
 )
 
+from pydantic import ValidationError
+
 from finances.db.repos import accounts as accounts_repo
 from finances.db.repos import categories as categories_repo
 from finances.db.repos import transaction_edits as transaction_edits_repo
 from finances.db.repos import transactions as transactions_repo
 from finances.domain import triage_admin
+from finances.domain.models import TransactionKind
 from finances.config import CARACAS_TZ
 from finances.format import fmt_date, fmt_number
 from finances.web.deps import dismissed_pairs as _dismissed_pairs, get_conn
@@ -81,9 +86,17 @@ from finances.web.services.rates_view import (
     build_rates_chart,
     rates_for_day,
 )
+from finances.web.services.transaction_add import (
+    NewTransactionRequest,
+    add_transaction,
+    entry_accounts,
+)
 from finances.web.services.transactions_query import (
     TransactionsFilter,
+    count_matching,
     query_transactions,
+    resolve_defaults,
+    row_matches_filter,
 )
 
 router = APIRouter(prefix="/_partial")
@@ -98,13 +111,19 @@ def transactions_list_partial(
     """Return ONLY the list partial — no base.html shell.
 
     Used by HTMX to swap ``#tx-list`` when filters / sort / page change.
+
+    An htmx request also gets the page header out of band: the swap
+    replaces ``#tx-list`` alone, and the Doto figure above it went stale
+    on every filter change. The full page renders the header itself, so
+    the twin exists only when htmx asked (see the monthly pivot, which
+    has the same shape for the same reason).
     """
     page = query_transactions(conn, f)
     templates = request.app.state.templates
     response = templates.TemplateResponse(
         request,
         "partials/transactions_list.html",
-        {"page": page, "filter": page.filter},
+        {"page": page, "filter": page.filter, "header_oob": _is_htmx(request)},
     )
     _push_page_url(request, response, "/transactions")
     return response
@@ -411,6 +430,8 @@ def _hx_trigger_json(
     queue_filter: str | None = None,
     resolved: int = 0,
     deleted_id: int | None = None,
+    toast_href: str | None = None,
+    toast_href_label: str | None = None,
 ) -> str:
     """Build an ``HX-Trigger`` header value: named events + a success toast.
 
@@ -439,7 +460,14 @@ def _hx_trigger_json(
         # The sitting counter is client state — the server knows how many
         # rows a write resolved, never when the sitting began.
         payload["triageResolved"] = {"count": resolved}
-    payload["toast"] = {"level": "success", "message": toast_message}
+    toast: dict[str, object] = {"level": "success", "message": toast_message}
+    if toast_href:
+        # A toast that reports something the surface cannot show has to
+        # offer the way to it, or the report is a dead end (the add-a-row
+        # case: written, but outside the current filter).
+        toast["href"] = toast_href
+        toast["hrefLabel"] = toast_href_label or "Show it"
+    payload["toast"] = toast
     return json.dumps(payload)
 
 
@@ -699,6 +727,248 @@ def transactions_edit_partial(
     )
     response.headers["HX-Trigger"] = _hx_trigger_json("closeModal", toast_message="Saved")
     return response
+
+
+# ---------------------------------------------------------------------------
+# Adding a transaction by hand (ADR-008 amendment 2026-09-03).
+# ---------------------------------------------------------------------------
+
+
+#: Fields of ``TransactionsFilter`` that take a list of values in the URL.
+_FILTER_LIST_FIELDS = frozenset(
+    {"accounts", "categories", "kinds", "sources", "currencies"}
+)
+
+#: Fields that must reach pydantic as ints. ``page_size`` is
+#: ``Literal[25, 50, 100]``, and pydantic will not build a Literal of ints
+#: from the string "50" — which the filter form puts in the URL on every
+#: request. Left as a string it failed the whole model, and the filter fell
+#: back to defaults: a row outside a one-day window came back reported as
+#: visible, under the unfiltered count.
+_FILTER_INT_FIELDS = frozenset({"page", "page_size"})
+
+_NEW_TXN_FIELD_LABELS = {
+    "account_id": "Account",
+    "occurred_at": "Date",
+    "kind": "Direction",
+    "amount": "Amount",
+    "description": "Description",
+    "category_id": "Category",
+    "notes": "Note",
+}
+
+
+def _filter_from_hx_current_url(request: Request) -> TransactionsFilter:
+    """Rebuild the list's filter from the page the request came from.
+
+    A write posted from a dialog has no query string of its own, and the
+    URL is what /transactions treats as the filter's source of truth (the
+    same reasoning base.html's ``refreshList`` follows). htmx sends
+    ``HX-Current-URL`` on every request, so the server can answer "would
+    your list show this row?" without the dialog having to carry the
+    filter in its own form.
+
+    Deliberately forgiving: this decides a courtesy (push the card, or
+    toast a link), never a write. Junk in the URL falls back to defaults
+    rather than failing an entry the owner already made.
+    """
+    raw = request.headers.get("HX-Current-URL")
+    if not raw:
+        return TransactionsFilter()
+    params = parse_qs(urlsplit(raw).query)
+    data: dict[str, object] = {}
+    for key, values in params.items():
+        if key not in TransactionsFilter.model_fields or not values:
+            continue
+        if key in _FILTER_LIST_FIELDS:
+            data[key] = values
+            continue
+        raw = values[-1]
+        if key in _FILTER_INT_FIELDS:
+            try:
+                data[key] = int(raw)
+            except ValueError:
+                continue
+        else:
+            data[key] = raw
+    try:
+        return TransactionsFilter(**data)
+    except ValidationError:
+        return TransactionsFilter()
+
+
+#: The dialog's CatPicker columns, and its lack of 1-8 shortcuts. The keys
+#: are False here and only here: this dialog has an amount field, and a
+#: digit typed into it must stay a digit rather than pick a category.
+_NEW_TXN_PICKER_COLUMNS = 2
+_NEW_TXN_PICKER_KEYS = False
+
+
+@router.get("/transactions/new", include_in_schema=False)
+def transaction_new_partial(
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Render the Add-transaction dialog.
+
+    Every ACTIVE account is offered; all but ``Cash USD`` come back
+    disabled, each naming what feeds it instead — see
+    :mod:`finances.web.services.transaction_add` for why that is the shape
+    rather than a one-account dropdown.
+    """
+    accounts = entry_accounts(conn)
+    cash = next(a for a in accounts if a.writable)
+    today = datetime.now(tz=CARACAS_TZ).date()
+
+    templates = request.app.state.templates
+    return templates.TemplateResponse(
+        request,
+        "partials/modal_transaction_new.html",
+        {
+            "accounts": accounts,
+            "cash_id": cash.id,
+            "cash_currency": cash.currency,
+            "today": today,
+            "picker": picker_payload(
+                conn, kind=TransactionKind.EXPENSE, today=today
+            ),
+            "picker_columns": _NEW_TXN_PICKER_COLUMNS,
+            "picker_keys": _NEW_TXN_PICKER_KEYS,
+        },
+    )
+
+
+@router.get("/transactions/new/categories", include_in_schema=False)
+def transaction_new_categories_partial(
+    request: Request,
+    kind: Literal["expense", "income"] = Query(default="expense"),
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Re-scope the dialog's category picker when the direction changes."""
+    today = datetime.now(tz=CARACAS_TZ).date()
+    templates = request.app.state.templates
+    return templates.TemplateResponse(
+        request,
+        "partials/new_transaction_picker.html",
+        {
+            "picker": picker_payload(conn, kind=TransactionKind(kind), today=today),
+            "picker_columns": _NEW_TXN_PICKER_COLUMNS,
+            "picker_keys": _NEW_TXN_PICKER_KEYS,
+        },
+    )
+
+
+@router.post("/transactions", include_in_schema=False)
+def transaction_add_partial(
+    request: Request,
+    account_id: str = Form(...),
+    occurred_at: str = Form(...),
+    kind: str = Form(...),
+    amount: str = Form(...),
+    description: str = Form(...),
+    category_id: str | None = Form(default=None),
+    notes: str | None = Form(default=None),
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Write one hand-entered row and answer with what the list should show.
+
+    Two shapes of answer, and the difference is honesty about the filter:
+
+    * the current filter shows the row, and the list is on page 1 → the
+      card, swapped into the top of the list, with the match count fixed
+      out-of-band;
+    * it does not → **no card**, and a toast carrying a link to a view
+      that does show it. Prepending a row a filter excludes is how a
+      filtered list quietly stops being a filtered list.
+
+    A closed account comes back 422 in the dialog's own words. The
+    disabled ``<option>`` is a courtesy; this is the guard (rule-008).
+    """
+    try:
+        req = NewTransactionRequest(
+            # Straight to pydantic, not through ``_parse_optional_int``:
+            # that helper's refusal is worded for ``category_id``, and it
+            # is the only field it is ever used for elsewhere.
+            account_id=account_id,
+            occurred_at=occurred_at,
+            kind=kind,
+            amount=amount,
+            description=description,
+            category_id=_parse_optional_int(category_id),
+            notes=notes,
+        )
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=422, detail=_describe_new_txn_errors(exc)
+        ) from exc
+
+    try:
+        card = add_transaction(conn, req)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    # Resolved here, not just inside the query helpers: the header partial
+    # renders the date window off this object, and an unresolved filter has
+    # no dates — which silently dropped "Wed, Aug 5 – Fri, Sep 4" from the
+    # out-of-band header while every server-side assertion still passed.
+    f = resolve_defaults(_filter_from_hx_current_url(request))
+    visible = f.page == 1 and row_matches_filter(conn, card.id, f)
+    total = count_matching(conn, f)
+
+    if visible:
+        toast_message = f"Added “{card.description}”"
+        href: str | None = None
+    else:
+        toast_message = (
+            f"Added “{card.description}”. Your current filter does not show it."
+        )
+        # Where it IS: its account, on its day. Narrow on purpose — a link
+        # that lands on a list the row is once again missing from would be
+        # worse than no link.
+        href = "/transactions?" + urlencode(
+            {
+                "accounts": card.account_name,
+                "date_from": card.occurred_at.date().isoformat(),
+                "date_to": card.occurred_at.date().isoformat(),
+            }
+        )
+
+    templates = request.app.state.templates
+    response = templates.TemplateResponse(
+        request,
+        "partials/transaction_added.html",
+        {
+            # No card on the hidden path: the response is then nothing but
+            # the out-of-band corrections and the dialog closing.
+            "card": card if visible else None,
+            "total": total,
+            "filter": f,
+            # The new row is the only match, so what stood there was the
+            # empty state. Emitting the OOB delete unconditionally would
+            # make htmx log a missing-target error on every other add.
+            "list_was_empty": visible and total == 1,
+        },
+    )
+    # No ``closeModal`` here — the dialog closes by an out-of-band swap in
+    # the template, which explains why at length. This header carries the
+    # toast only.
+    response.headers["HX-Trigger"] = _hx_trigger_json(
+        toast_message=toast_message,
+        toast_href=href,
+        toast_href_label="Show it" if href else None,
+    )
+    return response
+
+
+def _describe_new_txn_errors(exc: ValidationError) -> str:
+    """Pydantic's errors, in the dialog's vocabulary rather than pydantic's."""
+    parts: list[str] = []
+    for error in exc.errors():
+        field = ".".join(str(p) for p in error["loc"]) if error["loc"] else "input"
+        parts.append(f"{_NEW_TXN_FIELD_LABELS.get(field, field)}: {error['msg']}")
+    return "; ".join(parts) or "That entry could not be read."
 
 
 # ---------------------------------------------------------------------------

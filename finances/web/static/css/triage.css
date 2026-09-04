@@ -1001,7 +1001,21 @@
   align-items: center;
   gap: var(--space-2);
 }
+/* The disclosure is a chevron AND a label, so it has to lay them out as a
+ * row: tailwind.css's preflight sets `svg { display: block }`, which put
+ * the chevron on its own line above "The other 11" inside this otherwise
+ * block-level button. It also does not give up width — in the narrower
+ * Add-transaction dialog (.flow-modal) the flex row squeezed it below its
+ * own content and wrapped the label too. */
+.catpicker-disclosure .tlink {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
 .catpicker-disclosure-note {
+  min-width: 0;
   font-size: 11px;
   color: var(--text-placeholder);
 }

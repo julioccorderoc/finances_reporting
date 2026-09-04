@@ -313,6 +313,50 @@ def _project_card(
     )
 
 
+def row_matches_filter(
+    conn: sqlite3.Connection, txn_id: int, f: TransactionsFilter
+) -> bool:
+    """Would ``txn_id`` appear in the list ``f`` describes?
+
+    The same ``WHERE`` :func:`query_transactions` builds, narrowed to one
+    row — never a second, hand-written copy of the predicate, which is how
+    a "we added it to your list" claim starts being false for one filter
+    and true for the rest. Pagination is NOT part of the answer; the caller
+    knows which page is on screen.
+    """
+    f = resolve_defaults(f)
+    where_sql, where_params = _build_where(f)
+    row = conn.execute(
+        f"""
+        SELECT 1
+        FROM transactions t
+        LEFT JOIN accounts a ON a.id = t.account_id
+        LEFT JOIN categories c ON c.id = t.category_id
+        WHERE {where_sql} AND t.id = ?
+        """,
+        (*where_params, txn_id),
+    ).fetchone()
+    return row is not None
+
+
+def count_matching(conn: sqlite3.Connection, f: TransactionsFilter) -> int:
+    """How many rows ``f`` matches — the "N matches" line, without the page."""
+    f = resolve_defaults(f)
+    where_sql, where_params = _build_where(f)
+    return int(
+        conn.execute(
+            f"""
+            SELECT COUNT(*) AS c
+            FROM transactions t
+            LEFT JOIN accounts a ON a.id = t.account_id
+            LEFT JOIN categories c ON c.id = t.category_id
+            WHERE {where_sql}
+            """,
+            where_params,
+        ).fetchone()["c"]
+    )
+
+
 def query_transactions(
     conn: sqlite3.Connection, f: TransactionsFilter
 ) -> TransactionsPage:
@@ -379,6 +423,8 @@ __all__ = [
     "TransactionCard",
     "TransactionsFilter",
     "TransactionsPage",
+    "count_matching",
     "query_transactions",
     "resolve_defaults",
+    "row_matches_filter",
 ]

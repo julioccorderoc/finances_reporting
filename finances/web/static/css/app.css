@@ -110,6 +110,20 @@
 }
 .toast-dismiss:hover { opacity: 1; }
 
+/* The way out of a dead-end report. A toast that says "written, but your
+ * filter does not show it" has to be able to point at where it is; the
+ * link is underlined because on the inverse surface a colour shift alone
+ * is not a control. Only ever present when the trigger carried an href. */
+.toast-link {
+  flex: 0 0 auto;
+  color: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  white-space: nowrap;
+}
+.toast-link:hover { opacity: 0.85; }
+
 @media (max-width: 640px) {
   .toast-host {
     left: 1rem;

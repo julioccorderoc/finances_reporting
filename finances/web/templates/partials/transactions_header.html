@@ -1,0 +1,33 @@
+{# The Flow page answer, and the one thing you can DO to this ledger by hand.
+
+   Its own partial because a hand-written entry moves the figure, and the
+   figure renders OUTSIDE the list the entry is pushed into — the same shape
+   as accounts_header.html and monthly_header.html, and the same bug if it
+   is left behind (a headline that disagrees with the rows under it).
+   ``header_oob`` makes it an out-of-band twin.
+
+   Context: ``total`` (rows the current filter matches), ``filter``.
+
+   Nothing block-level in the actions slot: page_header renders it inside a
+   single <div class="page-actions">.
+#}
+{% from "_macros.html" import page_header %}
+{% from "_icons.html" import icon %}
+{% set answer %}{{ total | fmt_number(0) }} row{{ '' if total == 1 else 's' }}{% endset %}
+{% set meta %}
+  {%- if filter.date_from or filter.date_to -%}
+    <span class="flow-window">{{ filter.date_from | fmt_date if filter.date_from else '…' }} – {{ filter.date_to | fmt_date if filter.date_to else '…' }}</span>
+  {%- endif -%}
+{% endset %}
+<div id="transactions-header"{% if header_oob is defined and header_oob %} hx-swap-oob="true"{% endif %}>
+  {% call page_header("What happened?", answer, meta) %}
+    <button
+      type="button"
+      class="tbtn tbtn-primary"
+      data-add-transaction
+      hx-get="/_partial/transactions/new"
+      hx-target="#tx-modal-host"
+      hx-swap="innerHTML"
+    >{{ icon("plus", 14) }}Add transaction</button>
+  {% endcall %}
+</div>
