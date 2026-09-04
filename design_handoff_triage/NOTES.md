@@ -6,6 +6,77 @@ a place the shipped code deliberately does something other than what
 
 ---
 
+## 2026-09-03 — Set balance on /accounts, and four places it argues with itself
+
+**New surface, not a deviation from the triage design** — logged here because
+this file is where the reasons live and because two of the decisions below
+contradict what the obvious build would have done.
+
+`finances reconcile balances` had existed since 2026-08-04 and had been used
+three times. ADR-018 now has a viewer surface (its 2026-09-03 amendment); what
+follows is what the code does that a reader of the ADR alone would not expect.
+
+### The preview is scoped by account, not by position
+
+An adjustment is written per `(account, currency)`, so the natural window for
+"what could explain this gap" is the same pair. It is not: the panel lists
+every row on the **account** in the last 60 days, each labelled with its own
+currency.
+
+`v_account_balances` folds Binance Spot's USDC into its USDT figure — that is
+its own defect and the reason [project memory] says to use `position_balance`
+instead. A USDC row is therefore one of the most likely things to be *behind*
+a USDT gap that is not really there. Filtering it out would remove the
+evidence for the mistake the panel exists to prevent.
+
+### The card shows two different numbers, on purpose, with a line explaining it
+
+Binance Spot's card headline is the mixed figure (631.92 USDT in the walk
+below); the Set balance field is pre-filled with the position (673.92). Both
+are correct answers to different questions, and an adjustment is measured
+against the second. Rather than silently using one and displaying the other,
+the card prints *"Position only — the figure above sums this account's other
+assets too"* whenever they differ. It is a disclosure of an upstream defect,
+not a fix for it; fixing `v_account_balances` is its own job.
+
+### The note is required in the viewer and optional in the domain
+
+`record_adjustment(note=…)` defaults to `None` so `finances reconcile
+balances` keeps working unchanged, and `reconcile_view.write_adjustment`
+raises on a blank one. This looks like an inconsistency and is the point: a
+CLI invocation leaves its reason in a shell history and usually a commit
+message, a click leaves it nowhere, and `finances doctor` will list the row
+for as long as it exists.
+
+It lands in `notes`, never in `description` — rule-012 requires the
+description to name both figures and the date, and free text spliced into it
+would make that unparseable.
+
+### The card grid stopped stretching
+
+`.rpt-accounts` gained `align-items: start` and `.rpt-account` a
+`min-height: 8.375rem`. With the grid's default `stretch`, opening a reconcile
+panel dragged every card in its row to the panel's height — a ~900px-tall
+Cash USD card next to a Binance Spot preview. The `min-height` is what keeps
+the cards level once they no longer stretch: it is the height of a card with
+an institution line, which is the tallest shape the partial produces.
+
+### What the browser walk showed
+
+Driven at 1440×1100 against a scratch ledger (a seeded orphan transfer leg,
+two Binance Pay twins, a USDC row and a `*_nearest` bank row):
+
+- preview renders all four reason groups, each row opening its own modal;
+- writing re-renders the card (631.92 → 558.00 USDT), clears the panel, and
+  restates the page answer out-of-band;
+- the difference figure is `--text-signal`, the only red on the panel other
+  than the primary button.
+
+`hx-swap-oob` on the header is the same fix the monthly filter needed on
+2026-09-03: the total renders outside the swapped region, so without it the
+card and the Doto figure above it disagree.
+
+
 ## 2026-09-03 — the transfer categories are offered again (reverses a Wave 2 note)
 
 **Deviation, owner-decided.** Wave 2 recorded *"Transfer categories are not

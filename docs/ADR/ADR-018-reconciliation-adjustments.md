@@ -185,3 +185,108 @@ figure, the custodian figure and the reconciliation date. Adjustments are
 excluded from every income/expense aggregate via
 `money.SQL_NOT_CURRENCY_MOVEMENT` and included in every balance. An adjustment
 may not be written for a gap that a pending ingest would close.
+
+---
+
+## Amendment, 2026-09-03 — the viewer surface, and its guard rails
+
+**Status:** Accepted 2026-09-03. Owner request: *"'Set balance' on the
+Accounts page (ADR-018 gets a surface) — let's make it happen."*
+
+Everything above still holds. This amendment records what a *click* has to
+carry that a CLI invocation carried for free, and it changes nothing about
+what an adjustment means.
+
+### A.1 Why the CLI was not enough
+
+`finances reconcile balances` has existed since this ADR shipped and had
+been used three times. It is the right shape and the wrong door: the owner
+reads a balance in the Binance app and is looking at `/accounts`, not a
+terminal, and the account whose figure disagrees is the card in front of
+them. A surface that is one screen away from the moment of noticing is a
+surface that does not get used.
+
+### A.2 The preview is the feature; the write is the afterthought
+
+The obvious build — a number field and a Save button — is the dangerous
+one, and this project has the receipts. ADR-020 §1.2: three adjustments
+sized against balances a duplicate sync had corrupted fit the corruption
+exactly and left `finances doctor` reporting a healthy ledger that
+overstated income by 10,462.71 USDC. Then again on 2026-09-03: ten Binance
+Pay twins double-counting 2,260.72 USDT (ADR-022). **Both times the ledger
+looked exactly like a ledger missing history.** A plug cannot tell the
+difference, because absorbing the difference is the whole of what it does.
+
+So `POST /_partial/accounts/{id}/reconcile/preview` answers with the gap
+*and the case against writing it*: every row in the last 60 days on that
+account that is
+
+- **unpaired** — a `kind='transfer'` leg or a `p2p:` leg with no
+  counterpart (rule-002),
+- a **same-day, same-amount twin**,
+- **uncategorised**, or
+- **priced from a nearest rate** (ADR-021 `*_nearest`),
+
+each one a link that opens its own modal, because the answer to "that is a
+duplicate" is to delete it (ADR-022), not to plug around it. The window is
+scoped to the account but **not** to the reconciled currency: Binance
+Spot's USDC rows are exactly the kind of thing that gets mistaken for a
+USDT gap, and `v_account_balances` folds them into the same figure.
+
+### A.3 The ledger figure is the position, not the account balance
+
+`v_account_balances` sums an account across currencies — Binance Spot's
+"USDT" figure includes its USDC. An adjustment is written per
+`(account, currency)`, so the control pre-fills, and the preview measures,
+`reconciliation_adjustments.position_balance` instead. Where the two differ
+the card says so in one line rather than showing two numbers that disagree
+and explaining neither.
+
+### A.4 A note is required in the viewer and optional in the domain
+
+`record_adjustment` gains `note`, stored in `transactions.notes` — never in
+`description`, which rule-012 requires to name both figures and the date in
+a shape a machine can read.
+
+The viewer refuses a blank one (422). The CLI does not require it: an
+invocation leaves its reason in a shell history and a commit message, and a
+click leaves it nowhere. Since `finances doctor` will list this row for as
+long as it exists, a plug with no stated reason is sediment with a
+timestamp.
+
+### A.5 Dating is unchanged: today
+
+The row is dated `datetime.now(CARACAS_TZ)`. Dating at the ledger's start
+is ADR-020's opening-position claim — *"the books began mid-story"* — which
+is a different assertion, has its own stable `source_ref`, refuses to go
+negative, and stays a CLI act. The viewer offers only the dated
+adjustment. §2.1's cost is accepted again: history before the
+reconciliation date stays wrong, knowably, with a date attached.
+
+### A.6 The plug does not disappear
+
+Two surfaces, so that a residual can never quietly become the ledger:
+
+- Today carries a line — *"N adjustments · $X unexplained since
+  &lt;date&gt;"* — for as long as any exist, linking to the rows. `$X` is the
+  sum of the plugs' **magnitudes**, not their net: two opposite plugs
+  netting to zero are still two assertions. A plug in a currency the chain
+  cannot price is counted, never valued at zero.
+- `finances doctor` gains `reconciliation_adjustments`, a **warning**:
+  writing one is legitimate, carrying one silently is not.
+  `source='opening_balance'` rows are excluded — different claim.
+
+### A.7 What was deliberately not built
+
+**Reconciling a currency other than the account's own.** The control names
+one position, the account's declared asset. A Binance USDC plug is a real
+need and it needs a way to choose the asset; it is not this.
+
+**A "reconcile everything" sweep.** Every plug is a separate assertion
+about a separate position, and a button that writes five of them at once is
+a button that gets pressed without reading five previews.
+
+**Editing or reversing a plug from the viewer.** Reconciling the same
+position again is already the supported path — the uuid `source_ref` exists
+so that a second reconciliation is a second event — and ADR-022's delete
+covers removing one outright.

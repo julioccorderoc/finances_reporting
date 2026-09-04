@@ -5,7 +5,7 @@
 
 > **Two shapes, two situations.** A gap that arose on a *known* date gets a dated adjustment (ADR-018, below). A gap from history that no longer exists anywhere gets an **opening position** dated at the ledger's start (ADR-020, at the end of this file). ADR-020 supersedes ADR-018's dating argument; everything else in ADR-018 stands.
 
-**Constraint:** A `kind='adjustment'` row may only be written by `finances.domain.reconciliation_adjustments.record_adjustment`, invoked from `finances reconcile balances`. No ingest, backfill, or web write path may create one.
+**Constraint:** A `kind='adjustment'` row may only be written by `finances.domain.reconciliation_adjustments.record_adjustment`, invoked from `finances reconcile balances` or from the Accounts page's Set balance control (ADR-018 amendment 2026-09-03, at the end of this file). No ingest or backfill may create one, and no web path may write one except by calling that function.
 
 **What an adjustment means:** the difference between what the ledger computes for one `(account, currency)` position and what the custodian holding it reports, on the date the reconciliation was performed. It is the bookkeeping response to history that no longer exists — Binance serves internal-transfer records for six months only, and this ledger's history predates that.
 
@@ -39,3 +39,30 @@
 **The custodian figure is still an owner-supplied input**, exactly as for dated adjustments, and for the same reason.
 
 **A restatement is not an audit trail.** Replacing prior opening rows discards what was previously stated, and `transaction_edits` does not record deletes. If the history of restatements ever matters it needs its own record.
+
+## The viewer surface (ADR-018 amendment, 2026-09-03)
+
+**Constraint:** `finances.web.services.reconcile_view.write_adjustment` is the
+web viewer's only path to an adjustment, and it delegates the write to
+`record_adjustment` unchanged. The constraint at the top of this file is
+untouched: the domain function is still the only writer.
+
+**Invariants:**
+
+- **A preview precedes every write.** `POST
+  /_partial/accounts/{id}/reconcile/preview` states the gap and lists, for the
+  last 60 days on that account, the rows that could produce a false one:
+  unpaired legs, same-day same-amount twins, uncategorised rows and rows
+  priced `*_nearest`. It is scoped by account, deliberately **not** by
+  currency — a USDC row is a way to misread a USDT gap.
+- **A note is required from the viewer**, stored in `transactions.notes`, and
+  optional from the CLI. It never enters `description`, which must stay
+  machine-readable per the invariant above.
+- **The figure reconciled is the position**, `position_balance(account,
+  account.currency)` — never `v_account_balances`, which sums an account
+  across currencies.
+- **Dated now, in Caracas.** The viewer offers only the dated adjustment.
+  Opening positions stay `finances reconcile opening`.
+- **A plug stays visible.** Today carries `N adjustments · $X unexplained
+  since <date>` (magnitudes, not net) for as long as any exist, and
+  `finances doctor` reports `reconciliation_adjustments` as a warning.
