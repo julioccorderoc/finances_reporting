@@ -38,7 +38,7 @@ from finances.db.repos import accounts as accounts_repo
 from finances.db.repos import categories as categories_repo
 from finances.db.repos import transaction_edits as transaction_edits_repo
 from finances.db.repos import transactions as transactions_repo
-from finances.domain import triage_admin
+from finances.domain import cash_conversion, transfers, triage_admin
 from finances.domain.models import TransactionKind
 from finances.config import CARACAS_TZ
 from finances.format import fmt_date, fmt_number
@@ -51,6 +51,7 @@ from finances.web.services import uploads as uploads_svc
 from finances.web.services.categories_view import picker_payload
 from finances.web.services.accounts_view import build_account_cards
 from finances.web.services.pairing import find_pair_candidates
+from finances.web.services import cash_conversion_view
 from finances.web.services import reconcile_view
 from finances.web.services.transactions_query import _project_card
 from finances.web.services.transactions_write import (
@@ -573,6 +574,129 @@ def transactions_modal_partial(
             "top_categories": top_categories(conn, kind=txn.kind),
             "account_name": account_name,
             "history": _build_edit_history(conn, txn_id),
+            # One footer slot, two verbs. Mutually exclusive by construction:
+            # can_convert requires an unpaired row, can_unpair a paired one.
+            "can_become_cash": cash_conversion_view.can_convert(conn, txn),
+            "can_unpair": cash_conversion_view.can_unpair(txn),
+        },
+    )
+
+
+@router.get("/transactions/{txn_id}/became-cash", include_in_schema=False)
+def transactions_became_cash_panel(
+    request: Request,
+    txn_id: int,
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """The one-field panel: how many dollars came back.
+
+    A GET because it renders, and because the owner must be able to think
+    about the number before anything is written. It re-checks
+    ``can_convert`` rather than trusting that the button was visible — the
+    template is a courtesy, this is the guard.
+    """
+    txn = transactions_repo.get_by_id(conn, txn_id)
+    if txn is None:
+        raise HTTPException(status_code=404, detail=f"transaction id={txn_id} not found")
+    if not cash_conversion_view.can_convert(conn, txn):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "this row cannot have become cash: it is money arriving, "
+                "already paired, or already cash"
+            ),
+        )
+
+    templates = request.app.state.templates
+    return templates.TemplateResponse(
+        request,
+        "partials/became_cash_panel.html",
+        {
+            "txn": txn,
+            "suggested_usd": cash_conversion_view.suggested_usd(conn, txn),
+        },
+    )
+
+
+@router.post("/transactions/{txn_id}/became-cash", include_in_schema=False)
+def transactions_became_cash(
+    txn_id: int,
+    usd_received: str = Form(...),
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Record the conversion: promote the row, insert the Cash USD leg, pair.
+
+    Answers with events rather than markup, exactly as Delete does and for
+    the same reason: this modal opens from /transactions AND from the
+    dashboard, and htmx will not send a request whose ``hx-target`` matches
+    nothing. ``closeModal`` dismisses the dialog, ``listDirty`` asks whatever
+    is showing rows to fetch them again, and the toast names the dollars and
+    the price they were struck at.
+    """
+    try:
+        amount = Decimal(usd_received)
+    except InvalidOperation as exc:
+        raise HTTPException(
+            status_code=422, detail=f"{usd_received!r} is not an amount"
+        ) from exc
+
+    try:
+        result = cash_conversion.convert_to_cash(
+            conn, transaction_id=txn_id, usd_received=amount
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return Response(
+        status_code=200,
+        headers={
+            "HX-Trigger": _hx_trigger_json(
+                "closeModal",
+                "listDirty",
+                toast_message=cash_conversion_view.describe_conversion(result),
+            )
+        },
+    )
+
+
+@router.post("/transactions/{txn_id}/unpair", include_in_schema=False)
+def transactions_unpair(
+    txn_id: int,
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Break this row's transfer back into the two rows it was made from.
+
+    The undo ADR-022 said did not exist: its delete refuses a paired row
+    until something can break the pair. Nothing is deleted here — the toast
+    says so, because the owner would otherwise assume the row they just took
+    back has gone, and a stray Cash USD leg would sit in the ledger
+    inflating a balance nobody is looking at.
+    """
+    txn = transactions_repo.get_by_id(conn, txn_id)
+    if txn is None:
+        raise HTTPException(status_code=404, detail=f"transaction id={txn_id} not found")
+    if txn.transfer_id is None:
+        raise HTTPException(status_code=422, detail="this row is not part of a transfer")
+
+    try:
+        legs = transfers.unpair(conn, transfer_id=txn.transfer_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    names = {
+        int(r["id"]): str(r["name"])
+        for r in conn.execute("SELECT id, name FROM accounts").fetchall()
+    }
+    return Response(
+        status_code=200,
+        headers={
+            "HX-Trigger": _hx_trigger_json(
+                "closeModal",
+                "listDirty",
+                toast_message=cash_conversion_view.describe_unpair(legs, names),
+            )
         },
     )
 

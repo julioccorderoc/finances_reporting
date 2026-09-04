@@ -1,0 +1,95 @@
+{# «Became cash» — one field, revealed inside the Flow modal.
+
+   Rendered standalone by GET /_partial/transactions/{id}/became-cash, so it
+   carries its own wrapper id and Cancel empties that same host.
+
+   One question is asked, because one thing is unknown: how many dollars came
+   back. Everything else the ledger already holds — the date, the account, the
+   amount that left — and the rate is arithmetic on the answer, shown live so
+   a fat-fingered 4000 reads as an absurd price before it is written rather
+   than as a balance nobody checks.
+
+   Context:
+     txn            Transaction   the outgoing row
+     suggested_usd  Decimal|None  what the ledger prices it at, or None
+
+   House classes only (.flow-* / .tbtn-* in flow.css and triage.css). The
+   vendored CSS has no build step, so a new class here would render as
+   nothing.
+#}
+{% set native = txn.amount | abs %}
+{% set is_dollars = txn.currency in ('USD', 'USDT', 'USDC') %}
+<div
+  id="became-cash-panel"
+  class="flow-modal-section"
+  {# Single quotes throughout, never ``| tojson``: tojson leaves the double
+     quote unescaped, and one of those inside this attribute ends it —
+     silently, with every server-side test still green. #}
+  x-data="{
+    native: {{ native }},
+    usd: {{ suggested_usd if suggested_usd is not none else 0 }},
+    get rate() {
+      const usd = Number(this.usd);
+      if (!usd || usd <= 0) return null;
+      return (this.native / usd).toFixed(4);
+    }
+  }"
+  x-init="$nextTick(() => { const el = $el.querySelector('[name=usd_received]'); if (el) { el.focus(); el.select(); } })"
+>
+  <span class="teyebrow">Became cash</span>
+
+  <form
+    id="became-cash-form"
+    class="flow-modal-form"
+    hx-post="/_partial/transactions/{{ txn.id }}/became-cash"
+    {# hx-swap="none": the response is events, not markup. The modal opens
+       from /transactions AND from the dashboard, and a list-shaped answer
+       would make this a dead control on the second one. #}
+    hx-target="this"
+    hx-swap="none"
+  >
+    <label class="flow-field">
+      <span class="teyebrow">Dollars received</span>
+      <input
+        type="text"
+        inputmode="decimal"
+        name="usd_received"
+        class="flow-input flow-mono"
+        value="{{ '%.2f' % suggested_usd if suggested_usd is not none else '' }}"
+        x-model="usd"
+        autocomplete="off"
+      >
+      <span class="flow-hint">
+        {%- if suggested_usd is not none -%}
+          The ledger prices this row at ${{ '%.2f' % suggested_usd }} — the bills
+          you actually got are the one number it cannot know, so overwrite it.
+        {%- else -%}
+          The ledger cannot price this row, so there is nothing to suggest.
+          Type the bills you actually got.
+        {%- endif -%}
+      </span>
+    </label>
+
+    {% if not is_dollars %}
+    <p class="flow-muted">
+      Struck rate:
+      <span class="flow-mono" x-text="rate ? rate + ' {{ txn.currency }} per dollar' : '—'"></span>
+    </p>
+    {% endif %}
+  </form>
+
+  <div class="flow-pair-actions">
+    {# Removed in the browser, not fetched: an endpoint whose whole job is to
+       render nothing is a round trip to display an empty string. #}
+    <button
+      type="button"
+      class="tbtn tbtn-sm tbtn-ghost"
+      @click="$root.remove()"
+    >Cancel</button>
+    <button
+      type="submit"
+      form="became-cash-form"
+      class="tbtn tbtn-sm tbtn-primary"
+    >Record</button>
+  </div>
+</div>

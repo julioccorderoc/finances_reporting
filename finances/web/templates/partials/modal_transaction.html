@@ -120,7 +120,11 @@
       </section>
       {% endif %}
 
-      {# 4. The decision: category, rate, note. -------------------------- #}
+      {# 4. Where «Became cash» reveals its one field. Empty until the
+            footer control fetches into it; Cancel empties it again. ------ #}
+      <div id="became-cash-host"></div>
+
+      {# 5. The decision: category, rate, note. -------------------------- #}
       <form
         id="tx-edit-form"
         class="flow-modal-form"
@@ -216,6 +220,36 @@
         hx-swap="none"
         hx-confirm="Delete this row from the ledger? It will not come back when the statement is imported again."
       >Delete</button>
+      {# One slot, two verbs, mutually exclusive by construction: the
+         router sets can_become_cash only on an unpaired row and can_unpair
+         only on a paired one. It is the same question either way — what is
+         the other side of this row, and can I take it back? — so it keeps
+         one position, next to the other rare irreversible act.
+
+         Became cash reveals a field rather than acting on click: the number
+         it needs is one the owner is recalling, not confirming. Unpair acts
+         at once behind a confirm, because it puts things back rather than
+         writing something new. #}
+      {% if can_become_cash %}
+      <button
+        type="button"
+        class="tbtn tbtn-ghost"
+        data-modal-became-cash
+        hx-get="/_partial/transactions/{{ txn.id }}/became-cash"
+        hx-target="#became-cash-host"
+        hx-swap="innerHTML"
+      >Became cash…</button>
+      {% elif can_unpair %}
+      <button
+        type="button"
+        class="tbtn tbtn-ghost"
+        data-modal-unpair
+        hx-post="/_partial/transactions/{{ txn.id }}/unpair"
+        hx-target="this"
+        hx-swap="none"
+        hx-confirm="Break this transfer? Both rows stay in the ledger, unpaired — delete either one separately if it should not exist."
+      >Unpair</button>
+      {% endif %}
       <button
         type="button"
         class="tbtn tbtn-ghost"

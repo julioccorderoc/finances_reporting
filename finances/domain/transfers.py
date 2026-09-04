@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 import sqlite3
 import uuid
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any, NamedTuple
 
@@ -199,7 +199,28 @@ def _promote_to_transfer(
 
     Only the flag is cleared. ``category_id`` is left as-is so a
     category the owner set by hand survives the promotion.
+
+    Both overwritten columns are recorded in ``transfer_pairings`` first
+    (migration 024). Without that pre-image :func:`unpair` could only guess
+    them back from the amount's sign, which is wrong for every leg an
+    importer created as a transfer to begin with — and ADR-022's delete
+    stays refused on both rows until somebody can break the pair.
     """
+    conn.execute(
+        """
+        INSERT INTO transfer_pairings
+            (transfer_id, transaction_id, prior_kind, prior_needs_review, created_at)
+        SELECT ?, id, kind, needs_review, ?
+        FROM transactions WHERE id = ?
+        -- DO NOTHING, never DO UPDATE: promoting an already-promoted row
+        -- (same tid, both-anchors mode run twice) would otherwise record
+        -- prior_kind='transfer' over the truth and make the row
+        -- un-restorable. The first write is the only honest one, and
+        -- unpair deletes it, so a re-pair after an unpair records afresh.
+        ON CONFLICT(transaction_id) DO NOTHING
+        """,
+        (transfer_id, datetime.now(tz=UTC).isoformat(), transaction_id),
+    )
     conn.execute(
         "UPDATE transactions SET kind = 'transfer', transfer_id = ?, "
         "needs_review = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -491,6 +512,104 @@ def create_transfer(
 # ---------------------------------------------------------------------------
 # validate
 # ---------------------------------------------------------------------------
+
+#: Sources whose transfer pairs are the ledger's own corrections, not
+#: something the owner did by hand. ``transactions_repo.delete`` refuses
+#: individual rows from these (ADR-022 §2.3); ``unpair`` refuses their
+#: pairs for the same reason — an ADR-020 opening pair is restated through
+#: ``record_opening``, never broken from a footer button.
+UNBREAKABLE_PAIR_SOURCES: frozenset[str] = frozenset(
+    {"reconciliation", "opening_balance"}
+)
+
+
+def unpair(conn: sqlite3.Connection, *, transfer_id: str) -> list[Transaction]:
+    """Break a transfer back into the two rows it was made from.
+
+    ADR-022 refuses to delete a paired row -- *"the pair has to be broken
+    first, and no surface does that yet"*. This is that surface. It replays
+    the pre-image ``_promote_to_transfer`` recorded (migration 024): ``kind``
+    and ``needs_review`` go back to what they were, ``transfer_id`` goes to
+    NULL, and the pre-image is consumed so it cannot be replayed twice.
+
+    **It never deletes.** Both rows stay. A leg that should not exist is then
+    an ordinary unpaired row, and ADR-022's delete -- with its tombstone
+    rules -- takes it from there. Deleting from two places, under two sets of
+    rules, is how a ledger loses a row it meant to keep.
+
+    Refused when no pre-image exists: every pair made before migration 024,
+    and every pair an importer authored. Those legs were born
+    ``kind='transfer'``, so "restoring" them to ``expense`` because the
+    amount is negative would invent history rather than recover it.
+
+    Returns the rows as they stand after the break, so a caller can name what
+    it changed.
+    """
+    pre_image = conn.execute(
+        "SELECT transaction_id, prior_kind, prior_needs_review "
+        "FROM transfer_pairings WHERE transfer_id = ?",
+        (transfer_id,),
+    ).fetchall()
+    if not pre_image:
+        raise ValueError(
+            "there is no record of what these rows were before they were "
+            "paired, so the pair cannot be broken without inventing one. "
+            "Pairs made before this was recorded, and pairs an importer "
+            "made, stay as they are"
+        )
+
+    # Every leg, not only the recorded ones: a leg created by the pairing
+    # itself (``_insert_leg``) is born with a transfer_id and never passes
+    # through ``_promote_to_transfer``, so it has no pre-image -- but leaving
+    # its transfer_id pointing at a transfer that no longer exists would be a
+    # worse orphan than the one being fixed.
+    leg_ids = [
+        int(r["id"])
+        for r in conn.execute(
+            "SELECT id FROM transactions WHERE transfer_id = ? ORDER BY id",
+            (transfer_id,),
+        ).fetchall()
+    ]
+
+    for leg_id in leg_ids:
+        leg = txn_repo.get_by_id(conn, leg_id)
+        if leg is not None and leg.source in UNBREAKABLE_PAIR_SOURCES:
+            raise ValueError(
+                f"a '{leg.source}' pair is the ledger's own correction, not "
+                "a pairing decision: restate it through the module that "
+                "wrote it (ADR-018 / ADR-020), never by breaking it"
+            )
+
+    conn.execute("SAVEPOINT unpair_transfer")
+    try:
+        for row in pre_image:
+            conn.execute(
+                "UPDATE transactions SET kind = ?, needs_review = ?, "
+                "transfer_id = NULL, updated_at = CURRENT_TIMESTAMP "
+                "WHERE id = ?",
+                (
+                    row["prior_kind"],
+                    int(row["prior_needs_review"]),
+                    int(row["transaction_id"]),
+                ),
+            )
+        conn.execute(
+            "UPDATE transactions SET transfer_id = NULL, "
+            "updated_at = CURRENT_TIMESTAMP WHERE transfer_id = ?",
+            (transfer_id,),
+        )
+        conn.execute(
+            "DELETE FROM transfer_pairings WHERE transfer_id = ?", (transfer_id,)
+        )
+    except Exception:
+        conn.execute("ROLLBACK TO unpair_transfer")
+        raise
+    finally:
+        conn.execute("RELEASE unpair_transfer")
+
+    broken = [txn_repo.get_by_id(conn, leg_id) for leg_id in leg_ids]
+    return [leg for leg in broken if leg is not None]
+
 
 def validate(
     conn: sqlite3.Connection,
