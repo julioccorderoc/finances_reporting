@@ -81,13 +81,21 @@
 
 {%- macro prov(chip, rate, show_rate=True) -%}
 {#- Where the number came from. A BCV-priced row and a realized-rate row
-    are not the same claim, so they do not share a treatment (D2). -#}
+    are not the same claim, so they do not share a treatment (D2).
+
+    The explanation is a bubble of our own rather than a ``title``. The
+    native tooltip is the browser's to draw or not, never opens on
+    keyboard focus, and cannot be styled — while ``cursor: help`` had been
+    promising one all along. ``tabindex="0"`` is what lets the keyboard
+    reach it; the bubble itself is inert to the pointer so hovering the
+    chip is never interrupted by its own tooltip. -#}
 <span class="prov {{ chip.tone_class }}"
       data-prov="{{ chip.source }}"
-      title="{{ prov_title(chip, rate) }}">
+      tabindex="0">
   {%- if chip.warn_icon %}{{ icon("triangle-alert", 10) }}{% endif -%}
   {%- if chip.approximate %}≈{% endif %}{{ chip.label }}
   {%- if show_rate and rate is not none %} <span class="prov-rate">{{ rate | fmt_number }}</span>{% endif -%}
+  <span class="prov-help" role="tooltip">{{ prov_title(chip, rate) }}</span>
 </span>
 {%- endmacro -%}
 
