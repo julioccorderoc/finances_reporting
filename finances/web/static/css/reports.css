@@ -73,7 +73,8 @@
   box-shadow: var(--focus-ring);
 }
 
-/* A raised tile: the mobile Total, a rate, an account. */
+/* A raised tile: the mobile Total, an account. (The rates page had
+   these too until its date pivot replaced the latest-per-pair tiles.) */
 .rpt-tile {
   display: flex;
   flex-direction: column;
@@ -83,17 +84,6 @@
   background: var(--surface-raised);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
-}
-.rpt-tile-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-}
-.rpt-tile-caption {
-  font-size: var(--caption-size);
-  line-height: var(--caption-line);
-  color: var(--text-tertiary);
 }
 /* The mono figure of a tile. Not Doto: the page has exactly one of those. */
 .rpt-figure {
@@ -206,11 +196,6 @@
   align-items: center;
   gap: var(--space-3);
   flex-wrap: wrap;
-}
-.rpt-chart-legend-note {
-  margin-left: auto;
-  font-size: var(--caption-size);
-  color: var(--text-tertiary);
 }
 
 /* ── Monthly: filters ───────────────────────────────────────────────────── */
@@ -574,27 +559,11 @@
   color: var(--red-700);
 }
 
-/* ── Rates ──────────────────────────────────────────────────────────────── */
-
-.rpt-rate-tiles {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
-  gap: var(--space-2);
-}
-/* A rate carries less text than an account, so its tile sits denser. */
-.rpt-rate-tile {
-  gap: 4px;
-  padding: var(--space-3) var(--space-4);
-}
-
 /* ── Narrow widths ──────────────────────────────────────────────────────── */
 
 @media (max-width: 640px) {
   .rpt-chart {
     height: 224px;
-  }
-  .rpt-chart-legend-note {
-    margin-left: 0;
   }
 }
 
@@ -808,4 +777,188 @@
   font-size: var(--caption-size);
   line-height: var(--caption-line);
   color: var(--text-tertiary);
+}
+
+/* ── Rates: the date pivot ──────────────────────────────────────────────── */
+
+/* The scroll container. Both axes, and a height cap: a 365-day range is
+   365 rows, and a page that long buries everything under it. Capping here
+   is also what lets the header stick — a sticky row needs a scrolling
+   ancestor, and `overflow-x: auto` alone would make one on the wrong
+   axis. */
+.rpt-rate-scroll {
+  max-height: 60vh;
+  overflow: auto;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+}
+/* Column count rides in --rate-cols, set by the template, so one rule
+   serves any number of rate streams. */
+.rpt-rate-table {
+  display: grid;
+  grid-template-columns:
+    minmax(8.5rem, max-content)
+    repeat(var(--rate-cols), minmax(6.5rem, 1fr));
+  min-width: max-content;
+  /* The last row's hairline would otherwise sit one pixel inside the
+     container's own border and read as a 2px rule. Pulling the grid down
+     by that pixel lands the two on top of each other. Cheaper than
+     counting cells to find the final row, which cannot be done without
+     knowing --rate-cols at selector time. */
+  margin-bottom: -1px;
+}
+.rpt-rate-table > * {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: 9px var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+/* Header. Sticky against the container's own vertical scroll. */
+.rate-th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  padding-top: var(--space-3);
+  padding-bottom: var(--space-3);
+  background: var(--surface-raised);
+  border-bottom: 1px solid var(--border-default);
+  text-align: right;
+}
+.rate-th-pair {
+  font-family: var(--font-mono);
+  font-size: var(--caption-size);
+  font-weight: 500;
+  letter-spacing: var(--micro-tracking);
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+.rate-th-source {
+  font-size: var(--caption-size);
+  line-height: var(--caption-line);
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+/* rule-005: BCV is never a headline. The column says so once, in its
+   heading, rather than on every one of its cells. */
+.rate-th-source.is-reference {
+  font-style: italic;
+}
+
+/* The date column stays put while the streams scroll under it. */
+.rate-th-date,
+.rate-td-date {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  align-items: center;
+  background: var(--surface-raised);
+  border-right: 1px solid var(--border-subtle);
+  font-size: var(--body-sm-size);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.rate-th-date {
+  z-index: 3;
+  flex-direction: row;
+  align-items: center;
+  text-align: left;
+}
+.rate-td-date.is-ahead {
+  color: var(--text-primary);
+}
+
+/* Figures. Mono and tabular so the decimal points form a line. */
+.rate-td {
+  justify-content: flex-end;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--body-sm-size);
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+.rate-td.is-reference {
+  color: var(--text-tertiary);
+}
+.rate-td[data-empty] {
+  color: var(--text-disabled);
+}
+
+@media (max-width: 640px) {
+  .rpt-rate-scroll {
+    max-height: 70vh;
+  }
+  .rpt-rate-table > * {
+    padding-left: var(--space-2);
+    padding-right: var(--space-2);
+  }
+}
+
+/* ── The chart's hover overlay ──────────────────────────────────────────── */
+
+/* The same bubble idiom as triage's .prov-help: ink ground, inverse text,
+   the --shadow-pop token. Absolutely positioned inside .rpt-chart (which
+   is already relative) and free to spill past it — the card sets no
+   overflow clip, so a reading near the plot floor stays legible instead
+   of being cut in half the way the in-canvas tooltip was. */
+.rpt-chart-tip {
+  position: absolute;
+  z-index: var(--z-overlay);
+  width: max-content;
+  min-width: 10rem;
+  padding: 8px 10px;
+  background: var(--surface-inverse);
+  color: var(--text-inverse);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-pop);
+  pointer-events: none;
+}
+.rpt-chart-tip-day {
+  margin: 0 0 6px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--ink-700);
+  font-family: var(--font-sans);
+  font-size: var(--caption-size);
+  font-weight: 500;
+  white-space: nowrap;
+}
+/* Two columns: what it is, what it was. */
+.rpt-chart-tip-rows {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  gap: 3px var(--space-4);
+  margin: 0;
+}
+.rpt-chart-tip-name {
+  font-family: var(--font-mono);
+  font-size: var(--caption-size);
+  white-space: nowrap;
+}
+.rpt-chart-tip-name span {
+  font-family: var(--font-sans);
+  color: var(--ink-300);
+}
+.rpt-chart-tip-value {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--caption-size);
+  white-space: nowrap;
+}
+/* rule-005: BCV is reference, and reads as it. */
+.rpt-chart-tip-value.is-reference {
+  color: var(--ink-300);
+}
+.rpt-chart-tip-none {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--caption-size);
+  color: var(--ink-300);
 }

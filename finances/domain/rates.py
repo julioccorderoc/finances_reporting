@@ -161,6 +161,17 @@ def max_age_days(source: str) -> int | None:
     return _TIER_MAX_AGE_DAYS.get(source)
 
 
+def ladder_tiers() -> tuple[tuple[str, str, str], ...]:
+    """The fallback ladder as ``(base, quote, source)``, in priority order.
+
+    Public for the same reason :func:`max_age_days` is: readers outside the
+    resolver need the chain's own order, and a second copy of it is what
+    rule-012 forbids. The /rates table orders its columns by this, so a
+    re-ordering of the ladder re-orders the page with no edit there.
+    """
+    return _FALLBACK_TIERS
+
+
 def _tiers_for(currency: str) -> tuple[tuple[str, str, str], ...]:
     """The tiers that can price ``currency`` — the ones quoting in it.
 
@@ -300,6 +311,7 @@ __all__ = [
     "REALIZED_SOURCE",
     "RateResolution",
     "USER_RATE_SOURCE",
+    "ladder_tiers",
     "max_age_days",
     "resolve",
     "resolve_detail",

@@ -85,6 +85,7 @@ from finances.web.services.monthly_view import (
 from finances.web.services.rates_view import (
     DEFAULT_RANGE_DAYS,
     build_rates_chart,
+    build_rates_table,
     rates_for_day,
 )
 from finances.web.services.transaction_add import (
@@ -1828,20 +1829,25 @@ def triage_unpark_all_partial(
 
 
 
-@router.get("/rates/chart", include_in_schema=False)
-def rates_chart_partial(
+@router.get("/rates/panel", include_in_schema=False)
+def rates_panel_partial(
     request: Request,
     range_days: int = Query(DEFAULT_RANGE_DAYS, ge=1, le=3650),
     conn: sqlite3.Connection = Depends(get_conn),
 ):
-    """Return ONLY the rates chart fragment for HTMX range-toggle swap."""
-    chart = build_rates_chart(conn, range_days=range_days)
+    """Return the chart AND the table for the HTMX range-toggle swap.
+
+    One fragment rather than two: the range toggle governs both, and a
+    swap that moved only the chart left the table showing a different
+    window from the plot directly above it.
+    """
     templates = request.app.state.templates
     return templates.TemplateResponse(
         request,
-        "partials/rates_chart.html",
+        "partials/rates_panel.html",
         {
-            "chart": chart,
+            "chart": build_rates_chart(conn, range_days=range_days),
+            "table": build_rates_table(conn, range_days=range_days),
             "range_days": range_days,
             "range_options": [7, 30, 90, 365],
         },

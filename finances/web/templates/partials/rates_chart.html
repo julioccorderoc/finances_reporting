@@ -1,23 +1,38 @@
 {# Rates chart fragment.
 
-   Self-contained: renders the range toggle, the <canvas>, and an inline
-   <script> that constructs / re-constructs the Chart.js instance from the
-   `chart` variable in scope (instance of `RatesChart`).
+   Renders the range toggle, the <canvas>, the hover overlay, and an
+   inline <script> that constructs / re-constructs the Chart.js instance.
+   Needs `chart` (a `RatesChart`) and `table` (a `RatesTable`) in scope —
+   partials/rates_panel.html supplies both.
+
+   The overlay reads `table`, not `chart`: the plot draws two lines, but
+   the question a reader has on hover is "what was recorded that day",
+   which is every stream. Reusing the table's own rows means the overlay
+   and the grid below it cannot disagree.
 
    Used by:
-   * /rates page (full HTML render)
-   * /_partial/rates/chart (HTMX swap on range-toggle)
+   * /rates page (full HTML render), inside partials/rates_panel.html
+   * /_partial/rates/panel (HTMX swap on range-toggle)
 
    The payload rides in a <script type="application/json"> block, never in
    an attribute (tojson's double quotes would end the attribute and
    truncate the JSON while every server-side test stays green).
 
+   The x axis is the server's `chart.labels` — every day in the window,
+   ascending. Chart.js's `category` scale places points by INDEX unless it
+   is handed that list, so a 13-row median and a 245-row BCV series would
+   otherwise be drawn against different days; that is the defect where the
+   median appeared to stop a third of the way across the plot. The list is
+   built in rates_view, not here, so a server test can see it.
+
    Colour is SIGNAL's: the P2P median — the headline rate — is a solid ink
    line; BCV is a dashed ink-400 line, reference only; any other series the
-   chart is ever given (realized, user) takes the one red, once.
+   chart is ever given (realized, user) takes the one red, once. No fill
+   under the median: it publishes sparsely, so the area began wherever its
+   first row happened to fall and read as a grey slab dropped on the plot.
 #}
 
-<div id="rates-chart" class="rpt-chart-card">
+<div class="rpt-chart-card">
   <div class="rpt-chart-toolbar">
     <span class="teyebrow">Range</span>
     <div class="rpt-tabs" data-rates-range>
@@ -28,27 +43,35 @@
           class="tbtn tbtn-sm rpt-tab{% if active %} is-on{% endif %}"
           data-range-days="{{ opt }}"
           aria-pressed="{{ 'true' if active else 'false' }}"
-          hx-get="/_partial/rates/chart"
-          hx-target="#rates-chart"
+          hx-get="/_partial/rates/panel"
+          hx-target="#rates-panel"
           hx-swap="outerHTML"
           {# The PAGE's URL, not the partial's: `true` would push
-             /_partial/rates/chart?range_days=N into the address bar, and a
-             reload would land on a bare chart fragment. #}
+             /_partial/rates/panel?range_days=N into the address bar, and a
+             reload would land on a bare fragment. #}
           hx-push-url="/rates?range_days={{ opt }}"
           hx-vals='{"range_days": "{{ opt }}"}'
         >{{ opt }}d</button>
       {% endfor %}
     </div>
-    <span class="rpt-chart-legend-note">USDT/VES P2P median &middot; USD/VES BCV (reference)</span>
   </div>
 
   <div class="rpt-chart">
     <canvas id="rates-chart-canvas" aria-label="Rate history"></canvas>
+    {# A DOM node, not Chart.js's in-canvas tooltip: that one is drawn
+       inside the bitmap and is clipped by the canvas floor, which is what
+       cut the old one in half. #}
+    <div class="rpt-chart-tip" data-rates-tip hidden aria-hidden="true"></div>
   </div>
 
   {# Render data inline as JSON so the script can hydrate the chart. #}
   <script id="rates-chart-data" type="application/json">
     {
+      "labels": [
+        {% for d in chart.labels -%}
+        {{ d.isoformat() | tojson }}{% if not loop.last %},{% endif %}
+        {%- endfor %}
+      ],
       "series": [
         {% for s in chart.series %}
         {
@@ -62,6 +85,19 @@
         }{% if not loop.last %},{% endif %}
         {% endfor %}
       ],
+      "details": {
+        {% for row in table.rows -%}
+        {{ row.as_of_date.isoformat() | tojson }}: [
+          {%- set entries = [] -%}
+          {%- for col in table.columns if row.cells[col.key] is not none -%}
+          {%- set _ = entries.append(col) -%}
+          {%- endfor -%}
+          {% for col in entries -%}
+          {"pair": {{ col.pair | tojson }}, "label": {{ col.label | tojson }}, "value": {{ row.cells[col.key] | fmt_number(4) | tojson }}, "reference": {{ "true" if col.is_reference_only else "false" }}}{% if not loop.last %},{% endif %}
+          {%- endfor %}
+        ]{% if not loop.last %},{% endif %}
+        {% endfor %}
+      },
       "range_days": {{ range_days }}
     }
   </script>
@@ -87,15 +123,111 @@
       var red600 = tok("--red-600", "#c51a13");
       var grid = tok("--border-subtle", "#dbdad5");
       var tick = tok("--text-tertiary", "#666662");
-      var fade = tok("--surface-hover", "rgba(19, 19, 18, 0.045)");
       var mono = "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
+
+      // The axis payload stays ISO dates — that is what every series
+      // indexes into — and the labels are formatted here, at the width
+      // they have to fit. A year of "2026-08-14" is unreadable; a week of
+      // bare "14" loses the weekday a reader is actually looking for.
+      var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      var DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+      function parseISO(iso) {
+        var parts = String(iso).split("-");
+        if (parts.length !== 3) return null;
+        // Noon UTC: midnight would fall on the previous day in any
+        // negative offset, and Caracas is one.
+        return new Date(Date.UTC(+parts[0], +parts[1] - 1, +parts[2], 12));
+      }
+
+      // The axis tick. A week is read by weekday; anything longer is
+      // read by date. Month alone was tried and dropped: at a year's
+      // width it printed "Sep Sep Oct Oct", and suppressing the repeat is
+      // not possible from the callback — Chart.js passes the FULL tick
+      // array there, before autoSkip, so the previous entry is the
+      // previous day rather than the previous label drawn.
+      function tickLabel(iso, rangeDays) {
+        var d = parseISO(iso);
+        if (!d) return iso;
+        if (rangeDays <= 14) return DAYS[d.getUTCDay()] + " " + d.getUTCDate();
+        return MONTHS[d.getUTCMonth()] + " " + d.getUTCDate();
+      }
+
+      // The overlay heading. Room for the whole thing here.
+      function fullDate(iso) {
+        var d = parseISO(iso);
+        if (!d) return iso;
+        return DAYS[d.getUTCDay()] + ", " + MONTHS[d.getUTCMonth()] + " " + d.getUTCDate();
+      }
+
+      // The hover overlay. Chart.js hands us the tooltip model and we
+      // draw it as HTML, so it can spill past the canvas floor instead of
+      // being clipped by it, and so the figures use the sheet's own mono
+      // rather than a bitmap approximation of it.
+      var tipEl = document.querySelector("[data-rates-tip]");
+
+      function renderTip(context) {
+        if (!tipEl) return;
+        var model = context.tooltip;
+        if (!model || model.opacity === 0) {
+          tipEl.hidden = true;
+          return;
+        }
+
+        var iso = model.title && model.title.length ? model.title[0] : null;
+        var entries = (iso && data.details && data.details[iso]) || [];
+        if (!iso) {
+          tipEl.hidden = true;
+          return;
+        }
+
+        var html = '<p class="rpt-chart-tip-day">' + escapeText(fullDate(iso)) + "</p>";
+        if (entries.length) {
+          html += '<dl class="rpt-chart-tip-rows">';
+          entries.forEach(function (entry) {
+            // Both class attributes written out in full rather than
+            // concatenated from a variable: tests/web/test_template_css_classes
+            // scans this file for class="..." literals, and a name it cannot
+            // read is a name it cannot check against the sheets.
+            var open = entry.reference
+              ? '<dd class="rpt-chart-tip-value is-reference">'
+              : '<dd class="rpt-chart-tip-value">';
+            html +=
+              '<dt class="rpt-chart-tip-name">' +
+              escapeText(entry.pair) +
+              " <span>" + escapeText(entry.label) + "</span></dt>" +
+              open + escapeText(entry.value) + "</dd>";
+          });
+          html += "</dl>";
+        } else {
+          html += '<p class="rpt-chart-tip-none">Nothing recorded</p>';
+        }
+        tipEl.innerHTML = html;
+        tipEl.hidden = false;
+
+        // Positioned against the plot area, and flipped to the other side
+        // of the cursor near the right edge so it never leaves the card.
+        var area = context.chart.chartArea;
+        var left = model.caretX + 14;
+        if (left + tipEl.offsetWidth > area.right) {
+          left = model.caretX - tipEl.offsetWidth - 14;
+        }
+        tipEl.style.left = Math.max(area.left, left) + "px";
+        tipEl.style.top = Math.max(area.top, model.caretY - tipEl.offsetHeight / 2) + "px";
+      }
+
+      function escapeText(value) {
+        var node = document.createElement("span");
+        node.textContent = String(value == null ? "" : value);
+        return node.innerHTML;
+      }
 
       // One red on the chart, at most: the first series that is neither
       // the headline median nor the BCV reference.
       var redSpent = false;
       function styleFor(source) {
         if (source === "binance_p2p_median") {
-          return { borderColor: ink900, borderWidth: 1.5, borderDash: [], fill: "origin", backgroundColor: fade };
+          return { borderColor: ink900, borderWidth: 1.5, borderDash: [], fill: false, backgroundColor: ink900 };
         }
         if (source === "bcv") {
           return { borderColor: ink400, borderWidth: 1, borderDash: [4, 3], fill: false, backgroundColor: ink400 };
@@ -118,6 +250,9 @@
           borderDash: style.borderDash,
           fill: style.fill,
           tension: 0.15,
+          // The median publishes a dozen times a year. Without this its
+          // points render as loose dots with no line between them.
+          spanGaps: true,
           pointRadius: 1.5,
           pointBackgroundColor: style.borderColor,
           pointBorderWidth: 0
@@ -131,7 +266,9 @@
         }
         window.__ratesChart = new Chart(canvas.getContext("2d"), {
           type: "line",
-          data: { datasets: datasets },
+          // The shared axis. Every dataset indexes into it by date, so
+          // two series of very different density still line up.
+          data: { labels: data.labels, datasets: datasets },
           options: {
             responsive: true,
             maintainAspectRatio: false,
@@ -141,13 +278,37 @@
                 type: "category",
                 grid: { display: false },
                 border: { color: grid },
-                ticks: { color: tick, font: { family: mono, size: 11 }, maxRotation: 0, autoSkip: true }
+                ticks: {
+                  color: tick,
+                  font: { family: mono, size: 11 },
+                  maxRotation: 0,
+                  autoSkip: true,
+                  // The labels are ISO dates, which are wide enough that
+                  // autoSkip alone still let them touch at phone widths.
+                  autoSkipPadding: 16,
+                  // A year of days otherwise fits ~23 ticks, which is
+                  // more dates than anyone reads. Twelve is roughly one a
+                  // month at the longest range, and still generous at the
+                  // shortest, where autoSkip is the binding limit.
+                  maxTicksLimit: 12,
+                  callback: function (value) {
+                    return tickLabel(this.getLabelForValue(value), data.range_days);
+                  }
+                }
               },
               y: {
                 beginAtZero: false,
                 grid: { color: grid },
                 border: { display: false },
-                ticks: { color: tick, font: { family: mono, size: 11 } }
+                ticks: {
+                  color: tick,
+                  font: { family: mono, size: 11 },
+                  // Chart.js will fit a gridline every ~26px if allowed,
+                  // which stacks the figures into a solid column. Six
+                  // gives each one air.
+                  maxTicksLimit: 6,
+                  padding: 10
+                }
               }
             },
             plugins: {
@@ -156,11 +317,20 @@
                 align: "end",
                 labels: { usePointStyle: true, pointStyle: "line", boxWidth: 18, color: tick, font: { family: mono, size: 11 } }
               },
-              tooltip: { mode: "index", intersect: false, bodyFont: { family: mono, size: 11 }, titleFont: { family: mono, size: 11 } }
+              tooltip: {
+                enabled: false,
+                external: renderTip,
+                mode: "index",
+                intersect: false
+              }
             }
           }
         });
       }
+
+      canvas.addEventListener("mouseleave", function () {
+        if (tipEl) tipEl.hidden = true;
+      });
 
       // The mono is a vendored @font-face; drawing before it lands would
       // rasterise the ticks in the fallback face.

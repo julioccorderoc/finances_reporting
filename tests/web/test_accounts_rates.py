@@ -285,13 +285,13 @@ def test_rates_chart_default_range_30_days(
         assert len(series.points) <= 30
 
 
-def test_rates_chart_range_toggle_via_partial(
+def test_rates_range_toggle_via_panel_partial(
     accounts_rates_db: sqlite3.Connection,
     web_client_factory,
 ) -> None:
     client = web_client_factory()
     resp = client.get(
-        "/_partial/rates/chart",
+        "/_partial/rates/panel",
         params={"range_days": 7},
         headers={"HX-Request": "true"},
     )
@@ -366,13 +366,13 @@ def test_api_rates_returns_chart_and_latest_lists(
     assert chart["range_days"] == 30
 
 
-def test_htmx_partial_rates_chart_no_full_html(
+def test_htmx_partial_rates_panel_no_full_html(
     accounts_rates_db: sqlite3.Connection,
     web_client_factory,
 ) -> None:
     client = web_client_factory()
     resp = client.get(
-        "/_partial/rates/chart",
+        "/_partial/rates/panel",
         headers={"HX-Request": "true"},
     )
     assert resp.status_code == 200
