@@ -40,6 +40,20 @@ def open_conn(settings: WebSettings) -> sqlite3.Connection:
     autocommit (``isolation_level=None``). The caller closes it. Shared
     by :func:`get_conn` and by the rail, which renders outside the
     dependency graph (see ``services/rail.py``).
+
+    ``check_same_thread=False`` because a request is not a thread.
+    FastAPI runs a sync dependency's setup, the endpoint body and the
+    teardown as three separate hops into the anyio worker pool, and
+    under any concurrency at all those land on different workers — the
+    connection opened on one is then executed, and closed, on another.
+    Sequential requests reuse one idle worker, which is why the viewer
+    ran for months before htmx fired two requests at once (a keystroke
+    in the Flow search box is enough) and every page started 500ing.
+
+    This is safe *because* the connection is per-request: the hops are
+    sequential, so no two threads ever touch it at the same moment.
+    Sharing one connection between concurrent requests would not be, and
+    nothing here does that.
     """
     # Lazy import to keep import-time cycles off the Decimal adapter
     # registration in finances.db.connection.
@@ -50,6 +64,7 @@ def open_conn(settings: WebSettings) -> sqlite3.Connection:
         str(settings.db_path),
         detect_types=sqlite3.PARSE_DECLTYPES,
         isolation_level=None,
+        check_same_thread=False,
     )
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
