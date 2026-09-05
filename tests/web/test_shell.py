@@ -41,7 +41,7 @@ PAGES = ("/triage", "/", "/transactions", "/monthly", "/accounts", "/rates")
 DESTINATIONS = (
     ("/triage", "Triage"),
     ("/", "Today"),
-    ("/transactions", "Flow"),
+    ("/transactions", "Transactions"),
     ("/monthly", "Monthly"),
     ("/accounts", "Accounts"),
     ("/plans", "Plans"),
