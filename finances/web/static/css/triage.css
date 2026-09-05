@@ -655,6 +655,18 @@
   animation: triage-fade var(--dur-fast) var(--ease-standard);
 }
 
+/* Walking the run is not opening it. Every advance — save, park, an arrow,
+ * a confirmed pair — replaces the whole overlay, so the entrance would run
+ * again: the scrim drops to transparent for a frame and the queue behind
+ * blinks through. Both halves are killed, because stopping only the scrim
+ * leaves the dialog fading up from nothing, which is the same blink in a
+ * smaller box. The same rule B3 already states about geometry — paging
+ * must not move the frame by a pixel — applied to opacity. */
+.tover-static,
+.tover-static .tmodal {
+  animation: none;
+}
+
 /* The height is fixed on purpose: paging through 34 entries must not move
  * the frame by a pixel (criterion B3). */
 .tmodal {

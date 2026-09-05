@@ -1247,12 +1247,24 @@ def _synthetic_pair_item(
     )
 
 
+def _advance_url(item: TriageItem) -> str:
+    """A neighbour's own open URL, flagged as a step inside the run.
+
+    The arrows need no endpoint of their own (B6) — they point straight
+    at the neighbour's modal route. ``advance=1`` is the only thing that
+    distinguishes walking the run from opening it, and it is what tells
+    the dialog to skip the entrance animation.
+    """
+    return f"{modal_url_for(item)}?advance=1"
+
+
 def _render_modal(
     request: Request,
     conn: sqlite3.Connection,
     item_id: str,
     *,
     queue_items: Sequence[TriageItem] | None = None,
+    advancing: bool = False,
 ):
     """Render the dialog for ``item_id``.
 
@@ -1322,8 +1334,11 @@ def _render_modal(
             "txn": txn,
             "index": index,
             "total": total,
-            "prev_url": None if prev_item is None else modal_url_for(prev_item),
-            "next_url": None if next_item is None else modal_url_for(next_item),
+            # ``advance=1``: an arrow moves INSIDE a run that is already
+            # on screen, so the dialog it fetches must not re-play the
+            # entrance. The queue's own open URLs stay unflagged.
+            "prev_url": None if prev_item is None else _advance_url(prev_item),
+            "next_url": None if next_item is None else _advance_url(next_item),
             # Scoped to the row's own kind: apply_edit refuses a category
             # whose kind contradicts it, so an unscoped picker would put
             # Salary on keyboard shortcut 2 of an expense row.
@@ -1336,6 +1351,11 @@ def _render_modal(
             "can_become_cash": (
                 txn is not None and cash_conversion_view.can_convert(conn, txn)
             ),
+            # Whether this dialog is replacing one that is already open.
+            # The entrance animation belongs to opening the run, not to
+            # walking it: re-playing it on every advance drops the scrim
+            # to transparent for a frame and the page blinks through.
+            "advancing": advancing,
         },
     )
 
@@ -1344,10 +1364,11 @@ def _render_modal(
 def triage_modal_partial(
     request: Request,
     txn_id: int,
+    advance: bool = Query(default=False),
     conn: sqlite3.Connection = Depends(get_conn),
 ):
-    """Open the run on one transaction."""
-    return _render_modal(request, conn, f"txn:{txn_id}")
+    """Open the run on one transaction, or step to it from inside one."""
+    return _render_modal(request, conn, f"txn:{txn_id}", advancing=advance)
 
 
 @router.get(
@@ -1358,10 +1379,13 @@ def triage_pair_modal_partial(
     request: Request,
     deposit_id: int,
     sell_id: int,
+    advance: bool = Query(default=False),
     conn: sqlite3.Connection = Depends(get_conn),
 ):
     """Open the run on a proposed — or manually chosen — pair."""
-    return _render_modal(request, conn, f"pair:{deposit_id}:{sell_id}")
+    return _render_modal(
+        request, conn, f"pair:{deposit_id}:{sell_id}", advancing=advance
+    )
 
 
 def _convertible_or_refuse(
@@ -1425,7 +1449,9 @@ def _advance_after_write(
         )
         return response
 
-    response = _render_modal(request, conn, nxt.item_id, queue_items=after)
+    response = _render_modal(
+        request, conn, nxt.item_id, queue_items=after, advancing=True
+    )
     response.headers["HX-Trigger"] = _hx_trigger_json(
         "queueDirty", toast_message=toast_message, resolved=resolved
     )

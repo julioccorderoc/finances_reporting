@@ -14,6 +14,7 @@
      picker     PickerPayload
      day_rates  list[DayRate] — the nearest candidate per tier
      card       TransactionCard for the facts column
+     advancing  bool — this dialog is replacing one already on screen
 
    Geometry is in triage.css: 880px wide, height min(680px, 100% − 24px),
    fixed on purpose. Paging through the queue must not move the frame by a
@@ -26,7 +27,7 @@
 {% set needs_rate = item.needs.rate and item.txn_card is not none %}
 {% set is_pair = item.needs.pair %}
 
-<div class="tover"
+<div class="tover{% if advancing %} tover-static{% endif %}"
      data-triage-modal
      data-item-id="{{ item.item_id }}"
      {% if item.txn_card is not none %}data-txn-id="{{ card.id }}"{% endif %}
