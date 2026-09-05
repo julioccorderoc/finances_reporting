@@ -609,6 +609,66 @@
     };
   };
 
+  /* --- The rate chip's tooltip ------------------------------------------
+   *
+   * CSS alone cannot place this. The money cell is `min-width: 0;
+   * overflow: hidden` — the grid-cell guard that stops a long figure
+   * blowing out its column — so an absolutely-positioned bubble inside it
+   * is clipped away: present in the DOM, `visibility: visible`, correct
+   * bounding box, and not on screen. `position: fixed` escapes that, and
+   * viewport coordinates are the one thing a stylesheet cannot supply.
+   *
+   * The bubble is `visibility: hidden`, never `display: none`, so it is
+   * laid out at all times and can be measured before it is shown.
+   *
+   * Delegated on `document`, because every list on this surface is
+   * replaced wholesale by htmx: a listener bound to the chips themselves
+   * would be right on a cold load and gone for the rest of the sitting. */
+  var GUTTER = 8;
+  var activeProv = null;
+
+  function placeProvHelp(chip) {
+    var help = chip.querySelector(".prov-help");
+    if (!help) return;
+    var anchor = chip.getBoundingClientRect();
+    var bubble = help.getBoundingClientRect();
+
+    /* Right edges aligned, because the chip trails a right-aligned money
+     * block nearly everywhere; clamped so neither edge leaves the window. */
+    var left = Math.min(
+      anchor.right - bubble.width,
+      window.innerWidth - bubble.width - GUTTER
+    );
+    var top = anchor.bottom + 6;
+    /* Flip above rather than hang off the bottom of the window. */
+    if (top + bubble.height > window.innerHeight - GUTTER) {
+      top = anchor.top - bubble.height - 6;
+    }
+
+    help.style.left = Math.max(GUTTER, left) + "px";
+    help.style.top = Math.max(GUTTER, top) + "px";
+  }
+
+  function onProvActivate(event) {
+    var target = event.target;
+    var chip = target && target.closest ? target.closest(".prov") : null;
+    if (!chip) return;
+    activeProv = chip;
+    placeProvHelp(chip);
+  }
+
+  document.addEventListener("mouseover", onProvActivate);
+  document.addEventListener("focusin", onProvActivate);
+  /* Capture phase: the queue scrolls in its own container, not the window,
+   * and a fixed bubble left at stale coordinates detaches from its chip. */
+  document.addEventListener(
+    "scroll",
+    function () {
+      if (activeProv && activeProv.isConnected) placeProvHelp(activeProv);
+    },
+    true
+  );
+
   /* Exposed for the modal, which formats its rate preview as the owner
    * types (D8) and its footer label from the same numbers. */
   window.triageFormat = { usd: usd, native: native, rate: rateStr };

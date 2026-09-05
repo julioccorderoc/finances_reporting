@@ -578,15 +578,22 @@
  * native tooltip is the browser's to draw or not, never opens on keyboard
  * focus, and cannot be styled to match anything here.
  *
- * `visibility` rather than `display`, so the bubble is laid out and can be
- * transitioned; inert to the pointer so hovering the chip is never
- * interrupted by its own tooltip. It hangs BELOW the chip because every
- * chip on this surface sits in the upper half of its container — the
- * modal's facts column, a queue row's money block — and the scroll
- * containers clip on x, not on y. */
+ * `visibility` rather than `display`, so the bubble is laid out (and so
+ * measurable) at all times and can be transitioned; inert to the pointer
+ * so hovering the chip is never interrupted by its own tooltip.
+ *
+ * `position: fixed`, and the coordinates come from triage.js. Absolute
+ * positioning cannot work here: the money cell is `min-width: 0;
+ * overflow: hidden` — the grid-cell guard that stops a long figure
+ * blowing out its column — so the bubble was clipped away entirely.
+ * Present in the DOM, `visibility: visible`, correct bounding box, and
+ * not on screen; elementsFromPoint at its own centre returned the row
+ * underneath. Only a browser could see it. Nothing above it sets a
+ * transform, filter or will-change, so `fixed` really does escape to the
+ * viewport rather than being trapped in a containing block. */
 .prov-help {
-  position: absolute;
-  top: calc(100% + 6px);
+  position: fixed;
+  top: 0;
   left: 0;
   z-index: var(--z-overlay);
   width: max-content;

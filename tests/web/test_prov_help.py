@@ -116,3 +116,46 @@ def test_the_help_does_not_take_the_pointer() -> None:
     rule = re.search(r"\.prov-help\s*\{[^}]*\}", css, re.S)
     assert rule is not None
     assert "pointer-events: none" in rule.group(0)
+
+
+def test_the_bubble_escapes_the_clipping_money_cell() -> None:
+    """A browser-only defect, found by driving one (2026-09-05).
+
+    ``.triage-row-money`` and ``.flow-row-money`` are grid cells carrying
+    ``min-width: 0; overflow: hidden`` so a long figure cannot blow out its
+    column. An absolutely-positioned bubble inside one is CLIPPED: present
+    in the DOM, ``visibility: visible`` in getComputedStyle, correct
+    bounding box — and not on screen. elementsFromPoint at its own centre
+    returned the row underneath.
+
+    ``position: fixed`` is the escape. No ancestor here has a transform,
+    filter or will-change, so nothing turns it back into a containing
+    block; the coordinates are then the one thing CSS cannot supply, which
+    is why triage.js places it.
+    """
+    css = CSS.read_text(encoding="utf-8")
+
+    rule = re.search(r"\.prov-help\s*\{[^}]*\}", css, re.S)
+    assert rule is not None
+    assert "position: fixed" in rule.group(0)
+
+
+def test_the_placement_is_delegated_so_it_survives_a_swap() -> None:
+    """Every list on this surface is replaced wholesale by htmx.
+
+    A listener bound to the chips themselves is gone after the first queue
+    refresh, and the tooltip would then be correct on a cold load and
+    stuck in the top-left corner for the rest of the sitting.
+    """
+    js = (
+        pathlib.Path(__file__).resolve().parents[2]
+        / "finances"
+        / "web"
+        / "static"
+        / "js"
+        / "triage.js"
+    ).read_text(encoding="utf-8")
+
+    assert "placeProvHelp" in js
+    for event in ("mouseover", "focusin"):
+        assert f'document.addEventListener("{event}"' in js, event
