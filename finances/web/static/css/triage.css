@@ -513,6 +513,12 @@
   font-weight: 500;
   letter-spacing: -0.03em;
 }
+/* Money arriving. Only the headline figure takes it — the trail line is
+   already quiet at --text-tertiary, and tinting both would make the pair
+   shout where one number was meant to. */
+.tmoney-in {
+  color: var(--text-positive);
+}
 
 .tmoney-unpriced {
   font-size: 12.5px;

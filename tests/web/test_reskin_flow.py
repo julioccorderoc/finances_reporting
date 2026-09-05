@@ -231,11 +231,11 @@ def test_row_partial_honours_the_triage_modal_url_override() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Money: fmt_usd / fmt_native, positive is ink with a plus.
+# Money: fmt_usd / fmt_native, a plus and (since 2026-09-05) a tint.
 # ---------------------------------------------------------------------------
 
 
-def test_credit_reads_plus_dollar_in_ink_with_a_ves_native_line() -> None:
+def test_credit_reads_plus_dollar_tinted_with_a_ves_native_line() -> None:
     rendered = _render_card(
         _card(
             kind="income",
@@ -246,7 +246,12 @@ def test_credit_reads_plus_dollar_in_ink_with_a_ves_native_line() -> None:
         )
     )
 
-    assert '<span class="tmoney-lead" data-money="usd">+$1,000.00</span>' in rendered
+    # Money arriving carries .tmoney-in; the plus sign stays too, because
+    # colour alone is not a signal everyone can read.
+    assert (
+        '<span class="tmoney-lead tmoney-in" data-money="usd">+$1,000.00</span>'
+        in rendered
+    )
     assert "Bs. 36,500.00" in rendered
     # The provenance chip replaces the old rate_source_badge...
     assert 'data-prov="binance_p2p_median"' in rendered
@@ -254,7 +259,9 @@ def test_credit_reads_plus_dollar_in_ink_with_a_ves_native_line() -> None:
     # ...and the raw tier stays readable on the article for anything that
     # still keys off it.
     assert 'data-rate-source="binance_p2p_median"' in rendered
-    # Nothing green, nothing rose: money is ink with a sign.
+    # The tint is one token in signal.css, never a utility class: the
+    # vendored tailwind.css has no build step, so text-emerald would
+    # render as nothing at all with every server-side test still green.
     assert "text-emerald" not in rendered
     assert "text-rose" not in rendered
 

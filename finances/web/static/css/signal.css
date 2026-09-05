@@ -100,9 +100,19 @@
   --text-accent: var(--red-600);
   --text-danger: var(--red-700);
   --text-signal: var(--red-600);
-  /* Money is ink with a sign, never a colour: red on a credit reads as a loss,
-     and green never enters this system at all. */
-  --text-positive: var(--ink-900);
+  /* Money was ink with a sign, full stop. Amended 2026-09-05: the owner
+     could not tell at a glance whether a row was money in or money out,
+     which matters most in triage, where the figure is 22px and the sign
+     is one glyph of it.
+     Only ARRIVING money is tinted. Outflow is most of the ledger, so
+     colouring it would colour the whole page; one tinted number per
+     screenful makes "coloured = arriving" learnable in a sitting. The
+     original reason red is barred still holds — red on a credit reads as
+     a loss, and red already means error, danger and BCV here — so the one
+     hue that enters the system is a muted forest green, dark enough to
+     pass AA on paper (5.9:1) and desaturated enough not to read as a
+     status light. */
+  --text-positive: #2f6a4e;
   --text-negative: var(--ink-900);
 
   /* ── Semantic: surface ────────────────────────────────────────────────── */

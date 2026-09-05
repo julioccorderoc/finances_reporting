@@ -38,9 +38,14 @@
 {%- set chip = prov_chip(card.rate_source, is_bcv_fallback=card.is_bcv_fallback, approximate=card.approximate) -%}
 {%- set native_first = headline == "native" -%}
 {%- set self_priced = is_native_usd(card) -%}
+{#- Money arriving is tinted; money leaving keeps the ink (2026-09-05).
+    A transfer is excluded whichever way it points: its positive leg is
+    the negative leg's money, and colouring it would claim the money
+    arrived twice. -#}
+{%- set lead_class = "tmoney-lead tmoney-in" if (card.amount_native > 0 and card.kind != "transfer") else "tmoney-lead" -%}
 <span class="tmoney {% if align == 'left' %}tmoney-left{% endif %} {% if size == 'lg' %}tmoney-lg{% endif %}">
   {%- if native_first -%}
-    <span class="tmoney-lead" data-money="native">{{ card.amount_native | fmt_native(card.currency) }}</span>
+    <span class="{{ lead_class }}" data-money="native">{{ card.amount_native | fmt_native(card.currency) }}</span>
     {%- if not self_priced -%}
     <span class="tmoney-trail-line">
       {%- if card.amount_usd is not none -%}
@@ -57,7 +62,7 @@
     {%- endif -%}
   {%- else -%}
     {%- if card.amount_usd is not none -%}
-      <span class="tmoney-lead" data-money="usd">{{ card.amount_usd | fmt_usd(signed=True) }}</span>
+      <span class="{{ lead_class }}" data-money="usd">{{ card.amount_usd | fmt_usd(signed=True) }}</span>
     {%- elif size == "lg" -%}
       <span class="tmoney-unpriced">{{ icon("circle-slash", 17) }}Can't be priced</span>
     {%- else -%}
