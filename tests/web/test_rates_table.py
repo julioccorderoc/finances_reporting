@@ -98,8 +98,23 @@ def test_chart_labels_are_every_day_in_the_window_ascending(
 
     assert chart.labels == sorted(chart.labels)
     assert chart.labels[0] == TODAY - timedelta(days=9)
-    assert chart.labels[-1] == TODAY
-    assert len(chart.labels) == 10
+    # Ten days of window, plus the day BCV has already published ahead.
+    assert chart.labels[-1] == TODAY + timedelta(days=1)
+    assert len(chart.labels) == 11
+
+
+def test_chart_axis_holds_a_slot_for_a_day_with_no_rows(
+    seeded_web_db: sqlite3.Connection,
+) -> None:
+    """A gap in the feed is a gap on the axis, not a squeezed-out day."""
+    from finances.web.services.rates_view import build_rates_chart
+
+    _rate(seeded_web_db, TODAY - timedelta(days=4), "USDT", "VES", "binance_p2p_median", "955.0000")
+    _rate(seeded_web_db, TODAY, "USDT", "VES", "binance_p2p_median", "960.0000")
+
+    chart = build_rates_chart(seeded_web_db, range_days=5)
+
+    assert chart.labels == [TODAY - timedelta(days=offset) for offset in range(4, -1, -1)]
 
 
 def test_chart_labels_include_a_forward_dated_row(
@@ -149,6 +164,101 @@ def test_chart_payload_carries_the_labels_to_the_browser(
     assert "labels" in payload
     assert payload["labels"] == sorted(payload["labels"])
     assert TODAY.isoformat() in payload["labels"]
+
+
+def test_chart_payload_carries_every_stream_for_a_day_not_only_the_plotted_two(
+    ragged_rates_db: sqlite3.Connection,
+    web_client_factory,
+) -> None:
+    """The hover overlay answers "what was recorded that day", in full.
+
+    The chart plots two lines. The overlay shows all of them, so the
+    realized rate and the euro reference are visible without leaving the
+    plot for the table below it.
+    """
+    import json
+    import re
+
+    client: TestClient = web_client_factory()
+    body = client.get("/rates", params={"range_days": 10}).text
+    payload = json.loads(
+        re.search(
+            r'<script id="rates-chart-data" type="application/json">(.*?)</script>',
+            body,
+            re.DOTALL,
+        ).group(1)
+    )
+
+    yesterday = (TODAY - timedelta(days=1)).isoformat()
+    entries = payload["details"][yesterday]
+    labelled = {(e["pair"], e["label"]): e["value"] for e in entries}
+
+    # Recorded that day but NOT plotted by either line.
+    assert labelled[("USDT/VES", "realized")] == "958.5600"
+    assert labelled[("EUR/VES", "BCV")] == "941.2500"
+    # And the plotted one is there too.
+    assert ("USD/VES", "BCV") in labelled
+
+
+def test_chart_detail_omits_a_day_nothing_was_recorded_on(
+    seeded_web_db: sqlite3.Connection,
+    web_client_factory,
+) -> None:
+    import json
+    import re
+
+    _rate(seeded_web_db, TODAY, "USDT", "VES", "binance_p2p_median", "960.0000")
+
+    client: TestClient = web_client_factory()
+    body = client.get("/rates", params={"range_days": 5}).text
+    payload = json.loads(
+        re.search(
+            r'<script id="rates-chart-data" type="application/json">(.*?)</script>',
+            body,
+            re.DOTALL,
+        ).group(1)
+    )
+
+    assert list(payload["details"]) == [TODAY.isoformat()]
+
+
+def test_chart_detail_marks_a_reference_only_stream(
+    ragged_rates_db: sqlite3.Connection,
+    web_client_factory,
+) -> None:
+    """rule-005 again: the overlay may not present BCV as a headline."""
+    import json
+    import re
+
+    client: TestClient = web_client_factory()
+    body = client.get("/rates", params={"range_days": 10}).text
+    payload = json.loads(
+        re.search(
+            r'<script id="rates-chart-data" type="application/json">(.*?)</script>',
+            body,
+            re.DOTALL,
+        ).group(1)
+    )
+
+    entries = payload["details"][(TODAY - timedelta(days=1)).isoformat()]
+    bcv = next(e for e in entries if e["pair"] == "USD/VES")
+    p2p = next(e for e in entries if e["label"] == "realized")
+
+    assert bcv["reference"] is True
+    assert p2p["reference"] is False
+
+
+def test_chart_card_hosts_an_overlay_element(
+    ragged_rates_db: sqlite3.Connection,
+    web_client_factory,
+) -> None:
+    """A Chart.js in-canvas tooltip clips at the canvas floor. This one is
+    a DOM node, so it can spill out of the plot."""
+    client: TestClient = web_client_factory()
+    body = client.get("/rates").text
+
+    assert 'data-rates-tip' in body
+    assert "rpt-chart-tip" in body
 
 
 def test_chart_script_spans_gaps_so_a_sparse_series_still_draws_a_line() -> None:
