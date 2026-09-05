@@ -97,8 +97,8 @@ def test_empty_state_counts_the_matches_outside_the_range(
     ).text
 
     assert "No rows match these filters" in body
-    assert "1 row matches" in body
-    assert "outside" in body
+    assert "1 row matches outside" in body
+    assert "Tue, Jan 1, 2019 – Tue, Dec 31, 2019" in body
 
 
 def test_empty_state_offers_the_same_search_over_every_date(
@@ -111,7 +111,8 @@ def test_empty_state_offers_the_same_search_over_every_date(
         "/transactions", params={"q": "LEGACY", **_EMPTY_RANGE}
     ).text
 
-    assert 'data-search-all-dates href="/transactions?q=LEGACY"' in body
+    assert "data-search-all-dates" in body
+    assert 'href="/transactions?q=LEGACY"' in body
 
 
 def test_the_outside_count_respects_the_other_filters(
@@ -126,7 +127,7 @@ def test_the_outside_count_respects_the_other_filters(
     ).text
 
     assert "No rows match these filters" in body
-    assert "outside" not in body
+    assert "flow-empty-outside" not in body
     assert "data-search-all-dates" not in body
 
 
@@ -153,4 +154,4 @@ def test_plural_when_the_range_hides_several(
         "/transactions", params={"q": "COM.PAGO", **_EMPTY_RANGE}
     ).text
 
-    assert "3 rows match" in body
+    assert "3 rows match outside" in body

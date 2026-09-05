@@ -96,7 +96,6 @@ from finances.web.services.transactions_query import (
     TransactionsFilter,
     count_matching,
     query_transactions,
-    resolve_defaults,
     row_matches_filter,
 )
 
@@ -1036,11 +1035,11 @@ def transaction_add_partial(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    # Resolved here, not just inside the query helpers: the header partial
-    # renders the date window off this object, and an unresolved filter has
-    # no dates — which silently dropped "Wed, Aug 5 – Fri, Sep 4" from the
-    # out-of-band header while every server-side assertion still passed.
-    f = resolve_defaults(_filter_from_hx_current_url(request))
+    # The header partial renders its date window off this object, so it
+    # has to be the SAME filter the list was built from. Since 2026-09-05
+    # that filter invents nothing: no dates in the URL means no window,
+    # and the header then draws none.
+    f = _filter_from_hx_current_url(request)
     visible = f.page == 1 and row_matches_filter(conn, card.id, f)
     total = count_matching(conn, f)
 

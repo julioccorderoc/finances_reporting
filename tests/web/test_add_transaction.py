@@ -525,9 +525,37 @@ def test_post_corrects_the_page_headline_out_of_band(
     assert 'id="transactions-header" hx-swap-oob="true"' in resp.text
     assert "1 row" in resp.text
     assert "data-add-transaction" in resp.text, "the header keeps its own control"
-    # And it keeps the date window it was showing. The filter rebuilt from
-    # HX-Current-URL has to be resolved first, or the window silently goes.
+    # A bare /transactions has no window since 2026-09-05, so the header
+    # draws none. The window itself is guarded by the test below.
+    assert 'class="flow-window"' not in resp.text
+
+
+def test_post_keeps_the_date_window_the_page_was_showing(
+    entry_db: sqlite3.Connection, web_client_factory
+) -> None:
+    """The out-of-band header is built from the SAME filter as the list.
+
+    The original bug: the header renders its window off the filter rebuilt
+    from ``HX-Current-URL``, and a filter that never sees those dates
+    silently drops "Wed, Aug 5 – Fri, Sep 4" from the headline while every
+    other assertion passes. Now that no window is invented, the dates have
+    to survive the round trip on their own.
+    """
+    client = web_client_factory()
+    resp = _post(
+        client,
+        entry_db,
+        headers={
+            "HX-Current-URL": (
+                "http://testserver/transactions"
+                "?date_from=2020-01-01&date_to=2030-12-31"
+            )
+        },
+    )
+
     assert 'class="flow-window"' in resp.text
+    assert "Wed, Jan 1, 2020" in resp.text
+    assert "Tue, Dec 31, 2030" in resp.text
 
 
 def test_post_corrects_the_match_count_and_clears_the_empty_state(

@@ -19,7 +19,7 @@ self-contained.
 from __future__ import annotations
 
 import sqlite3
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Literal
 
@@ -31,7 +31,6 @@ from finances.domain.models import Transaction, TransactionKind
 _NATIVE_USD_CURRENCIES = money.NATIVE_USD_CURRENCIES
 _NATIVE_USD_SOURCE = money.NATIVE_USD_SOURCE
 _BCV_SOURCE_PREFIX = "bcv"
-_DEFAULT_WINDOW_DAYS = 30
 
 _KindLiteral = Literal["income", "expense", "transfer", "adjustment"]
 _NeedsReviewLiteral = Literal["any", "yes", "no"]
@@ -73,10 +72,13 @@ TXN_QUERY_BASE = """
 class TransactionsFilter(BaseModel):
     """URL-persistent filter state for /transactions.
 
-    All list-valued fields default to empty (``[]``) which the SQL builder
-    interprets as "no constraint". ``date_from`` / ``date_to`` default to
-    a 30-day window ending today (computed at request time, not import
-    time).
+    Every field defaults to "no constraint", dates included: a bare
+    /transactions is the whole ledger. It used to invent a last-30-days
+    window, which made an unfiltered search silently local — five rows
+    matching "Hemirla Milexa Pena Ba" answered zero because they were
+    four months old (2026-09-05). A window is now something the owner
+    sets, and :func:`outside_window_count` is how a set one admits what
+    it hides.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -148,21 +150,33 @@ class TransactionsPage(BaseModel):
     page_size: int
     total_pages: int
     filter: TransactionsFilter
+    outside_window: int = 0
+    """Matches this filter's date range is hiding, or 0.
+
+    Only ever non-zero when the page is empty AND a date was set, which is
+    the one moment the number is worth a query: it is what turns "No rows
+    match these filters" from a dead end into "…but 5 match outside this
+    range"."""
 
 
 # ---------------------------------------------------------------------------
-# Filter defaults + resolution.
+# Filter windows.
 # ---------------------------------------------------------------------------
 
 
-def resolve_defaults(f: TransactionsFilter) -> TransactionsFilter:
-    """Fill in date defaults at request time (last-30-days window)."""
-    if f.date_from is not None and f.date_to is not None:
-        return f
-    today = datetime.now(tz=timezone.utc).date()
-    df = f.date_from if f.date_from is not None else today - timedelta(days=_DEFAULT_WINDOW_DAYS)
-    dt = f.date_to if f.date_to is not None else today
-    return f.model_copy(update={"date_from": df, "date_to": dt})
+def outside_window_count(
+    conn: sqlite3.Connection, f: TransactionsFilter
+) -> int:
+    """How many rows ``f`` would match if its dates were dropped.
+
+    Zero when ``f`` sets no date at all — with no window there is no
+    "elsewhere" to point at. Every OTHER filter is kept, so the count
+    answers "outside this range", never "in the whole ledger".
+    """
+    if f.date_from is None and f.date_to is None:
+        return 0
+    undated = f.model_copy(update={"date_from": None, "date_to": None})
+    return count_matching(conn, undated)
 
 
 # ---------------------------------------------------------------------------
@@ -324,7 +338,6 @@ def row_matches_filter(
     and true for the rest. Pagination is NOT part of the answer; the caller
     knows which page is on screen.
     """
-    f = resolve_defaults(f)
     where_sql, where_params = _build_where(f)
     row = conn.execute(
         f"""
@@ -341,7 +354,6 @@ def row_matches_filter(
 
 def count_matching(conn: sqlite3.Connection, f: TransactionsFilter) -> int:
     """How many rows ``f`` matches — the "N matches" line, without the page."""
-    f = resolve_defaults(f)
     where_sql, where_params = _build_where(f)
     return int(
         conn.execute(
@@ -361,7 +373,6 @@ def query_transactions(
     conn: sqlite3.Connection, f: TransactionsFilter
 ) -> TransactionsPage:
     """Run the filtered, sorted, paginated query and return a page."""
-    f = resolve_defaults(f)
 
     where_sql, where_params = _build_where(f)
 
@@ -416,6 +427,11 @@ def query_transactions(
         page_size=f.page_size,
         total_pages=total_pages,
         filter=f,
+        # Only when there is nothing to show and a window to blame. An
+        # empty list is the one screen that has room for the extra count,
+        # and paying for it on every populated page would be a second
+        # COUNT(*) nobody reads.
+        outside_window=outside_window_count(conn, f) if total == 0 else 0,
     )
 
 
@@ -425,6 +441,6 @@ __all__ = [
     "TransactionsPage",
     "count_matching",
     "query_transactions",
-    "resolve_defaults",
+    "outside_window_count",
     "row_matches_filter",
 ]

@@ -77,10 +77,32 @@
         {% include "partials/card_transaction.html" %}
       {% endfor %}
     {% else %}
-      {# Nothing matches (not nothing exists): one line and a way back. #}
+      {# Nothing matches (not nothing exists): one line and a way back.
+
+         When a date range is what is hiding them, say how many and offer
+         to drop just the dates — keeping the search, the accounts and
+         everything else the owner typed. The filter stays honest; it
+         stops being silent. #}
       <div class="flow-empty" id="tx-empty">
         {{ icon("search", 28) }}
         <span>No rows match these filters</span>
+        {% if page.outside_window %}
+          {% set n = page.outside_window %}
+          {# One sentence, one line: Jinja's default whitespace would break
+             "5 rows match" across four lines, which reads fine in a browser
+             and is unassertable in a test. #}
+          <span class="flow-empty-outside">
+            {{- n | fmt_number(0) }} row{{ '' if n == 1 else 's' }}
+            {{- ' matches' if n == 1 else ' match' }} outside
+            {%- if filter.date_from and filter.date_to %}
+              {{ filter.date_from | fmt_date }} – {{ filter.date_to | fmt_date -}}
+            {%- elif filter.date_from %} this start date
+            {%- else %} this end date{% endif -%}
+          </span>
+          <a href="{{ transactions_url(filter, date_from=None, date_to=None) }}"
+             data-search-all-dates
+             class="tbtn tbtn-sm">Search all dates</a>
+        {% endif %}
         <a href="/transactions" class="flow-link">Clear filters</a>
       </div>
     {% endif %}

@@ -43,7 +43,7 @@ from finances.web.routers import partials as partials_router
 from finances.web.settings import WebSettings
 from finances.web.services.rail import build_rail
 from finances.web.services.triage_view import prov_chip
-from finances.web.urls import modal_url_for
+from finances.web.urls import modal_url_for, transactions_url
 
 WEB_PACKAGE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = WEB_PACKAGE_DIR / "static"
@@ -169,6 +169,9 @@ def create_app(settings: WebSettings) -> FastAPI:
         {
             "prov_chip": prov_chip,
             "modal_url_for": modal_url_for,
+            # How the empty state offers the same search over every date:
+            # the current filter minus its window, written back as a URL.
+            "transactions_url": transactions_url,
             "rail_state": build_rail,
         }
     )

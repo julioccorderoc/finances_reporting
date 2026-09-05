@@ -116,8 +116,8 @@
 
   <div class="flow-filters-foot">
     {# Full navigation on purpose: dropping ALL query params (incl. the
-       hidden sort/direction) resets to the server-side defaults —
-       last-30-days window per transactions_query.resolve_defaults. #}
+       hidden sort/direction) resets to the server-side defaults, which
+       since 2026-09-05 means no date window at all — the whole ledger. #}
     <a href="/transactions" data-clear-filters class="flow-link">Clear filters</a>
   </div>
 </form>

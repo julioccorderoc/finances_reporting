@@ -250,6 +250,13 @@
 .flow-empty svg {
   color: var(--ink-900);
 }
+/* What the date range is hiding. Quieter than the headline above it: it
+   is a footnote about the filter, not a second verdict about the ledger. */
+.flow-empty-outside {
+  font-size: var(--body-sm-size);
+  color: var(--text-tertiary);
+  max-width: 40ch;
+}
 
 /* A text link in the accent red (the 600, never the brand 500). */
 .flow-link {
