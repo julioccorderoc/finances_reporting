@@ -43,6 +43,7 @@ from finances.web.services.rates_view import (
     DEFAULT_RANGE_DAYS,
     build_latest_rates,
     build_rates_chart,
+    build_rates_table,
 )
 from finances.web.services.transactions_query import (
     TransactionsFilter,
@@ -219,17 +220,21 @@ def rates_page(
     range_days: int = Query(DEFAULT_RANGE_DAYS, ge=1, le=3650),
     conn: sqlite3.Connection = Depends(get_conn),
 ):
-    """Render the /rates page (chart + latest-per-pair card list)."""
-    chart = build_rates_chart(conn, range_days=range_days)
-    latest = build_latest_rates(conn)
+    """Render the /rates page: headline, then the chart-and-table panel.
+
+    ``latest`` still feeds the headline figure — the newest USDT/VES P2P
+    median — even though the latest-per-pair tiles it also used to draw
+    are gone; the table now carries those numbers with their history.
+    """
     templates = request.app.state.templates
     return templates.TemplateResponse(
         request,
         "pages/rates.html",
         {
             "title": "Rates",
-            "chart": chart,
-            "latest": latest,
+            "chart": build_rates_chart(conn, range_days=range_days),
+            "table": build_rates_table(conn, range_days=range_days),
+            "latest": build_latest_rates(conn),
             "range_days": range_days,
             "range_options": [7, 30, 90, 365],
         },

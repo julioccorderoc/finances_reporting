@@ -1,0 +1,64 @@
+{# The rates date pivot. Self-contained: requires `table` (RatesTable).
+
+   Rows are days, newest first; columns are (base, quote, source) streams
+   in the resolver's own ladder order. This replaced the latest-per-pair
+   tiles, which showed the same six numbers with no history and no way to
+   see that the P2P median is published a dozen times a year while BCV is
+   published daily.
+
+   A gap is left EMPTY. Carrying the previous day's number across it would
+   make a sparse feed look daily, and carrying is the resolver's job under
+   its own bounds — this grid reports what was recorded.
+
+   CSS Grid, not <table>: the viewer's data surfaces are grids (see
+   .flow-rows, .rpt-pivot) so the columns can collapse at narrow widths
+   without a horizontal-scroll trap. The column count rides in a custom
+   property so one stylesheet serves any number of streams.
+#}
+{% from "_icons.html" import icon %}
+
+{% if table.rows %}
+  <div class="rpt-rate-scroll">
+    <section
+      class="rpt-rate-table"
+      style="--rate-cols: {{ table.columns | length }};"
+      aria-label="Rate history"
+    >
+      <div class="rate-th rate-th-date">Date</div>
+      {% for col in table.columns %}
+        <div class="rate-th" data-column="{{ col.key }}">
+          <span class="rate-th-pair">{{ col.pair }}</span>
+          <span class="rate-th-source{% if col.is_reference_only %} is-reference{% endif %}">
+            {{ col.label }}{% if col.is_reference_only %} &middot; ref{% endif %}
+          </span>
+        </div>
+      {% endfor %}
+
+      {% for row in table.rows %}
+        <div class="rate-td rate-td-date{% if row.is_future %} is-ahead{% endif %}" data-row-date="{{ row.as_of_date.isoformat() }}">
+          {{ row.as_of_date | fmt_date }}
+          {%- if row.is_future %}
+          <span class="tbadge" data-row-ahead title="Published ahead of today">ahead</span>
+          {%- endif %}
+        </div>
+        {% for col in table.columns %}
+          {% set value = row.cells[col.key] %}
+          {% if value is none %}
+            <span class="rate-td" data-cell data-empty data-column="{{ col.key }}">
+              <span class="rpt-pivot-empty">&mdash;</span>
+            </span>
+          {% else %}
+            <span class="rate-td{% if col.is_reference_only %} is-reference{% endif %}" data-cell data-column="{{ col.key }}">
+              {{ value | fmt_number(4) }}
+            </span>
+          {% endif %}
+        {% endfor %}
+      {% endfor %}
+    </section>
+  </div>
+{% else %}
+  <div class="rpt-empty" data-rates-empty>
+    {{ icon("percent", 28) }}
+    <p class="rpt-empty-line">No rates in this range. Run <code>finances ingest p2p-rates</code> and <code>finances ingest bcv</code>.</p>
+  </div>
+{% endif %}

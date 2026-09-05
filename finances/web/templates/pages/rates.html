@@ -33,12 +33,10 @@
 {% endset %}
 {{ page_header("What is a dollar worth?", answer, meta) }}
 
+{# Chart and table swap together; see partials/rates_panel.html. The
+   latest-per-pair tiles that used to sit here are gone — the table's
+   newest row says the same thing, in the company of its own history. #}
 <section class="rpt-section">
-  {% include "partials/rates_chart.html" %}
-</section>
-
-<section class="rpt-section">
-  <h2 class="teyebrow rpt-section-title">Latest per pair</h2>
-  {% include "partials/rates_latest_per_pair.html" %}
+  {% include "partials/rates_panel.html" %}
 </section>
 {% endblock %}

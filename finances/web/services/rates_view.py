@@ -47,9 +47,25 @@ class RateSeries(BaseModel):
 
 
 class RatesChart(BaseModel):
+    """The plotted series plus the axis they are plotted against.
+
+    ``labels`` is the shared date domain: every day any series has a row
+    for, ascending. It is built here rather than in the browser because
+    Chart.js's ``category`` scale places points by *index* unless it is
+    handed an explicit label list — so a 13-row median and a 245-row BCV
+    series end up drawn against different days. That defect is invisible
+    to a server test if the axis is assembled in JavaScript, and visible
+    to one if it is assembled here.
+
+    The domain is not clamped to today: BCV publishes tomorrow's rate
+    today, and an axis that stopped at ``date.today()`` would drop a rate
+    the ledger already holds.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     series: list[RateSeries]
+    labels: list[date]
     range_days: int
 
 
@@ -61,6 +77,49 @@ class LatestRateCard(BaseModel):
     source: str
     rate: Decimal
     as_of_date: date
+
+
+class RateColumn(BaseModel):
+    """One (base, quote, source) stream, as a column of the rates table.
+
+    ``key`` is what the row cells are keyed by; it exists because a
+    template cannot index a dict with a tuple.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    key: str
+    base: str
+    quote: str
+    source: str
+    pair: str
+    label: str
+    is_reference_only: bool
+
+
+class RateTableRow(BaseModel):
+    """One day, with whatever each column published for it.
+
+    A cell is ``None`` when that stream has no row for that day. It is
+    deliberately not carried forward from the day before: the P2P median
+    is published a dozen times a year and a filled-in column would make it
+    look daily. Carrying is the *resolver's* job, under its own bounds —
+    this table reports what was recorded.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    as_of_date: date
+    is_future: bool
+    cells: dict[str, Decimal | None]
+
+
+class RatesTable(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    columns: list[RateColumn]
+    rows: list[RateTableRow]
+    range_days: int
 
 
 # (base, quote, source, label) — the two series the chart pins.
@@ -82,6 +141,24 @@ _MODAL_SERIES_SPEC: tuple[tuple[str, str, str, str], ...] = (
 
 # ADR-005: BCV is reference-only and never a headline figure.
 _REFERENCE_ONLY_SOURCES = frozenset({"bcv"})
+
+# Display names for the sources the ledger records today. Open-ended on
+# purpose (``rates.source`` is TEXT): a source with no entry here shows
+# its raw value rather than being dropped or renamed.
+SOURCE_LABELS: dict[str, str] = {
+    "user_rate": "user rate",
+    "binance_p2p_realized": "realized",
+    "binance_p2p_median": "P2P median",
+    "binance_p2p_median_buy": "P2P buy",
+    "binance_p2p_median_sell": "P2P sell",
+    "bcv": "BCV",
+    "native_usd": "native",
+}
+
+
+def source_label(source: str) -> str:
+    """Human name for ``source``, falling back to the stored value."""
+    return SOURCE_LABELS.get(source, source)
 
 
 class DayRate(BaseModel):
@@ -177,7 +254,31 @@ def build_rates_chart(
                 points=points,
             )
         )
-    return RatesChart(series=series, range_days=range_days)
+    return RatesChart(
+        series=series,
+        labels=_date_axis(series, since=since),
+        range_days=range_days,
+    )
+
+
+def _date_axis(series: list[RateSeries], *, since: date) -> list[date]:
+    """Every calendar day from ``since`` to the last day worth showing.
+
+    Every day, not only the days with rows: the gaps are the point. A P2P
+    median published nine times in a month should look like nine marks
+    across the month, not nine consecutive ones.
+
+    The right edge is today, or later if a series carries a forward-dated
+    row — BCV publishes ahead, and an axis stopping at ``today`` would
+    silently drop a rate the ledger already holds.
+    """
+    last = max(
+        [date.today()]
+        + [point.as_of_date for s in series for point in s.points]
+    )
+    if last < since:
+        return []
+    return [since + timedelta(days=n) for n in range((last - since).days + 1)]
 
 
 def build_latest_rates(conn: sqlite3.Connection) -> list[LatestRateCard]:
@@ -214,6 +315,89 @@ def build_latest_rates(conn: sqlite3.Connection) -> list[LatestRateCard]:
             )
         )
     return cards
+
+
+def build_rates_table(
+    conn: sqlite3.Connection, *, range_days: int = DEFAULT_RANGE_DAYS
+) -> RatesTable:
+    """Build the date pivot: one row per day, one column per rate stream.
+
+    Columns are *discovered* from the window rather than listed here — a
+    source ingested later earns a column with no edit to this module,
+    which is the same open-endedness ``transactions.source`` has. They are
+    then ordered by the resolver's own ladder (``rates.ladder_tiers``), so
+    the leftmost column is the one that would have priced a transaction
+    and the rightmost is the one that would not. Streams the ladder does
+    not price at all — BCV in euros, say — follow it, stably sorted.
+
+    Rows come from the data, not the calendar: a day no stream published
+    on is absent rather than blank. Days *after* today are kept and
+    flagged; BCV publishes ahead of itself and hiding tomorrow's rate
+    would misreport the ledger.
+    """
+    if range_days <= 0:
+        range_days = DEFAULT_RANGE_DAYS
+    since = date.today() - timedelta(days=range_days - 1)
+
+    rows = conn.execute(
+        """
+        SELECT as_of_date, base, quote, source, rate
+        FROM rates
+        WHERE as_of_date >= ?
+        ORDER BY as_of_date DESC, base, quote, source
+        """,
+        (since.isoformat(),),
+    ).fetchall()
+
+    ladder = list(rates_domain.ladder_tiers())
+
+    def rank(triple: tuple[str, str, str]) -> tuple[int, str, str, str]:
+        # Ladder members sort by their position in the chain; everything
+        # else lands after them, ordered stably.
+        position = ladder.index(triple) if triple in ladder else len(ladder)
+        return (position, *triple)
+
+    seen: set[tuple[str, str, str]] = set()
+    by_day: dict[date, dict[str, Decimal]] = {}
+    for row in rows:
+        as_of = row["as_of_date"]
+        if not isinstance(as_of, date):
+            as_of = date.fromisoformat(str(as_of))
+        rate_value = row["rate"]
+        if not isinstance(rate_value, Decimal):
+            rate_value = Decimal(str(rate_value))
+        triple = (row["base"], row["quote"], row["source"])
+        seen.add(triple)
+        by_day.setdefault(as_of, {})[_column_key(*triple)] = rate_value
+
+    columns = [
+        RateColumn(
+            key=_column_key(base, quote, source),
+            base=base,
+            quote=quote,
+            source=source,
+            pair=f"{base}/{quote}",
+            label=source_label(source),
+            is_reference_only=source in _REFERENCE_ONLY_SOURCES,
+        )
+        for base, quote, source in sorted(seen, key=rank)
+    ]
+
+    today = date.today()
+    table_rows = [
+        RateTableRow(
+            as_of_date=day,
+            is_future=day > today,
+            cells={column.key: by_day[day].get(column.key) for column in columns},
+        )
+        for day in sorted(by_day, reverse=True)
+    ]
+    return RatesTable(columns=columns, rows=table_rows, range_days=range_days)
+
+
+def _column_key(base: str, quote: str, source: str) -> str:
+    """Stable cell key. A tuple cannot index a dict from a template."""
+    return f"{base}/{quote}:{source}"
 
 
 def rates_for_day(
@@ -310,7 +494,13 @@ __all__ = [
     "RatePoint",
     "RateSeries",
     "RatesChart",
+    "RateColumn",
+    "RateTableRow",
+    "RatesTable",
+    "SOURCE_LABELS",
     "build_latest_rates",
+    "build_rates_table",
     "build_rates_chart",
+    "source_label",
     "rates_for_day",
 ]

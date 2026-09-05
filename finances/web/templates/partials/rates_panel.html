@@ -1,0 +1,15 @@
+{# Chart + table as one swap target.
+
+   The range toggle lives in the chart's toolbar but governs both: a
+   toggle that replaced only the chart left a 90-day table sitting under
+   a 7-day plot, silently disagreeing with it. One target, one request,
+   one window.
+
+   Requires `chart`, `table`, `range_days`, `range_options`.
+#}
+<div id="rates-panel">
+  {% include "partials/rates_chart.html" %}
+
+  <h2 class="teyebrow rpt-section-title">History</h2>
+  {% include "partials/rates_table.html" %}
+</div>
