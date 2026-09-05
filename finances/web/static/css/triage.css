@@ -499,7 +499,7 @@
   align-items: flex-start;
 }
 
-.tmoney-usd {
+.tmoney-lead {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-size: 13px;
@@ -508,7 +508,7 @@
   color: var(--text-primary);
   white-space: nowrap;
 }
-.tmoney-lg .tmoney-usd {
+.tmoney-lg .tmoney-lead {
   font-size: 22px;
   font-weight: 500;
   letter-spacing: -0.03em;
@@ -527,7 +527,7 @@
   font-size: 17px;
 }
 
-.tmoney-native-line {
+.tmoney-trail-line {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -535,18 +535,18 @@
   justify-content: flex-end;
   min-width: 0;
 }
-.tmoney-left .tmoney-native-line {
+.tmoney-left .tmoney-trail-line {
   justify-content: flex-start;
   flex-wrap: wrap;
 }
-.tmoney-native {
+.tmoney-trail {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-size: 11px;
   color: var(--text-tertiary);
   white-space: nowrap;
 }
-.tmoney-lg .tmoney-native {
+.tmoney-lg .tmoney-trail {
   font-size: 12px;
 }
 

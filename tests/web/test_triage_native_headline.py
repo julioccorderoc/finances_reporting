@@ -29,19 +29,37 @@ from collections.abc import Callable
 
 from starlette.testclient import TestClient
 
+#: fmt_native glues the ticker to the number with U+00A0, so "Bs. 365.00"
+#: typed with an ordinary space matches nothing.
+NBSP = "\u00a0"
+
 
 def _money_blocks(html: str) -> list[str]:
-    return re.findall(r'<span class="tmoney[ "].*?</span>\s*</span>', html, re.S)
+    """Every ``<span class="tmoney …">…</span>``, balanced.
+
+    A regex cannot do this: the block nests two levels on one branch and
+    three on the other, so any non-greedy pattern closes early on one of
+    them. Counting the tags is shorter than being clever about it.
+    """
+    blocks: list[str] = []
+    for start in (m.start() for m in re.finditer(r'<span class="tmoney[ "]', html)):
+        depth = 0
+        for tag in re.finditer(r"<span\b|</span>", html[start:]):
+            depth += 1 if tag.group(0).startswith("<span") else -1
+            if depth == 0:
+                blocks.append(html[start : start + tag.end()])
+                break
+    return blocks
 
 
 def _lead(block: str) -> str:
-    match = re.search(r'<span class="tmoney-lead">([^<]*)</span>', block)
+    match = re.search(r'<span class="tmoney-lead"[^>]*>([^<]*)</span>', block)
     assert match is not None, f"no lead figure in {block!r}"
     return match.group(1)
 
 
 def _trail(block: str) -> str | None:
-    match = re.search(r'<span class="tmoney-trail">([^<]*)</span>', block)
+    match = re.search(r'<span class="tmoney-trail"[^>]*>([^<]*)</span>', block)
     return None if match is None else match.group(1)
 
 
@@ -63,10 +81,10 @@ def test_the_triage_modal_leads_with_the_bolivares(
 ) -> None:
     with web_client_factory() as client:
         block = _block_for(
-            client.get("/_partial/triage/1/modal").text, "16,000.00"
+            client.get("/_partial/triage/1/modal").text, f"16,000.00"
         )
 
-    assert _lead(block) == "−Bs. 16,000.00"
+    assert _lead(block) == f"−Bs.{NBSP}16,000.00"
     assert _trail(block) == "−$100.00"
 
 
@@ -77,7 +95,7 @@ def test_the_triage_queue_leads_with_the_bolivares(
     with web_client_factory() as client:
         block = _block_for(client.get("/triage").text, "24,000.00")
 
-    assert _lead(block) == "−Bs. 24,000.00"
+    assert _lead(block) == f"−Bs.{NBSP}24,000.00"
     assert _trail(block) == "−$154.84"
 
 
@@ -88,7 +106,7 @@ def test_the_chip_rides_the_derived_figure(
     """The chip explains the conversion, so it follows the dollars."""
     with web_client_factory() as client:
         block = _block_for(
-            client.get("/_partial/triage/1/modal").text, "16,000.00"
+            client.get("/_partial/triage/1/modal").text, f"16,000.00"
         )
 
     trail_line = re.search(
@@ -107,7 +125,7 @@ def test_a_usdt_row_says_it_once(
     with web_client_factory() as client:
         block = _block_for(client.get("/triage").text, "USDT")
 
-    assert _lead(block) == "−200.00 USDT"
+    assert _lead(block) == f"−200.00{NBSP}USDT"
     assert _trail(block) is None
 
 
@@ -121,10 +139,10 @@ def test_flow_still_leads_with_the_dollars(
     web_client_factory: Callable[[], TestClient],
 ) -> None:
     with web_client_factory() as client:
-        block = _block_for(client.get("/transactions").text, "Bs. 365.00")
+        block = _block_for(client.get("/transactions").text, f"Bs.{NBSP}365.00")
 
     assert _lead(block) == "−$10.00"
-    assert _trail(block) == "−Bs. 365.00"
+    assert _trail(block) == f"−Bs.{NBSP}365.00"
 
 
 def test_the_flow_modal_still_leads_with_the_dollars(

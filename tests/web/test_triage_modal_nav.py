@@ -383,7 +383,9 @@ def test_the_arrows_carry_a_real_url_not_a_js_expression(
 
     prev = _nav_button(client.get("/_partial/triage/2/modal").text, "prev")
 
-    assert 'hx-get="/_partial/triage/1/modal"' in prev
+    # ?advance=1 since 2026-09-05: an arrow moves inside a run that is
+    # already on screen, so the dialog it fetches skips the entrance.
+    assert 'hx-get="/_partial/triage/1/modal?advance=1"' in prev
     assert 'hx-target="#triage-modal-host"' in prev
     assert "navigateModal" not in prev
 

@@ -33,6 +33,7 @@ from finances.domain import rates as rates_engine
 from finances.domain import transfers as transfers_domain
 from finances.format import fmt_date_short, fmt_number
 from finances.web.services.categories_view import PickerPayload, picker_payload
+from finances.web.services.transactions_query import TransactionCard
 from finances.web.services.triage import (
     TriageItem,
     TriageQueue,
@@ -157,6 +158,18 @@ _CHIPLESS_SOURCES = frozenset(
         rates_engine.NEEDS_REVIEW_SOURCE,
     }
 )
+
+
+def is_native_usd(card: TransactionCard) -> bool:
+    """Is this row's dollar figure the same number as its native one?
+
+    True for USD, USDT and USDC, where the chain prices a dollar at one
+    dollar. The money block asks so it can draw one figure instead of the
+    same amount twice when the native amount is the headline. Decided off
+    ``rate_source`` rather than the ticker, so the answer comes from the
+    resolver that actually priced the row.
+    """
+    return card.rate_source == money.NATIVE_USD_SOURCE
 
 
 def prov_chip(

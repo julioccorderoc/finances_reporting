@@ -67,7 +67,7 @@
 
     <div class="tmodal-body">
       <div class="tmodal-facts">
-        {{ money(card, size="lg", align="left") }}
+        {{ money(card, size="lg", align="left", headline="native") }}
         <div class="tmodal-merchant">
           <span class="tmodal-merchant-name">{{ item.merchant or card.description }}</span>
           {%- if item.merchant %}<span class="tmodal-merchant-raw">{{ card.description }}</span>{% endif %}

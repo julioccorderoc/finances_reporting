@@ -14,26 +14,60 @@
 
 {# --- Money ------------------------------------------------------------- #}
 
-{%- macro money(card, size="sm", align="right") -%}
-{#- The consolidated USD figure, with the native amount under it.
+{%- macro money(card, size="sm", align="right", headline="usd") -%}
+{#- Two figures for the same money: one leads, one trails.
 
-    ``card`` is a TransactionCard. The provenance chip is decided by
-    ``prov_chip`` (a template global over services/triage_view), never by
-    the template: a native-USD row explains nothing, and a row with no
-    dollar figure already says so in words. -#}
+    ``headline`` decides which. ``"usd"`` is the ledger's own voice — Flow
+    answers "what did this cost me", and one currency down the column is
+    the whole point of the page. ``"native"`` is triage's: recognising a
+    row means matching the figure that is actually on the statement, in
+    the statement's own currency (owner, 2026-09-05).
+
+    The chip always rides the TRAIL line, because the trail is always the
+    derived figure and the chip is the derivation. Under ``headline="usd"``
+    that is the native amount annotated with the rate it was priced at;
+    under ``"native"`` it is the dollars, annotated the same way.
+
+    ``card`` is a TransactionCard. Whether there is a chip at all is
+    decided by ``prov_chip`` (a template global over services/triage_view),
+    never here: a native-USD row explains nothing, and a row with no dollar
+    figure already says so in words.
+
+    A native-USD row leading with its native figure has no trail to draw —
+    the two lines would be the same dollars twice (D3). -#}
 {%- set chip = prov_chip(card.rate_source, is_bcv_fallback=card.is_bcv_fallback, approximate=card.approximate) -%}
+{%- set native_first = headline == "native" -%}
+{%- set self_priced = is_native_usd(card) -%}
 <span class="tmoney {% if align == 'left' %}tmoney-left{% endif %} {% if size == 'lg' %}tmoney-lg{% endif %}">
-  {%- if card.amount_usd is not none -%}
-    <span class="tmoney-usd">{{ card.amount_usd | fmt_usd(signed=True) }}</span>
-  {%- elif size == "lg" -%}
-    <span class="tmoney-unpriced">{{ icon("circle-slash", 17) }}Can't be priced</span>
+  {%- if native_first -%}
+    <span class="tmoney-lead" data-money="native">{{ card.amount_native | fmt_native(card.currency) }}</span>
+    {%- if not self_priced -%}
+    <span class="tmoney-trail-line">
+      {%- if card.amount_usd is not none -%}
+        <span class="tmoney-trail" data-money="usd">{{ card.amount_usd | fmt_usd(signed=True) }}</span>
+      {%- elif size == "lg" -%}
+        {# D5's two wordings, unchanged by the flip — only smaller, because
+           they now sit on the trail line rather than in the headline. #}
+        <span class="tmoney-unpriced">{{ icon("circle-slash", 13) }}Can't be priced</span>
+      {%- else -%}
+        <span class="tmoney-unpriced">Unpriced</span>
+      {%- endif -%}
+      {%- if chip %}{{ prov(chip, card.rate, show_rate=(size != "sm")) }}{% endif -%}
+    </span>
+    {%- endif -%}
   {%- else -%}
-    <span class="tmoney-unpriced">Unpriced</span>
+    {%- if card.amount_usd is not none -%}
+      <span class="tmoney-lead" data-money="usd">{{ card.amount_usd | fmt_usd(signed=True) }}</span>
+    {%- elif size == "lg" -%}
+      <span class="tmoney-unpriced">{{ icon("circle-slash", 17) }}Can't be priced</span>
+    {%- else -%}
+      <span class="tmoney-unpriced">Unpriced</span>
+    {%- endif -%}
+    <span class="tmoney-trail-line">
+      <span class="tmoney-trail" data-money="native">{{ card.amount_native | fmt_native(card.currency) }}</span>
+      {%- if chip %}{{ prov(chip, card.rate, show_rate=(size != "sm")) }}{% endif -%}
+    </span>
   {%- endif -%}
-  <span class="tmoney-native-line">
-    <span class="tmoney-native">{{ card.amount_native | fmt_native(card.currency) }}</span>
-    {%- if chip %}{{ prov(chip, card.rate, show_rate=(size != "sm")) }}{% endif -%}
-  </span>
 </span>
 {%- endmacro -%}
 

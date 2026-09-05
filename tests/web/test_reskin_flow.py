@@ -246,7 +246,7 @@ def test_credit_reads_plus_dollar_in_ink_with_a_ves_native_line() -> None:
         )
     )
 
-    assert '<span class="tmoney-usd">+$1,000.00</span>' in rendered
+    assert '<span class="tmoney-lead" data-money="usd">+$1,000.00</span>' in rendered
     assert "Bs. 36,500.00" in rendered
     # The provenance chip replaces the old rate_source_badge...
     assert 'data-prov="binance_p2p_median"' in rendered
@@ -262,7 +262,7 @@ def test_credit_reads_plus_dollar_in_ink_with_a_ves_native_line() -> None:
 def test_debit_uses_the_typographic_minus() -> None:
     rendered = _render_card(_card())
 
-    assert '<span class="tmoney-usd">−$33.82</span>' in rendered
+    assert '<span class="tmoney-lead" data-money="usd">−$33.82</span>' in rendered
     assert "−Bs. 1,234.56" in rendered
 
 
@@ -278,7 +278,7 @@ def test_native_usd_row_renders_no_chip() -> None:
         )
     )
 
-    assert '<span class="tmoney-usd">−$12.50</span>' in rendered
+    assert '<span class="tmoney-lead" data-money="usd">−$12.50</span>' in rendered
     assert "data-prov=" not in rendered
 
 

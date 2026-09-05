@@ -42,7 +42,7 @@ from finances.web.routers import pages as pages_router
 from finances.web.routers import partials as partials_router
 from finances.web.settings import WebSettings
 from finances.web.services.rail import build_rail
-from finances.web.services.triage_view import prov_chip
+from finances.web.services.triage_view import is_native_usd, prov_chip
 from finances.web.urls import modal_url_for, transactions_url
 
 WEB_PACKAGE_DIR = Path(__file__).resolve().parent
@@ -168,6 +168,10 @@ def create_app(settings: WebSettings) -> FastAPI:
     app.state.templates.env.globals.update(
         {
             "prov_chip": prov_chip,
+            # Whether a row prices itself — the money block asks so a
+            # native-USD row leading with its own currency does not
+            # print the same dollars twice.
+            "is_native_usd": is_native_usd,
             "modal_url_for": modal_url_for,
             # How the empty state offers the same search over every date:
             # the current filter minus its window, written back as a URL.
