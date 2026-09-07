@@ -33,10 +33,18 @@
 {% endset %}
 {{ page_header("What is a dollar worth?", answer, meta) }}
 
-{# Chart and table swap together; see partials/rates_panel.html. The
-   latest-per-pair tiles that used to sit here are gone — the table's
-   newest row says the same thing, in the company of its own history. #}
+{# Two independent surfaces on one page. The chart answers "what has the
+   dollar been doing lately", bounded by its range toggle; the log answers
+   "what exactly was recorded, ever", bounded by nothing until the owner
+   says so. They share this URL and each carries the other's state through
+   it, through the HX-Push-Url header the two fragment routes set. #}
+{% set log_filter = log.filter %}
 <section class="rpt-section">
-  {% include "partials/rates_panel.html" %}
+  {% include "partials/rates_chart.html" %}
+</section>
+
+<section class="rpt-section">
+  <h2 class="teyebrow rpt-section-title">History</h2>
+  {% include "partials/rates_log.html" %}
 </section>
 {% endblock %}

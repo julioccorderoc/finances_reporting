@@ -19,7 +19,7 @@ import sqlite3
 from datetime import date, timedelta
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from finances.db.repos import rates as rates_repo
 from finances.domain import money
@@ -79,47 +79,74 @@ class LatestRateCard(BaseModel):
     as_of_date: date
 
 
-class RateColumn(BaseModel):
-    """One (base, quote, source) stream, as a column of the rates table.
+class RateLogRow(BaseModel):
+    """One recorded rate, as the history log lists it.
 
-    ``key`` is what the row cells are keyed by; it exists because a
-    template cannot index a dict with a tuple.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    key: str
-    base: str
-    quote: str
-    source: str
-    pair: str
-    label: str
-    is_reference_only: bool
-
-
-class RateTableRow(BaseModel):
-    """One day, with whatever each column published for it.
-
-    A cell is ``None`` when that stream has no row for that day. It is
-    deliberately not carried forward from the day before: the P2P median
-    is published a dozen times a year and a filled-in column would make it
-    look daily. Carrying is the *resolver's* job, under its own bounds —
-    this table reports what was recorded.
+    Flat rather than pivoted: the pivot this replaced showed one row per
+    day and one column per stream, which meant a wall of em-dashes as soon
+    as the range was wide enough to be interesting — BCV publishes daily,
+    the P2P median a dozen times a year. Here every row carries a rate.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     as_of_date: date
+    base: str
+    quote: str
+    pair: str
+    source: str
+    label: str
+    rate: Decimal
+    is_reference_only: bool
     is_future: bool
-    cells: dict[str, Decimal | None]
 
 
-class RatesTable(BaseModel):
+class RatesLogFilter(BaseModel):
+    """URL-persistent filter state for the /rates history log.
+
+    Every field defaults to "no constraint", dates included: a bare
+    /rates lists every rate the ledger holds. The pivot's window was the
+    chart's range toggle, which made the table a view of the plot rather
+    than of the data. ``TransactionsFilter`` carries the same warning for
+    the same reason — an invented default window makes an unfiltered
+    search silently local.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
-    columns: list[RateColumn]
-    rows: list[RateTableRow]
-    range_days: int
+    date_from: date | None = None
+    date_to: date | None = None
+    pairs: list[str] = Field(default_factory=list)
+    sources: list[str] = Field(default_factory=list)
+    page: int = 1
+    page_size: int = 50
+
+
+class RatesLogPage(BaseModel):
+    """Paginated result for the log fragment."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    rows: list[RateLogRow]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+    filter: RatesLogFilter
+
+
+class RatesLogOptions(BaseModel):
+    """What the two dropdowns offer, read off the data.
+
+    Not a hard-coded list: ``rates.source`` is TEXT and open-ended, the
+    same as ``transactions.source``, so a stream ingested later earns a
+    filter entry with no edit here.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    pairs: list[str]
+    sources: list[str]
 
 
 # (base, quote, source, label) — the two series the chart pins.
@@ -317,48 +344,92 @@ def build_latest_rates(conn: sqlite3.Connection) -> list[LatestRateCard]:
     return cards
 
 
-def build_rates_table(
-    conn: sqlite3.Connection, *, range_days: int = DEFAULT_RANGE_DAYS
-) -> RatesTable:
-    """Build the date pivot: one row per day, one column per rate stream.
+def _ladder_rank(base: str, quote: str, source: str) -> int:
+    """Where ``(base, quote, source)`` sits in the resolver's chain.
 
-    Columns are *discovered* from the window rather than listed here — a
-    source ingested later earns a column with no edit to this module,
-    which is the same open-endedness ``transactions.source`` has. They are
-    then ordered by the resolver's own ladder (``rates.ladder_tiers``), so
-    the leftmost column is the one that would have priced a transaction
-    and the rightmost is the one that would not. Streams the ladder does
-    not price at all — BCV in euros, say — follow it, stably sorted.
-
-    Rows come from the data, not the calendar: a day no stream published
-    on is absent rather than blank. Days *after* today are kept and
-    flagged; BCV publishes ahead of itself and hiding tomorrow's rate
-    would misreport the ledger.
+    Streams the ladder does not price at all — BCV in euros, say — sort
+    after every one it does. Read off ``rates.ladder_tiers`` rather than
+    restated, so a re-ordering of the chain re-orders every surface that
+    lists tiers (rule-012).
     """
-    if range_days <= 0:
-        range_days = DEFAULT_RANGE_DAYS
-    since = date.today() - timedelta(days=range_days - 1)
+    ladder = list(rates_domain.ladder_tiers())
+    triple = (base, quote, source)
+    return ladder.index(triple) if triple in ladder else len(ladder)
 
+
+def _log_where(f: RatesLogFilter) -> tuple[str, list[object]]:
+    """The WHERE clause for ``f``, and its parameters.
+
+    An empty filter yields no constraints at all — that is what makes a
+    bare /rates the whole ledger rather than a window onto it.
+    """
+    clauses: list[str] = []
+    params: list[object] = []
+
+    if f.date_from is not None:
+        clauses.append("as_of_date >= ?")
+        params.append(f.date_from.isoformat())
+    if f.date_to is not None:
+        clauses.append("as_of_date <= ?")
+        params.append(f.date_to.isoformat())
+    if f.pairs:
+        marks = ", ".join("?" for _ in f.pairs)
+        clauses.append(f"(base || '/' || quote) IN ({marks})")
+        params.extend(f.pairs)
+    if f.sources:
+        marks = ", ".join("?" for _ in f.sources)
+        clauses.append(f"source IN ({marks})")
+        params.extend(f.sources)
+
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    return where, params
+
+
+def count_matching_rates(conn: sqlite3.Connection, f: RatesLogFilter) -> int:
+    """How many rows ``f`` matches — the "N rates" line, without the page."""
+    where, params = _log_where(f)
+    row = conn.execute(f"SELECT COUNT(*) FROM rates{where}", params).fetchone()
+    return int(row[0])
+
+
+def build_rates_log(
+    conn: sqlite3.Connection, f: RatesLogFilter | None = None
+) -> RatesLogPage:
+    """Run the filtered, paginated history query and return a page.
+
+    One row per recorded rate. The pivot this replaced showed one row per
+    day and one column per stream, which meant a grid that was mostly
+    em-dashes as soon as the range was wide enough to be interesting.
+
+    Ordering is date descending, then the resolver's ladder within a day,
+    so the tier that would have priced a transaction reads above the one
+    that would not. The ladder rank is computed in Python rather than in
+    SQL: expressing it as a CASE would be a second copy of the chain.
+    """
+    f = f or RatesLogFilter()
+    where, params = _log_where(f)
+
+    total = count_matching_rates(conn, f)
+    page_size = max(1, f.page_size)
+    total_pages = max(1, -(-total // page_size))
+    page_number = min(max(1, f.page), total_pages)
+    offset = (page_number - 1) * page_size
+
+    # Ordered in SQL by date and pair so the page boundary is stable, then
+    # re-ordered by ladder rank within each day below. Sorting the whole
+    # table in Python would mean reading every row to render fifty.
     rows = conn.execute(
-        """
+        f"""
         SELECT as_of_date, base, quote, source, rate
-        FROM rates
-        WHERE as_of_date >= ?
+        FROM rates{where}
         ORDER BY as_of_date DESC, base, quote, source
+        LIMIT ? OFFSET ?
         """,
-        (since.isoformat(),),
+        [*params, page_size, offset],
     ).fetchall()
 
-    ladder = list(rates_domain.ladder_tiers())
-
-    def rank(triple: tuple[str, str, str]) -> tuple[int, str, str, str]:
-        # Ladder members sort by their position in the chain; everything
-        # else lands after them, ordered stably.
-        position = ladder.index(triple) if triple in ladder else len(ladder)
-        return (position, *triple)
-
-    seen: set[tuple[str, str, str]] = set()
-    by_day: dict[date, dict[str, Decimal]] = {}
+    today = date.today()
+    log_rows: list[RateLogRow] = []
     for row in rows:
         as_of = row["as_of_date"]
         if not isinstance(as_of, date):
@@ -366,38 +437,83 @@ def build_rates_table(
         rate_value = row["rate"]
         if not isinstance(rate_value, Decimal):
             rate_value = Decimal(str(rate_value))
-        triple = (row["base"], row["quote"], row["source"])
-        seen.add(triple)
-        by_day.setdefault(as_of, {})[_column_key(*triple)] = rate_value
-
-    columns = [
-        RateColumn(
-            key=_column_key(base, quote, source),
-            base=base,
-            quote=quote,
-            source=source,
-            pair=f"{base}/{quote}",
-            label=source_label(source),
-            is_reference_only=source in _REFERENCE_ONLY_SOURCES,
+        log_rows.append(
+            RateLogRow(
+                as_of_date=as_of,
+                base=row["base"],
+                quote=row["quote"],
+                pair=f"{row['base']}/{row['quote']}",
+                source=row["source"],
+                label=source_label(row["source"]),
+                rate=rate_value,
+                is_reference_only=row["source"] in _REFERENCE_ONLY_SOURCES,
+                is_future=as_of > today,
+            )
         )
-        for base, quote, source in sorted(seen, key=rank)
+
+    # Within a day, the chain's order. Python's sort is stable, so the
+    # SQL ordering survives as the tie-break among equal ranks.
+    log_rows.sort(
+        key=lambda r: (-r.as_of_date.toordinal(), _ladder_rank(r.base, r.quote, r.source))
+    )
+
+    return RatesLogPage(
+        rows=log_rows,
+        total=total,
+        page=page_number,
+        page_size=page_size,
+        total_pages=total_pages,
+        filter=f,
+    )
+
+
+def rates_log_options(conn: sqlite3.Connection) -> RatesLogOptions:
+    """The pairs and sources the dropdowns offer, read off the table."""
+    pairs = [
+        row[0]
+        for row in conn.execute(
+            "SELECT DISTINCT base || '/' || quote FROM rates ORDER BY 1"
+        ).fetchall()
     ]
-
-    today = date.today()
-    table_rows = [
-        RateTableRow(
-            as_of_date=day,
-            is_future=day > today,
-            cells={column.key: by_day[day].get(column.key) for column in columns},
-        )
-        for day in sorted(by_day, reverse=True)
+    sources = [
+        row[0]
+        for row in conn.execute(
+            "SELECT DISTINCT source FROM rates ORDER BY 1"
+        ).fetchall()
     ]
-    return RatesTable(columns=columns, rows=table_rows, range_days=range_days)
+    return RatesLogOptions(pairs=pairs, sources=sources)
 
 
-def _column_key(base: str, quote: str, source: str) -> str:
-    """Stable cell key. A tuple cannot index a dict from a template."""
-    return f"{base}/{quote}:{source}"
+def build_chart_details(
+    conn: sqlite3.Connection, *, range_days: int = DEFAULT_RANGE_DAYS
+) -> dict[date, list[RateLogRow]]:
+    """Every rate recorded on each day of the chart's window, by day.
+
+    Feeds the chart's hover overlay, which answers "what was recorded that
+    day" — all of it, not only the two series the plot plots. Bounded by
+    the chart's range because that is the only place it is read, and
+    carrying a year of detail into a page that plots a week would be
+    payload for nothing.
+    """
+    if range_days <= 0:
+        range_days = DEFAULT_RANGE_DAYS
+    since = date.today() - timedelta(days=range_days - 1)
+
+    page = build_rates_log(
+        conn,
+        RatesLogFilter(date_from=since, page=1, page_size=_DETAIL_ROW_CAP),
+    )
+
+    by_day: dict[date, list[RateLogRow]] = {}
+    for row in page.rows:
+        by_day.setdefault(row.as_of_date, []).append(row)
+    return by_day
+
+
+# A year of daily BCV in two currencies plus the P2P streams is well under
+# this; the cap only exists so a pathological table cannot put an unbounded
+# payload on the page.
+_DETAIL_ROW_CAP = 5000
 
 
 def rates_for_day(
@@ -491,16 +607,20 @@ __all__ = [
     "DEFAULT_RANGE_DAYS",
     "DayRate",
     "LatestRateCard",
+    "RateLogRow",
     "RatePoint",
     "RateSeries",
     "RatesChart",
-    "RateColumn",
-    "RateTableRow",
-    "RatesTable",
+    "RatesLogFilter",
+    "RatesLogOptions",
+    "RatesLogPage",
     "SOURCE_LABELS",
+    "build_chart_details",
     "build_latest_rates",
-    "build_rates_table",
     "build_rates_chart",
-    "source_label",
+    "build_rates_log",
+    "count_matching_rates",
     "rates_for_day",
+    "rates_log_options",
+    "source_label",
 ]

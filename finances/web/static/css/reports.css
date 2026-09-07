@@ -779,36 +779,27 @@
   color: var(--text-tertiary);
 }
 
-/* ── Rates: the date pivot ──────────────────────────────────────────────── */
+/* ── Rates: the history log ─────────────────────────────────────────────── */
 
-/* The scroll container. Both axes, and a height cap: a 365-day range is
-   365 rows, and a page that long buries everything under it. Capping here
-   is also what lets the header stick — a sticky row needs a scrolling
-   ancestor, and `overflow-x: auto` alone would make one on the wrong
-   axis. */
-.rpt-rate-scroll {
-  max-height: 60vh;
-  overflow: auto;
+/* Card-rows on a grid, the .flow-rows idiom: date, pair, source, rate.
+   Four real columns rather than the date pivot this replaced — that one
+   grew a column per stream, and with BCV publishing daily against a P2P
+   median published a dozen times a year, most of the grid was em-dashes. */
+.rate-log-rows {
+  display: grid;
+  grid-template-columns: minmax(8.5rem, max-content) minmax(5.5rem, max-content) 1fr minmax(6.5rem, max-content);
+  margin-top: var(--space-3);
   background: var(--surface-raised);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
+  overflow: hidden;
 }
-/* Column count rides in --rate-cols, set by the template, so one rule
-   serves any number of rate streams. */
-.rpt-rate-table {
-  display: grid;
-  grid-template-columns:
-    minmax(8.5rem, max-content)
-    repeat(var(--rate-cols), minmax(6.5rem, 1fr));
-  min-width: max-content;
-  /* The last row's hairline would otherwise sit one pixel inside the
-     container's own border and read as a 2px rule. Pulling the grid down
-     by that pixel lands the two on top of each other. Cheaper than
-     counting cells to find the final row, which cannot be done without
-     knowing --rate-cols at selector time. */
-  margin-bottom: -1px;
+.rate-log-head,
+.rate-log-row {
+  display: contents;
 }
-.rpt-rate-table > * {
+.rate-log-head > *,
+.rate-log-row > * {
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -816,66 +807,39 @@
   padding: 9px var(--space-3);
   border-bottom: 1px solid var(--border-subtle);
 }
-
-/* Header. Sticky against the container's own vertical scroll. */
-.rate-th {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 1px;
+.rate-log-head > * {
   padding-top: var(--space-3);
   padding-bottom: var(--space-3);
-  background: var(--surface-raised);
   border-bottom: 1px solid var(--border-default);
-  text-align: right;
 }
-.rate-th-pair {
-  font-family: var(--font-mono);
-  font-size: var(--caption-size);
-  font-weight: 500;
-  letter-spacing: var(--micro-tracking);
-  color: var(--text-primary);
-  white-space: nowrap;
+.rate-log-head-rate {
+  justify-content: flex-end;
 }
-.rate-th-source {
-  font-size: var(--caption-size);
-  line-height: var(--caption-line);
-  color: var(--text-tertiary);
-  white-space: nowrap;
+.rate-log-row:last-child > * {
+  border-bottom: 0;
 }
-/* rule-005: BCV is never a headline. The column says so once, in its
-   heading, rather than on every one of its cells. */
-.rate-th-source.is-reference {
-  font-style: italic;
-}
-
-/* The date column stays put while the streams scroll under it. */
-.rate-th-date,
-.rate-td-date {
-  position: sticky;
-  left: 0;
-  z-index: 1;
-  align-items: center;
-  background: var(--surface-raised);
-  border-right: 1px solid var(--border-subtle);
+.rate-log-date {
   font-size: var(--body-sm-size);
   color: var(--text-secondary);
   white-space: nowrap;
 }
-.rate-th-date {
-  z-index: 3;
-  flex-direction: row;
-  align-items: center;
-  text-align: left;
-}
-.rate-td-date.is-ahead {
+.rate-log-pair {
+  font-family: var(--font-mono);
+  font-size: var(--body-sm-size);
   color: var(--text-primary);
+  white-space: nowrap;
 }
-
-/* Figures. Mono and tabular so the decimal points form a line. */
-.rate-td {
+.rate-log-source {
+  font-size: var(--body-sm-size);
+  color: var(--text-secondary);
+}
+/* rule-005: BCV is reference only, and reads as it — once on the source,
+   once on the figure, never as a headline. */
+.rate-log-source.is-reference {
+  font-style: italic;
+  color: var(--text-tertiary);
+}
+.rate-log-rate {
   justify-content: flex-end;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -883,18 +847,22 @@
   color: var(--text-primary);
   white-space: nowrap;
 }
-.rate-td.is-reference {
+.rate-log-rate.is-reference {
   color: var(--text-tertiary);
-}
-.rate-td[data-empty] {
-  color: var(--text-disabled);
 }
 
 @media (max-width: 640px) {
-  .rpt-rate-scroll {
-    max-height: 70vh;
+  /* The source column is the one that can wrap, so it is the one that
+     goes; its text is repeated in the pair beside it often enough. */
+  .rate-log-rows {
+    grid-template-columns: minmax(7rem, max-content) 1fr minmax(6rem, max-content);
   }
-  .rpt-rate-table > * {
+  .rate-log-head > :nth-child(3),
+  .rate-log-row > :nth-child(3) {
+    display: none;
+  }
+  .rate-log-head > *,
+  .rate-log-row > * {
     padding-left: var(--space-2);
     padding-right: var(--space-2);
   }
