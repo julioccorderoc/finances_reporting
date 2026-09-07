@@ -2,17 +2,24 @@
 
    Renders the range toggle, the <canvas>, the hover overlay, and an
    inline <script> that constructs / re-constructs the Chart.js instance.
-   Needs `chart` (a `RatesChart`) and `table` (a `RatesTable`) in scope —
-   partials/rates_panel.html supplies both.
+   Needs `chart` (a `RatesChart`), `details` (day -> [RateLogRow]) and
+   `log_filter` in scope.
 
-   The overlay reads `table`, not `chart`: the plot draws two lines, but
+   The overlay reads `details`, not `chart`: the plot draws two lines, but
    the question a reader has on hover is "what was recorded that day",
-   which is every stream. Reusing the table's own rows means the overlay
-   and the grid below it cannot disagree.
+   which is every stream. Both come from the same builder the history log
+   uses, so the overlay and the table below cannot disagree.
+
+   The range toggle pushes onto /rates, the same address the log's filter
+   form pushes, so a change of plot window must not clear the table's
+   filters. That is settled server-side by HX-Push-Url rather than by a
+   rendered attribute: the attribute is written once, at page load, and
+   would still describe the filter state as it was before the owner
+   touched the table.
 
    Used by:
-   * /rates page (full HTML render), inside partials/rates_panel.html
-   * /_partial/rates/panel (HTMX swap on range-toggle)
+   * /rates page (full HTML render)
+   * /_partial/rates/chart (HTMX swap on range-toggle)
 
    The payload rides in a <script type="application/json"> block, never in
    an attribute (tojson's double quotes would end the attribute and
@@ -32,7 +39,7 @@
    first row happened to fall and read as a grey slab dropped on the plot.
 #}
 
-<div class="rpt-chart-card">
+<div class="rpt-chart-card" id="rates-chart-card">
   <div class="rpt-chart-toolbar">
     <span class="teyebrow">Range</span>
     <div class="rpt-tabs" data-rates-range>
@@ -43,13 +50,21 @@
           class="tbtn tbtn-sm rpt-tab{% if active %} is-on{% endif %}"
           data-range-days="{{ opt }}"
           aria-pressed="{{ 'true' if active else 'false' }}"
-          hx-get="/_partial/rates/panel"
-          hx-target="#rates-panel"
+          hx-get="/_partial/rates/chart"
+          hx-target="#rates-chart-card"
           hx-swap="outerHTML"
-          {# The PAGE's URL, not the partial's: `true` would push
-             /_partial/rates/panel?range_days=N into the address bar, and a
-             reload would land on a bare fragment. #}
-          hx-push-url="/rates?range_days={{ opt }}"
+          {# The log's filter form rides along, for two reasons: the
+             server needs it to write the address bar, and the attribute
+             below cannot — it is rendered once, at page load, so a URL
+             baked in here would still describe the filter state as it was
+             BEFORE the owner touched the table.
+
+             `true` alone would push the PARTIAL's path and a reload would
+             land on a bare fragment; the route's HX-Push-Url header
+             overrides it with /rates plus this request's whole query,
+             which is exactly range_days AND the log's filters. #}
+          hx-include="#rates-log-filters"
+          hx-push-url="true"
           hx-vals='{"range_days": "{{ opt }}"}'
         >{{ opt }}d</button>
       {% endfor %}
@@ -86,14 +101,10 @@
         {% endfor %}
       ],
       "details": {
-        {% for row in table.rows -%}
-        {{ row.as_of_date.isoformat() | tojson }}: [
-          {%- set entries = [] -%}
-          {%- for col in table.columns if row.cells[col.key] is not none -%}
-          {%- set _ = entries.append(col) -%}
-          {%- endfor -%}
-          {% for col in entries -%}
-          {"pair": {{ col.pair | tojson }}, "label": {{ col.label | tojson }}, "value": {{ row.cells[col.key] | fmt_number(4) | tojson }}, "reference": {{ "true" if col.is_reference_only else "false" }}}{% if not loop.last %},{% endif %}
+        {% for day, entries in details.items() -%}
+        {{ day.isoformat() | tojson }}: [
+          {% for entry in entries -%}
+          {"pair": {{ entry.pair | tojson }}, "label": {{ entry.label | tojson }}, "value": {{ entry.rate | fmt_number(4) | tojson }}, "reference": {{ "true" if entry.is_reference_only else "false" }}}{% if not loop.last %},{% endif %}
           {%- endfor %}
         ]{% if not loop.last %},{% endif %}
         {% endfor %}
@@ -259,6 +270,34 @@
         };
       });
 
+      // A vertical hairline at whatever the pointer is over, so the
+      // reading in the overlay is tied to a visible position on the plot.
+      // `afterDatasetsDraw` rather than `afterDraw`: the line passes UNDER
+      // the series and their points, which is what keeps it a guide rather
+      // than a mark competing with the data.
+      var crosshair = {
+        id: "crosshair",
+        afterDatasetsDraw: function (chart) {
+          var active = chart.tooltip && chart.tooltip.getActiveElements
+            ? chart.tooltip.getActiveElements()
+            : [];
+          if (!active.length) return;
+          var x = active[0].element.x;
+          var area = chart.chartArea;
+          var ctx = chart.ctx;
+          ctx.save();
+          ctx.beginPath();
+          ctx.lineWidth = 1;
+          ctx.strokeStyle = ink300;
+          // Half-pixel offset so a 1px line lands on one device pixel
+          // instead of straddling two and rendering as a 2px blur.
+          ctx.moveTo(Math.round(x) + 0.5, area.top);
+          ctx.lineTo(Math.round(x) + 0.5, area.bottom);
+          ctx.stroke();
+          ctx.restore();
+        }
+      };
+
       function build() {
         // Destroy any existing chart on this canvas (HTMX swap re-runs this).
         if (window.__ratesChart) {
@@ -266,6 +305,7 @@
         }
         window.__ratesChart = new Chart(canvas.getContext("2d"), {
           type: "line",
+          plugins: [crosshair],
           // The shared axis. Every dataset indexes into it by date, so
           // two series of very different density still line up.
           data: { labels: data.labels, datasets: datasets },

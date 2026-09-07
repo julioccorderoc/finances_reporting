@@ -11,6 +11,8 @@ from typing import Literal
 
 from fastapi import HTTPException, Query
 
+from finances.web.routers._optional_date import optional_date
+
 from finances.web.services.transactions_query import (
     TransactionsFilter,
 )
@@ -19,8 +21,8 @@ _ALLOWED_PAGE_SIZES: frozenset[int] = frozenset({25, 50, 100})
 
 
 def filter_from_query(
-    date_from: date | None = Query(default=None),
-    date_to: date | None = Query(default=None),
+    date_from: str | None = Query(default=None),
+    date_to: str | None = Query(default=None),
     accounts: list[str] = Query(default_factory=list),
     categories: list[str] = Query(default_factory=list),
     kinds: list[Literal["income", "expense", "transfer", "adjustment"]] = Query(
@@ -44,8 +46,8 @@ def filter_from_query(
             detail=f"page_size must be one of {sorted(_ALLOWED_PAGE_SIZES)}",
         )
     return TransactionsFilter(
-        date_from=date_from,
-        date_to=date_to,
+        date_from=optional_date(date_from, field="date_from"),
+        date_to=optional_date(date_to, field="date_to"),
         accounts=accounts,
         categories=categories,
         kinds=kinds,

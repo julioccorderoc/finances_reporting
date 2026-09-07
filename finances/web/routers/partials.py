@@ -44,6 +44,7 @@ from finances.config import CARACAS_TZ
 from finances.format import fmt_date, fmt_number
 from finances.web.deps import dismissed_pairs as _dismissed_pairs, get_conn
 from finances.web.routers._monthly_filter_dep import monthly_filter_from_query
+from finances.web.routers._rates_filter_dep import rates_filter_from_query
 from finances.web.routers._tx_filter_dep import filter_from_query
 from finances.web.services.category_stats import top_categories
 from finances.web.services.dashboard import build_kpis, build_sync_status
@@ -84,9 +85,12 @@ from finances.web.services.monthly_view import (
 )
 from finances.web.services.rates_view import (
     DEFAULT_RANGE_DAYS,
+    RatesLogFilter,
+    build_chart_details,
     build_rates_chart,
-    build_rates_table,
+    build_rates_log,
     rates_for_day,
+    rates_log_options,
 )
 from finances.web.services.transaction_add import (
     NewTransactionRequest,
@@ -1829,29 +1833,70 @@ def triage_unpark_all_partial(
 
 
 
-@router.get("/rates/panel", include_in_schema=False)
-def rates_panel_partial(
+@router.get("/rates/chart", include_in_schema=False)
+def rates_chart_partial(
     request: Request,
     range_days: int = Query(DEFAULT_RANGE_DAYS, ge=1, le=3650),
+    log_filter: RatesLogFilter = Depends(rates_filter_from_query),
     conn: sqlite3.Connection = Depends(get_conn),
 ):
-    """Return the chart AND the table for the HTMX range-toggle swap.
+    """The chart card alone, for the range-toggle swap.
 
-    One fragment rather than two: the range toggle governs both, and a
-    swap that moved only the chart left the table showing a different
-    window from the plot directly above it.
+    The log filter is read but not used to build anything: the toggle's
+    buttons re-render with it so the URL they push still carries the
+    table's state. Accepting the parameters rather than rejecting them is
+    the point — the two controls share one address.
     """
     templates = request.app.state.templates
-    return templates.TemplateResponse(
+    response = templates.TemplateResponse(
         request,
-        "partials/rates_panel.html",
+        "partials/rates_chart.html",
         {
             "chart": build_rates_chart(conn, range_days=range_days),
-            "table": build_rates_table(conn, range_days=range_days),
+            "details": build_chart_details(conn, range_days=range_days),
+            "log_filter": log_filter,
             "range_days": range_days,
             "range_options": [7, 30, 90, 365],
         },
     )
+    # This request's query carries the log's filters (the toggle includes
+    # the filter form) as well as range_days, so pushing it whole is what
+    # keeps a change of plot window from clearing the table.
+    _push_page_url(request, response, "/rates")
+    return response
+
+
+@router.get("/rates/log", include_in_schema=False)
+def rates_log_partial(
+    request: Request,
+    range_days: int = Query(DEFAULT_RANGE_DAYS, ge=1, le=3650),
+    log_filter: RatesLogFilter = Depends(rates_filter_from_query),
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """The history log alone, for filter / pager / per-page swaps.
+
+    ``range_days`` is accepted and passed straight back to the template so
+    the fragment's own controls keep pushing a URL that preserves the
+    plot's window. It selects nothing here.
+    """
+    templates = request.app.state.templates
+    response = templates.TemplateResponse(
+        request,
+        "partials/rates_log.html",
+        {
+            "log": build_rates_log(conn, log_filter),
+            "options": rates_log_options(conn),
+            "range_days": range_days,
+        },
+    )
+    # The form, the pager and the per-page select all say
+    # hx-push-url="true", which pushes THIS path. Without the header a
+    # reload would land on a bare fragment — the same trap /transactions
+    # and /monthly already route through this helper to avoid. The
+    # request's query carries range_days too, so the plot's window
+    # survives the push.
+    _push_page_url(request, response, "/rates")
+    return response
 
 
 # ---------------------------------------------------------------------------

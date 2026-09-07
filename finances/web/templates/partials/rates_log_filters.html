@@ -1,0 +1,81 @@
+{# Filter form for the /rates history log. Requires `log` and `options`.
+
+   Same idiom as partials/transactions_filters.html — the house field for
+   dates, native <details> dropdowns for the multi-selects, HTMX swapping
+   the list alone and pushing the URL so a filter state is shareable.
+
+   The hidden range_days is load-bearing. This form pushes onto /rates,
+   which is also where the chart's range toggle pushes; without it, every
+   filter change would reset the plot to its default window. The mirror is
+   in the chart's toolbar, where the toggle sends this form along with its
+   own request so the server can push both halves of the state.
+#}
+{%- macro dropdown(name, label, options, selected) -%}
+  {%- set n = selected | length -%}
+  {%- set text = 'Any' if n == 0 else (selected[0] if n == 1 else (n ~ ' selected')) -%}
+  <fieldset class="flow-fieldset">
+    <legend class="teyebrow">{{ label }}</legend>
+    <details
+      class="flow-dd"
+      data-filter-group="{{ name }}"
+      x-data="{
+        text: '',
+        sync() {
+          const on = Array.from(this.$el.querySelectorAll('input:checked'));
+          this.text = on.length === 0 ? 'Any' : (on.length === 1 ? on[0].value : on.length + ' selected');
+        }
+      }"
+      x-init="sync()"
+      @change="sync()"
+      @click.outside="$el.open = false"
+      @keydown.escape="$el.open = false"
+    >
+      <summary class="flow-input flow-dd-summary{% if n %} is-set{% endif %}" x-bind:class="{ 'is-set': text !== 'Any' }">
+        <span class="flow-dd-value" x-text="text">{{ text }}</span>
+      </summary>
+      <div class="flow-dd-menu" role="group" aria-label="{{ label }}">
+        {%- for opt in options %}
+        <label class="flow-dd-option"><input type="checkbox" class="tcheck" name="{{ name }}" value="{{ opt }}"{% if opt in selected %} checked{% endif %}><span>{{ opt }}</span></label>
+        {%- endfor %}
+      </div>
+    </details>
+  </fieldset>
+{%- endmacro -%}
+<form
+  id="rates-log-filters"
+  class="flow-filters"
+  hx-get="/_partial/rates/log"
+  hx-target="#rates-log"
+  hx-push-url="true"
+  hx-trigger="change"
+  hx-vals='{"page": "1"}'
+>
+  {# The chart's window, carried through untouched. #}
+  <input type="hidden" name="range_days" value="{{ range_days }}">
+
+  <div class="flow-filter-grid">
+    <label class="flow-field">
+      <span class="teyebrow">From</span>
+      <input
+        type="date"
+        name="date_from"
+        value="{{ log.filter.date_from.isoformat() if log.filter.date_from else '' }}"
+        class="flow-input"
+      >
+    </label>
+    <label class="flow-field">
+      <span class="teyebrow">To</span>
+      <input
+        type="date"
+        name="date_to"
+        value="{{ log.filter.date_to.isoformat() if log.filter.date_to else '' }}"
+        class="flow-input"
+      >
+    </label>
+  </div>
+
+  <div class="flow-filter-groups">
+    {% if options.pairs %}{{ dropdown("pairs", "Pairs", options.pairs, log.filter.pairs) }}{% endif %}
+    {% if options.sources %}{{ dropdown("sources", "Sources", options.sources, log.filter.sources) }}{% endif %}
+  </div>
+</form>

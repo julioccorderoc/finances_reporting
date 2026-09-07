@@ -24,6 +24,7 @@ from finances.db.repos import categories as categories_repo
 from finances.web.deps import dismissed_pairs, get_conn
 from finances.web.settings import ENV_RELOAD_CHILD
 from finances.web.routers._monthly_filter_dep import monthly_filter_from_query
+from finances.web.routers._rates_filter_dep import rates_filter_from_query
 from finances.web.routers._tx_filter_dep import filter_from_query
 from finances.web.services.accounts_view import build_account_cards
 from finances.web.services.category_stats import top_categories
@@ -41,9 +42,12 @@ from finances.web.services.monthly_view import (
 )
 from finances.web.services.rates_view import (
     DEFAULT_RANGE_DAYS,
+    RatesLogFilter,
+    build_chart_details,
     build_latest_rates,
     build_rates_chart,
-    build_rates_table,
+    build_rates_log,
+    rates_log_options,
 )
 from finances.web.services.transactions_query import (
     TransactionsFilter,
@@ -218,13 +222,19 @@ def triage_page(
 def rates_page(
     request: Request,
     range_days: int = Query(DEFAULT_RANGE_DAYS, ge=1, le=3650),
+    log_filter: RatesLogFilter = Depends(rates_filter_from_query),
     conn: sqlite3.Connection = Depends(get_conn),
 ):
-    """Render the /rates page: headline, then the chart-and-table panel.
+    """Render /rates: headline, the chart, then the history log.
+
+    Two independent controls on one address. ``range_days`` governs the
+    plot and nothing else; the log filter governs the table and nothing
+    else. Both are read here so each side's links can carry the other's
+    state — each pushes /rates plus its whole query, via the
+    ``HX-Push-Url`` header on the fragment routes.
 
     ``latest`` still feeds the headline figure — the newest USDT/VES P2P
-    median — even though the latest-per-pair tiles it also used to draw
-    are gone; the table now carries those numbers with their history.
+    median — which is the only thing left that reads it on this page.
     """
     templates = request.app.state.templates
     return templates.TemplateResponse(
@@ -233,7 +243,9 @@ def rates_page(
         {
             "title": "Rates",
             "chart": build_rates_chart(conn, range_days=range_days),
-            "table": build_rates_table(conn, range_days=range_days),
+            "details": build_chart_details(conn, range_days=range_days),
+            "log": build_rates_log(conn, log_filter),
+            "options": rates_log_options(conn),
             "latest": build_latest_rates(conn),
             "range_days": range_days,
             "range_options": [7, 30, 90, 365],
