@@ -23,7 +23,11 @@ FLOW_CSS = (
     Path(__file__).resolve().parents[2] / "finances" / "web" / "static" / "css" / "flow.css"
 )
 
-GROUPS = ("accounts", "kinds", "currencies", "sources")
+# Categories joined them on 2026-09-07 (tests/web/test_category_filter.py).
+# It is listed here because everything below is a property of *every*
+# dropdown; what is particular to it — the in-use-only option list and the
+# Uncategorized sentinel — is pinned in its own file.
+GROUPS = ("accounts", "categories", "kinds", "currencies", "sources")
 
 
 def _group(body: str, name: str) -> str:
@@ -93,7 +97,7 @@ def test_summary_reads_any_the_one_value_or_a_count(
     assert _summary_text(_group(two, "accounts")) == "2 selected"
 
 
-def test_dropdowns_sit_in_one_row_of_four_and_flow_css_owns_them() -> None:
+def test_dropdowns_sit_in_one_row_and_flow_css_owns_them() -> None:
     css = FLOW_CSS.read_text(encoding="utf-8")
 
     assert "choice-chip" not in css
@@ -102,7 +106,7 @@ def test_dropdowns_sit_in_one_row_of_four_and_flow_css_owns_them() -> None:
 
     groups = css[css.index(".flow-filter-groups {") :]
     groups = groups[: groups.index("}")]
-    assert "repeat(4, minmax(0, 1fr))" in groups
+    assert "repeat(5, minmax(0, 1fr))" in groups
 
     menu = css[css.index(".flow-dd-menu {") :]
     menu = menu[: menu.index("}")]
