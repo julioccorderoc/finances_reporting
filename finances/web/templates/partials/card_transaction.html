@@ -47,7 +47,10 @@
   <span class="flow-row-desc" title="{{ card.description }}">
     <span class="flow-row-name">{{ card.description if card.description else '—' }}</span>
     {%- if card.notes %}
-    <span class="flow-row-note" data-note-indicator title="{{ card.notes }}">{{ card.notes | truncate(60) }}</span>
+    {#- No truncate(): Jinja cannot know the column's width, and the "..."
+        it appends is one no browser width will ever expand. CSS elides
+        at the real width; the title holds the whole note. -#}
+    <span class="flow-row-note" data-note-indicator title="{{ card.notes }}">{{ card.notes }}</span>
     {%- endif %}
   </span>
 

@@ -47,6 +47,7 @@ from finances.web.services.rates_view import (
 )
 from finances.web.services.transactions_query import (
     TransactionsFilter,
+    category_options,
     query_transactions,
 )
 from finances.web.services.triage_view import build_screen
@@ -144,6 +145,9 @@ def transactions_page(
 
     # Filter dropdown options. Lightweight — these are short lists.
     accounts_options = [a.name for a in accounts_repo.list_all(conn, include_inactive=True)]
+    # (value, label) pairs, unlike the four lists beside it: one of them is
+    # a sentinel that must never reach the screen. See category_options.
+    categories_options = category_options(conn)
     kinds_options = ["income", "expense", "transfer", "adjustment"]
     currencies_options = sorted(
         {
@@ -167,6 +171,7 @@ def transactions_page(
             "page": page,
             "filter": page.filter,
             "accounts_options": accounts_options,
+            "categories_options": categories_options,
             "kinds_options": kinds_options,
             "currencies_options": currencies_options,
             "sources_options": sources_options,
