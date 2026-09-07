@@ -60,8 +60,8 @@ OWNED = (
     "partials/account_card.html",
     "pages/rates.html",
     "partials/rates_chart.html",
-    "partials/rates_panel.html",
-    "partials/rates_table.html",
+    "partials/rates_log.html",
+    "partials/rates_log_filters.html",
 )
 
 _DESKTOP = {"User-Agent": "Mozilla/5.0 desktop"}
@@ -492,7 +492,7 @@ def test_rates_chart_payload_is_a_json_block_on_the_page_and_the_partial(
     assert payload["range_days"] == 30
 
     client = web_client_factory()
-    partial = client.get("/_partial/rates/panel", params={"range_days": 7}, headers={"HX-Request": "true"}).text
+    partial = client.get("/_partial/rates/chart", params={"range_days": 7}, headers={"HX-Request": "true"}).text
     assert _json_block(partial, "rates-chart-data")["range_days"] == 7
     assert 'id="rates-chart-canvas"' in partial
     assert "data-chart=" not in partial
@@ -507,45 +507,42 @@ def test_rates_range_toggle_keeps_its_hx_contract_as_tabs(
     assert [re.search(r'data-range-days="(\d+)"', b).group(1) for b in buttons] == ["7", "30", "90", "365"]
     for button in buttons:
         for attr in (
-            'hx-get="/_partial/rates/panel"',
-            'hx-target="#rates-panel"',
+            'hx-get="/_partial/rates/chart"',
+            'hx-target="#rates-chart-card"',
             'hx-swap="outerHTML"',
         ):
             assert attr in button, attr
-        # The page's URL is pushed, never the partial's (see the test below).
-        assert re.search(r'hx-push-url="/rates\?range_days=\d+"', button)
+        # The page's URL is pushed, never the partial's — via the
+        # HX-Push-Url header, asserted in test_rates_log.py.
+        assert 'hx-push-url="true"' in button
         assert re.search(r"hx-vals='\{\"range_days\": \"\d+\"\}'", button)
         assert "tbtn tbtn-sm rpt-tab" in button
     assert sum("is-on" in b for b in buttons) == 1
     assert "is-on" in next(b for b in buttons if 'data-range-days="30"' in b)
 
 
-def test_rate_table_headings_are_pairs_and_bcv_is_marked_reference(
+def test_rate_log_rows_name_the_pair_and_mark_bcv_reference(
     seeded_web_db: sqlite3.Connection, web_client_factory
 ) -> None:
-    """What the latest-per-pair tiles used to say, said by the columns.
+    """What the latest-per-pair tiles used to say, said by the log rows.
 
-    The tiles showed today's number per pair with no history; the table's
-    heading names the pair and its stream, and its first row carries the
-    same figures.
+    The tiles showed today's number per pair with no history; a log row
+    names the pair, its stream, and the figure, with rule-005's
+    reference-only marker on the BCV rows.
     """
     html = _page(web_client_factory, "/rates")
-    assert 'class="rpt-rate-table"' in html
+    assert 'class="rate-log-rows"' in html
 
-    headings = re.findall(r'<div class="rate-th" data-column="[^"]+">.*?</div>', html, flags=re.DOTALL)
-    assert len(headings) == 2
+    rows = re.findall(r'<div class="rate-log-row"[^>]*>.*?</div>\s*(?=<div class="rate-log-row"|</div>)', html, flags=re.DOTALL)
+    assert rows, "no log rows rendered"
 
-    p2p = next(h for h in headings if "binance_p2p_median" in h)
-    bcv = next(h for h in headings if ":bcv" in h)
-    assert '<span class="rate-th-pair">USDT/VES</span>' in p2p
+    p2p = next(r for r in rows if 'data-source="binance_p2p_median"' in r)
+    bcv = next(r for r in rows if 'data-source="bcv"' in r)
+    assert '<span class="rate-log-pair">USDT/VES</span>' in p2p
     assert "is-reference" not in p2p
-    assert '<span class="rate-th-pair">USD/VES</span>' in bcv
-    assert "rate-th-source is-reference" in bcv
+    assert '<span class="rate-log-pair">USD/VES</span>' in bcv
+    assert "rate-log-source is-reference" in bcv
     assert "&middot; ref" in bcv
-
-    # Today's figures, in the newest row.
-    assert f'data-row-date="{date.today().isoformat()}"' in html
-    assert "36.5000" in html
 
 
 def test_rates_chart_script_draws_greyscale_and_one_red() -> None:
@@ -638,9 +635,20 @@ def test_rates_range_toggle_pushes_the_page_url_not_the_partial(
     seeded_web_db: sqlite3.Connection, web_client_factory
 ) -> None:
     """A reload after a toggle must land on /rates, never on the bare
-    fragment. ``hx-push-url="true"`` would push the partial's own URL."""
+    fragment.
+
+    Both controls on this page say ``hx-push-url="true"`` — which pushes
+    the PARTIAL's path — and are corrected server-side by the
+    ``HX-Push-Url`` header, the same route /transactions and /monthly
+    take."""
     with web_client_factory() as client:
         page = client.get("/rates").text
+        pushed = client.get(
+            "/_partial/rates/log",
+            params={"page_size": 25, "range_days": 90},
+            headers={"HX-Request": "true"},
+        ).headers["HX-Push-Url"]
 
-    assert 'hx-push-url="/rates?range_days=90"' in page
-    assert 'hx-push-url="true"' not in page.split('id="rates-panel"', 1)[1]
+    assert pushed.startswith("/rates?")
+    assert "range_days=90" in pushed
+    assert "_partial" not in pushed

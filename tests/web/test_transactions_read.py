@@ -392,3 +392,23 @@ def test_txn_query_base_selects_every_column_row_to_transaction_needs(
     assert txn.source_ref == "prov-1"
     assert row["account_name"] == "Provincial"
     assert row["category_name"] == "Groceries"
+
+
+def test_empty_date_inputs_do_not_break_the_transactions_filter(
+    seeded_web_db, web_client_factory
+) -> None:
+    """The /transactions filter form was 422ing on its own default state.
+
+    Both date inputs start empty, and an empty ``<input type="date">``
+    serialises as ``date_from=``. FastAPI cannot parse "" into a date, so
+    every filter change on that page returned 422 and the list silently
+    never moved. Found while wiring the same form onto /rates.
+    """
+    client = web_client_factory()
+    resp = client.get(
+        "/_partial/transactions/list",
+        params={"date_from": "", "date_to": "", "kinds": "income"},
+        headers={"HX-Request": "true"},
+    )
+
+    assert resp.status_code == 200

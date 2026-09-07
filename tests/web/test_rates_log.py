@@ -398,22 +398,45 @@ def test_the_chart_range_toggle_preserves_the_log_filters(
 ) -> None:
     """Changing the plotted window must not silently reset the table.
 
-    Both controls push onto the same /rates URL. A toggle that pushed a
-    bare ?range_days= would drop every filter the owner had set, and the
-    next reload would show them an unfiltered table they did not ask for.
+    Settled by the response header, not by a rendered attribute. The
+    toggle's buttons are written once, at page load; a URL baked into them
+    would still describe the filter state as it was BEFORE the owner
+    touched the table, so the first filter change would leave every button
+    pointing at an unfiltered address. The browser showed exactly that.
     """
+    client: TestClient = web_client_factory()
+    pushed = client.get(
+        "/_partial/rates/chart",
+        params={
+            "range_days": 90,
+            "sources": "bcv",
+            "date_from": "",
+            "date_to": "",
+            "page_size": 25,
+        },
+        headers={"HX-Request": "true"},
+    ).headers["HX-Push-Url"]
+
+    assert pushed.startswith("/rates?")
+    assert "range_days=90" in pushed
+    assert "sources=bcv" in pushed
+    assert "page_size=25" in pushed
+
+
+def test_the_range_toggle_sends_the_filter_form_with_its_request(
+    log_rates_db: sqlite3.Connection,
+    web_client_factory,
+) -> None:
+    """Which is the only way the server can know the filters to push."""
     import re
 
     client: TestClient = web_client_factory()
-    body = client.get(
-        "/rates", params={"range_days": 30, "sources": "bcv", "page_size": 25}
-    ).text
+    body = client.get("/rates").text
+    buttons = re.findall(r"<button[^>]*data-range-days[^>]*>", body)
 
-    pushes = re.findall(r'hx-push-url="([^"]*range_days=[^"]*)"', body)
-    assert pushes
-    for url in pushes:
-        assert "sources=bcv" in url, url
-        assert "page_size=25" in url, url
+    assert buttons
+    for button in buttons:
+        assert 'hx-include="#rates-log-filters"' in button, button
 
 
 def test_the_log_filter_form_preserves_the_chart_range(
@@ -481,3 +504,67 @@ def test_chart_script_registers_a_crosshair_plugin() -> None:
 
     assert "afterDatasetsDraw" in source
     assert "crosshair" in source.lower()
+
+
+# ---------------------------------------------------------------------------
+# Empty date inputs.
+# ---------------------------------------------------------------------------
+
+
+def test_empty_date_inputs_are_no_constraint_not_a_422(
+    log_rates_db: sqlite3.Connection,
+    web_client_factory,
+) -> None:
+    """An untouched <input type="date"> serialises as ``date_from=``.
+
+    That is the DEFAULT state of the filter form, and FastAPI cannot parse
+    "" into a date, so every filter change 422'd and the table silently
+    never moved. Found in a browser; invisible to any test that builds its
+    query dict in Python.
+    """
+    client: TestClient = web_client_factory()
+    resp = client.get(
+        "/_partial/rates/log",
+        params={"date_from": "", "date_to": "", "sources": "bcv", "page_size": 50},
+        headers={"HX-Request": "true"},
+    )
+
+    assert resp.status_code == 200
+    assert "bcv" in resp.text.lower()
+
+
+def test_a_real_date_still_filters(
+    log_rates_db: sqlite3.Connection,
+    web_client_factory,
+) -> None:
+    """The empty-string coercion must not swallow genuine dates."""
+    from finances.web.services.rates_view import build_rates_log
+
+    client: TestClient = web_client_factory()
+    cutoff = TODAY - timedelta(days=2)
+    body = client.get(
+        "/_partial/rates/log",
+        params={"date_from": cutoff.isoformat(), "page_size": 200},
+        headers={"HX-Request": "true"},
+    ).text
+
+    expected = build_rates_log(
+        log_rates_db,
+        _filter(date_from=cutoff, page_size=200),
+    ).total
+    assert f"{expected} rate" in body
+
+
+def test_a_malformed_date_is_still_rejected(
+    log_rates_db: sqlite3.Connection,
+    web_client_factory,
+) -> None:
+    """Only the empty string is forgiven, not any unparseable text."""
+    client: TestClient = web_client_factory()
+    resp = client.get(
+        "/_partial/rates/log",
+        params={"date_from": "not-a-date"},
+        headers={"HX-Request": "true"},
+    )
+
+    assert resp.status_code == 422
