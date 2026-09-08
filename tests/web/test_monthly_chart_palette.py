@@ -21,6 +21,12 @@ from the owner, one surface:
   stack order with no totals and no shares. The replacement is a DOM overlay —
   the idiom rates_chart.html already established — ranked by size, and it can
   open "Other" because the tail that fed it is now on the wire.
+
+Since ADR-023 a series is a group or an ungrouped category, and the slot
+belongs to the *series*. The seeding helper below inserts fresh, ungrouped
+categories so each is its own series and the rank arithmetic these tests
+rely on stays exact whatever the seeded mapping says; the grouped cases
+live in test_monthly_chart_groups.py.
 """
 
 from __future__ import annotations
@@ -40,6 +46,7 @@ from finances.db.repos import transactions as transactions_repo
 from finances.domain.models import (
     Account,
     AccountKind,
+    Category,
     Transaction,
     TransactionKind,
 )
@@ -71,11 +78,15 @@ MACROS_HTML = REPO_ROOT / "finances" / "web" / "templates" / "_macros.html"
 def _seed_categories(
     conn: sqlite3.Connection, *, count: int
 ) -> tuple[datetime, list[str]]:
-    """Insert ``count`` expense categories of strictly descending totals.
+    """Insert ``count`` ungrouped expense categories of strictly descending totals.
 
     Returns ``(today, names_in_rank_order)``. Amounts descend so the chart's
     top-N slice is deterministic, which is what makes "is this slot stable
-    under filtering" a question with one right answer.
+    under filtering" a question with one right answer. The categories are
+    created here rather than taken from the taxonomy: a seeded one may
+    belong to a group (ADR-023), and a group is one series however many of
+    its categories are in play, which would silently change the rank every
+    assertion below counts on.
     """
     today = datetime.now(tz=UTC)
     cash = accounts_repo.insert(
@@ -84,10 +95,11 @@ def _seed_categories(
 
     names: list[str] = []
     amount = Decimal("500.00")
-    idx = 0
-    for cat in categories_repo.list_all(conn):
-        if cat.kind != TransactionKind.EXPENSE:
-            continue
+    for idx in range(count):
+        cat = categories_repo.insert(
+            conn, Category(kind=TransactionKind.EXPENSE, name=f"Series {idx:02d}")
+        )
+        assert cat.group_name is None
         transactions_repo.insert(
             conn,
             Transaction(
@@ -104,13 +116,7 @@ def _seed_categories(
         )
         names.append(cat.name)
         amount -= Decimal("10")
-        idx += 1
-        if idx >= count:
-            break
 
-    assert len(names) >= count, (
-        f"fixture needs {count} expense categories, found {len(names)}"
-    )
     return today, names
 
 
@@ -267,7 +273,9 @@ def test_other_members_ride_along_with_the_chart(
     """The tail folded into Other is on the wire, so the overlay can open it.
 
     Other is routinely the largest block on the owner's real chart — the cap
-    hides most of the story unless the hover can say what is in there.
+    hides most of the story unless the hover can say what is in there. Since
+    ADR-023 §2.4 the tail is Other's ``members``: the same field a group
+    carries, so the overlay has one way to open a block.
     """
     from finances.web.services.monthly_view import (
         MonthlyFilter,
@@ -280,24 +288,25 @@ def test_other_members_ride_along_with_the_chart(
         web_db, MonthlyFilter(kind=MonthlyKind.EXPENSE), today=today.date()
     )
 
-    assert chart.other_members, "expected the folded tail on the payload"
+    other = next(s for s in chart.series if s.category == "Other")
+    assert other.members, "expected the folded tail on the payload"
 
     named = [s.category for s in chart.series if s.category != "Other"]
-    for member in chart.other_members:
+    for member in other.members:
         assert member.category not in named
 
     # The members must account for exactly the Other series, month by month.
-    other = next(s for s in chart.series if s.category == "Other")
     for i in range(len(chart.months)):
         assert sum(
-            (m.values[i] for m in chart.other_members), Decimal("0")
+            (m.values[i] for m in other.members), Decimal("0")
         ) == other.values[i]
 
 
 def test_no_other_members_when_nothing_is_folded(
     web_db: sqlite3.Connection,
 ) -> None:
-    """Under the cap there is no Other, so there is no tail to carry."""
+    """Under the cap there is no Other, so there is no tail to carry — and
+    an ungrouped category has nothing inside it to open."""
     from finances.web.services.monthly_view import (
         MonthlyFilter,
         MonthlyKind,
@@ -310,7 +319,7 @@ def test_no_other_members_when_nothing_is_folded(
     )
 
     assert all(s.category != "Other" for s in chart.series)
-    assert chart.other_members == []
+    assert all(s.members == [] for s in chart.series)
 
 
 # ---------------------------------------------------------------------------

@@ -416,7 +416,12 @@ def test_pivot_bcv_fallback_overlay_marker_present(
 def test_chart_series_top_5_plus_other(
     web_db: sqlite3.Connection,
 ) -> None:
-    """7+ expense categories → chart yields 6 series (top 5 + Other)."""
+    """7+ series → chart yields 6 (top 5 + Other).
+
+    A series is a group or an ungrouped category (ADR-023), so the seven
+    categories here are all ungrouped ones: Transport and Utilities would
+    fold into one Home series and the cap would never be reached.
+    """
     from finances.db.repos import rates as rates_repo
     from finances.domain.models import Rate
     from finances.web.services.monthly_view import (
@@ -433,20 +438,21 @@ def test_chart_series_top_5_plus_other(
     )
 
     # Make sure rates are not relevant here — using USD account, native_usd path.
-    # 7 distinct expense categories, descending amounts.
+    # 7 distinct ungrouped expense categories, descending amounts.
     cat_names = [
         "Groceries",
-        "Transport",
-        "Utilities",
-        "Entertainment",
+        "Purchases",
         "Health",
-        "Restaurants",
+        "Lending",
+        "Fees",
+        "Education",
         "Other Expense",
     ]
     found_cats = []
     for name in cat_names:
         c = categories_repo.get_by_name(web_db, TransactionKind.EXPENSE, name)
         if c is not None:
+            assert c.group_name is None, f"{name} is grouped; pick an ungrouped one"
             found_cats.append(c)
 
     # If fewer than 7 default categories exist for expense, supplement
