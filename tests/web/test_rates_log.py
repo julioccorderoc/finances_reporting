@@ -17,6 +17,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import date, timedelta
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -568,3 +569,77 @@ def test_a_malformed_date_is_still_rejected(
     )
 
     assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# The filter panel is one row.
+# ---------------------------------------------------------------------------
+
+#: reports.css, where the rates log owns its layout.
+_REPORTS_CSS = (
+    Path(__file__).resolve().parents[2]
+    / "finances"
+    / "web"
+    / "static"
+    / "css"
+    / "reports.css"
+)
+
+
+def _filter_form(body: str) -> str:
+    """The rates filter form alone, sliced out of a rendered page."""
+    start = body.index('id="rates-log-filters"')
+    return body[start : body.index("</form>", start)]
+
+
+def test_the_four_rates_filters_share_one_row(
+    log_rates_db: sqlite3.Connection,
+    web_client_factory,
+) -> None:
+    """From, To, Pairs and Sources sit in a single grid container.
+
+    Two containers is two rows however the columns are counted — the dates
+    stacked above the dropdowns, half the panel white space. /transactions
+    splits them because it carries eleven controls; four fit on one line at
+    the 1196px cap with room to spare.
+    """
+    client: TestClient = web_client_factory()
+    form = _filter_form(client.get("/rates").text)
+
+    assert form.count("rates-filter-row") == 1
+    assert "flow-filter-groups" not in form
+    assert "flow-filter-grid" not in form
+
+
+def test_the_one_row_holds_the_controls_in_reading_order(
+    log_rates_db: sqlite3.Connection,
+    web_client_factory,
+) -> None:
+    """Dates first, then the two multi-selects — the order the panel had."""
+    client: TestClient = web_client_factory()
+    form = _filter_form(client.get("/rates").text)
+
+    positions = [
+        form.index('name="date_from"'),
+        form.index('name="date_to"'),
+        form.index('data-filter-group="pairs"'),
+        form.index('data-filter-group="sources"'),
+    ]
+
+    assert positions == sorted(positions)
+
+
+def test_reports_css_gives_the_rates_filter_row_four_columns() -> None:
+    """The row is only a row if the sheet says four columns.
+
+    Asserted against reports.css rather than flow.css on purpose: the flow
+    classes are shared with /transactions, and widening them there is a
+    different question with a different answer.
+    """
+    css = _REPORTS_CSS.read_text(encoding="utf-8")
+
+    start = css.index(".rates-filter-row {")
+    block = css[start : css.index("}", start)]
+
+    assert "grid-template-columns" in block
+    assert "repeat(4" in block
