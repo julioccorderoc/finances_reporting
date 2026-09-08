@@ -61,11 +61,11 @@ _REVERSAL_MARKER_PREDICATE = " OR ".join(
     for marker in REVERSAL_MARKERS
 )
 
-# The categories migration 027 placed in a group (ADR-023 §2.2), as
-# (kind, name). Only the members are listed: the group labels themselves
-# are data the owner may rename with an UPDATE (§2.7), so nothing here
-# spells them. ``tests/test_migration_027_category_groups.py`` pins this
-# to the seed.
+# The categories migration 027 placed in a group (ADR-023 §2.2), plus the
+# one 028 stored as Other (§2.6 as amended), as (kind, name). Only the
+# members are listed: the group labels themselves are data the owner may
+# rename with an UPDATE (§2.7), so nothing here spells them.
+# ``tests/test_migration_027_category_groups.py`` pins this to the seed.
 GROUPED_CATEGORIES: frozenset[tuple[str, str]] = frozenset(
     {
         ("expense", "Rent"),
@@ -77,6 +77,7 @@ GROUPED_CATEGORIES: frozenset[tuple[str, str]] = frozenset(
         ("expense", "Leisure"),
         ("expense", "Family"),
         ("expense", "Gifts"),
+        ("expense", "Lending"),
     }
 )
 

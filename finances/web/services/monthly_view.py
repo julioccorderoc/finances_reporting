@@ -65,6 +65,13 @@ CHART_COLOR_SLOTS: int = 5
 #: slots on the bucket that means least.
 OTHER_COLOR_SLOT: int = -1
 
+#: The remainder's label. Stored as a category's ``group_name`` it is the
+#: instruction to fold that category into the remainder whatever its rank
+#: (ADR-023 §2.6 as amended 2026-09-08 — Lending). Not a group: it never
+#: competes for a slot and never holds a palette rank. The remainder is
+#: still computed for everything else that misses the cap.
+OTHER_LABEL = "Other"
+
 _KIND_INCOME = "income"
 _KIND_EXPENSE = "expense"
 
@@ -728,6 +735,13 @@ def build_chart(
         if r.month in fallback_per_month:
             fallback_per_month[r.month] += abs(fallback)
 
+    # A category stored as Other never competes: it leaves the ranking and
+    # the palette basis before either is built, so it holds neither a slot
+    # nor a rank. It rejoins as part of the remainder below.
+    folded_key: _SeriesKey = (_GROUP, OTHER_LABEL)
+    folded = totals.pop(folded_key, None)
+    totals_unfiltered.pop(folded_key, None)
+
     # Rank by absolute window sum and slice top N.
     ranked = sorted(totals.items(), key=lambda kv: _magnitude(kv[1]), reverse=True)
     head = ranked[:CHART_TOP_N]
@@ -763,30 +777,30 @@ def build_chart(
             _series_drill_url(month=m, categories=selects, kind=f.kind) for m in months
         ]
 
-    def series_for(key: _SeriesKey, by_month: _MonthTotals, slot: int) -> MonthlyChartSeries:
-        members: list[MonthlyChartSeries] = []
-        if key[0] == _GROUP:
-            # Largest first, in the group's own colour: the contents of one
-            # block, not blocks of their own.
-            for cat_key, cat_months in sorted(
-                member_totals[key].items(),
-                key=lambda kv: _magnitude(kv[1]),
-                reverse=True,
-            ):
-                name = category_names[cat_key]
-                members.append(
-                    MonthlyChartSeries(
-                        category=_category_label(name),
-                        values=values_for(cat_months),
-                        color_slot=slot,
-                        drill_urls=drill_urls_for([_filter_value(name)]),
-                    )
+    def members_for(key: _SeriesKey, slot: int) -> list[MonthlyChartSeries]:
+        """A group's categories, largest first, in the group's own colour:
+        the contents of one block, not blocks of their own."""
+        out: list[MonthlyChartSeries] = []
+        for cat_key, cat_months in sorted(
+            member_totals[key].items(), key=lambda kv: _magnitude(kv[1]), reverse=True
+        ):
+            name = category_names[cat_key]
+            out.append(
+                MonthlyChartSeries(
+                    category=_category_label(name),
+                    values=values_for(cat_months),
+                    color_slot=slot,
+                    drill_urls=drill_urls_for([_filter_value(name)]),
                 )
+            )
+        return out
+
+    def series_for(key: _SeriesKey, by_month: _MonthTotals, slot: int) -> MonthlyChartSeries:
         return MonthlyChartSeries(
             category=labels[key],
             values=values_for(by_month),
             color_slot=slot,
-            members=members,
+            members=members_for(key, slot) if key[0] == _GROUP else [],
             drill_urls=drill_urls_for(selects_for(key)),
         )
 
@@ -794,23 +808,30 @@ def build_chart(
     for key, by_month in head:
         series.append(series_for(key, by_month, slots[labels[key]]))
 
-    if tail:
-        other_values = [
-            sum((by_month.get(m, Decimal("0")) for _, by_month in tail), Decimal("0"))
-            for m in months
-        ]
+    if tail or folded is not None:
+        parts: list[_MonthTotals] = [by_month for _, by_month in tail]
         # Ranked already — ``tail`` is the far end of the same sort, so what
         # missed the cap is a series: a small group folds in as itself,
-        # members and all. Every member shares Other's neutral.
+        # members and all. A category stored as Other sits flat beside them
+        # — it is not a group, so there is no inner Other to open. Every
+        # member shares Other's neutral.
+        members = [series_for(key, by_month, OTHER_COLOR_SLOT) for key, by_month in tail]
+        selects = [value for key, _ in tail for value in selects_for(key)]
+        if folded is not None:
+            parts.append(folded)
+            members.extend(members_for(folded_key, OTHER_COLOR_SLOT))
+            selects.extend(selects_for(folded_key))
+        members.sort(key=lambda s: abs(sum(s.values, Decimal("0"))), reverse=True)
         series.append(
             MonthlyChartSeries(
-                category="Other",
-                values=other_values,
+                category=OTHER_LABEL,
+                values=[
+                    sum((part.get(m, Decimal("0")) for part in parts), Decimal("0"))
+                    for m in months
+                ],
                 color_slot=OTHER_COLOR_SLOT,
-                members=[series_for(key, by_month, OTHER_COLOR_SLOT) for key, by_month in tail],
-                drill_urls=drill_urls_for(
-                    [value for key, _ in tail for value in selects_for(key)]
-                ),
+                members=members,
+                drill_urls=drill_urls_for(selects),
             )
         )
 

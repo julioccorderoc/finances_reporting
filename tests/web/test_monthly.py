@@ -420,7 +420,8 @@ def test_chart_series_top_5_plus_other(
 
     A series is a group or an ungrouped category (ADR-023), so the seven
     categories here are all ungrouped ones: Transport and Utilities would
-    fold into one Home series and the cap would never be reached.
+    fold into one Home series, Lending is stored as Other (migration 028),
+    and either way the cap would never be reached.
     """
     from finances.db.repos import rates as rates_repo
     from finances.domain.models import Rate
@@ -443,7 +444,7 @@ def test_chart_series_top_5_plus_other(
         "Groceries",
         "Purchases",
         "Health",
-        "Lending",
+        "Subscriptions",
         "Fees",
         "Education",
         "Other Expense",
