@@ -26,11 +26,12 @@ from pydantic import BaseModel, ConfigDict, field_validator
 from finances.config import BINANCE_DEFAULT_LOOKBACK_DAYS, CARACAS_TZ
 from finances.db.repos import accounts as accounts_repo
 from finances.db.repos import categories as categories_repo
+from finances.db.repos import exchange_balances as exchange_balances_repo
 from finances.db.repos import import_state as import_state_repo
 from finances.db.repos import transactions as transactions_repo
 from finances.domain import realized_rates
 from finances.domain.earn import EarnSnapshotRow, refresh_earn_positions
-from finances.domain.models import Transaction, TransactionKind
+from finances.domain.models import ExchangeBalance, Transaction, TransactionKind
 from finances.domain.reconciliation import run_reconciliation_pass
 from finances.domain.transfers import SameAccountConvertPairing, create_transfer
 
@@ -41,6 +42,14 @@ _SPOT_ACCOUNT_NAME = "Binance Spot"
 _FUNDING_ACCOUNT_NAME = "Binance Funding"
 _EARN_ACCOUNT_NAME = "Binance Earn"
 _INTEREST_CATEGORY = ("income", "Interest")
+
+# Binance reports Simple Earn principal inside the Spot wallet under an
+# ``LD``-prefixed asset (LDUSDT, LDUSDC). It is not a Spot holding: the
+# same money is the Earn account (ADR-003), already checked against the
+# position endpoint. Recording it as a Spot balance would assert Spot
+# holds an asset it does not, and double-count Earn for anything summing
+# ``exchange_balances``.
+_EARN_SHADOW_ASSET_PREFIX = "LD"
 
 
 # ---------------------------------------------------------------------------
@@ -158,7 +167,10 @@ class RawBinanceP2pRow(_RawBase):
     def _dec(cls, v: Any) -> Decimal:
         return _coerce_decimal(v)
 
-    def to_transaction(self, *, spot_account_id: int) -> Transaction:
+    def to_transaction(self, *, funding_account_id: int) -> Transaction:
+        # Funding, not Spot (ADR-024). Binance settles C2C/P2P in the
+        # Funding wallet; booking it against Spot left that wallet holding
+        # -2,017 USDT and Funding holding money nothing ever spent.
         if self.tradeType == "SELL":
             kind = TransactionKind.EXPENSE
             amount = -self.amount
@@ -171,7 +183,7 @@ class RawBinanceP2pRow(_RawBase):
             f"(order {self.orderNumber})"
         )
         return Transaction(
-            account_id=spot_account_id,
+            account_id=funding_account_id,
             occurred_at=_from_ms(self.createTime),
             kind=kind,
             amount=amount,
@@ -191,6 +203,9 @@ class RawBinanceConvertRow(_RawBase):
     toAsset: str
     toAmount: Decimal
     createTime: int
+    # Absent on older payloads, which predate the field entirely -- that is
+    # the old behaviour, not an unknown wallet.
+    walletType: str = "SPOT"
 
     @field_validator("fromAmount", "toAmount", mode="before")
     @classmethod
@@ -202,7 +217,27 @@ class RawBinanceConvertRow(_RawBase):
     def _str_id(cls, v: Any) -> str:
         return str(v)
 
-    def to_transactions(self, *, spot_account_id: int) -> list[Transaction]:
+    def to_transactions(
+        self, *, spot_account_id: int, funding_account_id: int
+    ) -> list[Transaction]:
+        # Binance names the wallet on the record and the ledger ignored it
+        # for a year (ADR-025). SPOT_FUNDING is the combined-wallet mode: a
+        # conversion allowed to draw across both. The one live instance
+        # consumed 400.19 USDC when Funding held 400.00 and Spot held dust,
+        # and the proceeds were credited to Spot -- so the outgoing leg is
+        # Funding's and the incoming leg Spot's, which makes this an
+        # ordinary cross-account pair under rule-002.
+        #
+        # An unrecognised wallet raises rather than defaulting to Spot:
+        # filing the unknown as Spot is precisely the defect corrected here,
+        # and the ingest loop turns this into an import_runs error.
+        if self.walletType not in _CONVERT_SOURCE_WALLETS:
+            raise ValueError(f"unknown convert walletType: {self.walletType}")
+        from_account_id = (
+            funding_account_id
+            if _CONVERT_SOURCE_WALLETS[self.walletType] == "funding"
+            else spot_account_id
+        )
         occurred_at = _from_ms(self.createTime)
         description = (
             f"Convert {format(self.fromAmount, 'f')} {self.fromAsset.upper()} → "
@@ -216,7 +251,7 @@ class RawBinanceConvertRow(_RawBase):
         # phantom earning, for a conversion that actually cost about $1.81.
         transfer_id = f"convert:{self.orderId}"
         from_leg = Transaction(
-            account_id=spot_account_id,
+            account_id=from_account_id,
             occurred_at=occurred_at,
             kind=TransactionKind.TRANSFER,
             amount=-self.fromAmount,
@@ -239,6 +274,14 @@ class RawBinanceConvertRow(_RawBase):
         )
         return [from_leg, to_leg]
 
+
+# Which wallet a conversion drew from. ``SPOT_FUNDING`` is Binance's
+# combined-wallet mode; the ledger books the outgoing leg where the money
+# actually was. Anything absent from this map is refused, not assumed.
+_CONVERT_SOURCE_WALLETS = {
+    "SPOT": "spot",
+    "SPOT_FUNDING": "funding",
+}
 
 _TRANSFER_DIRECTIONS = {
     "MAIN_FUNDING": ("spot", "funding"),
@@ -379,7 +422,11 @@ class RawBinancePayRow(_RawBase):
     def _dec(cls, v: Any) -> Decimal:
         return _coerce_decimal(v)
 
-    def to_transaction(self, *, spot_account_id: int) -> Transaction:
+    def to_transaction(self, *, funding_account_id: int) -> Transaction:
+        # Funding, not Spot (ADR-024): Binance Pay spends the Funding
+        # wallet. The backfill had already placed five of ten legacy Pay
+        # rows there, which is why the twin guard never keyed on account.
+        #
         # Binance Pay's transaction history returns a *signed* ``amount``:
         # positive = money in (income), negative = money out (expense). Trust
         # the sign — not ``orderType``. A C2C *send* carries a negative amount
@@ -392,7 +439,7 @@ class RawBinancePayRow(_RawBase):
             kind = TransactionKind.INCOME
             direction = "incoming"
         return Transaction(
-            account_id=spot_account_id,
+            account_id=funding_account_id,
             occurred_at=_from_ms(self.transactionTime),
             kind=kind,
             amount=self.amount,
@@ -597,7 +644,7 @@ def _ingest_p2p(
     *,
     start_ms: int,
     end_ms: int,
-    spot_id: int,
+    funding_id: int,
     stats: dict[str, int],
     errors: list[str],
 ) -> None:
@@ -617,7 +664,7 @@ def _ingest_p2p(
                 errors.append(f"p2p {trade_type}: {exc}")
                 continue
             result = transactions_repo.upsert_by_source_ref(
-                conn, row.to_transaction(spot_account_id=spot_id)
+                conn, row.to_transaction(funding_account_id=funding_id)
             )
             _tally(stats, result)
 
@@ -629,6 +676,7 @@ def _ingest_converts(
     start_ms: int,
     end_ms: int,
     spot_id: int,
+    funding_id: int,
     stats: dict[str, int],
     errors: list[str],
 ) -> None:
@@ -641,10 +689,13 @@ def _ingest_converts(
             continue
         try:
             row = RawBinanceConvertRow.model_validate(item)
+            legs = row.to_transactions(
+                spot_account_id=spot_id, funding_account_id=funding_id
+            )
         except Exception as exc:  # noqa: BLE001
             errors.append(f"convert: {exc}")
             continue
-        for leg in row.to_transactions(spot_account_id=spot_id):
+        for leg in legs:
             result = transactions_repo.upsert_by_source_ref(conn, leg)
             _tally(stats, result)
 
@@ -878,7 +929,7 @@ def _ingest_pay(
     *,
     start_ms: int,
     end_ms: int,
-    spot_id: int,
+    funding_id: int,
     twin_account_ids: list[int],
     stats: dict[str, int],
     errors: list[str],
@@ -902,7 +953,7 @@ def _ingest_pay(
         except Exception as exc:  # noqa: BLE001
             errors.append(f"pay: {exc}")
             continue
-        txn = row.to_transaction(spot_account_id=spot_id)
+        txn = row.to_transaction(funding_account_id=funding_id)
         if _pay_twin_exists(conn, txn, account_ids=twin_account_ids):
             stats["rows_skipped_pay_twin"] += 1
             continue
@@ -946,6 +997,91 @@ def _ingest_earn_positions(
         earn_account_id=earn_id,
         snapshot_at=snapshot_at,
     )
+
+
+def _held_currencies(conn: sqlite3.Connection, account_id: int) -> set[str]:
+    return {
+        str(row[0])
+        for row in conn.execute(
+            "SELECT DISTINCT currency FROM transactions WHERE account_id = ?",
+            (account_id,),
+        )
+    }
+
+
+def capture_exchange_balances(
+    conn: sqlite3.Connection,
+    client: Any,
+    *,
+    captured_at: datetime,
+) -> list[str]:
+    """Record what Binance says Spot and Funding hold (ADR-023).
+
+    Two read-only calls at the end of a sync that already makes a dozen.
+    Nothing here is derived: the number goes in as the exchange gave it,
+    because it is the figure the ledger's own rows are measured against.
+
+    Which assets get recorded is the one judgement call. A balance the
+    exchange reports as non-zero is a position by definition. A *zero* one
+    matters only when the ledger disagrees — Funding USDC reads 0.00 on
+    the exchange and 400.00 in the ledger, and skipping zeroes would hide
+    exactly that. Assets in neither set (a dust line for a coin never
+    traded) are left out, so the check is not permanently facing phantoms.
+
+    Errors are returned, never raised: a sync that has already written
+    rows must not be undone because the last read failed. Same contract as
+    every other step here.
+    """
+    errors: list[str] = []
+    account_ids = _resolve_accounts(conn)
+    spot_id = account_ids[_SPOT_ACCOUNT_NAME]
+    funding_id = account_ids[_FUNDING_ACCOUNT_NAME]
+
+    def _record(account_id: int, rows: list[dict[str, Any]]) -> None:
+        held = _held_currencies(conn, account_id)
+        reported: dict[str, Decimal] = {}
+        for item in rows:
+            asset = str(item.get("asset", "")).upper()
+            if not asset or asset.startswith(_EARN_SHADOW_ASSET_PREFIX):
+                continue
+            reported[asset] = (
+                _coerce_decimal(item.get("free", "0"))
+                + _coerce_decimal(item.get("locked", "0"))
+                + _coerce_decimal(item.get("freeze", "0"))
+            )
+
+        # An asset the exchange holds none of is simply absent from the
+        # response — it does not come back as zero. Against a position the
+        # ledger thinks it holds, that absence is a flat contradiction and
+        # the most important one there is, so it is recorded as the zero it
+        # means. Without this, Funding USDC (ledger 400.00, exchange
+        # nothing) produces no snapshot and no finding.
+        for asset in sorted(held - reported.keys()):
+            reported[asset] = Decimal(0)
+
+        for asset, total in reported.items():
+            if total == 0 and asset not in held:
+                continue
+            exchange_balances_repo.insert(
+                conn,
+                ExchangeBalance(
+                    account_id=account_id,
+                    currency=asset,
+                    balance=total,
+                    captured_at=captured_at,
+                    source=SOURCE,
+                ),
+            )
+
+    try:
+        _record(spot_id, list(client.account().get("balances", []) or []))
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"spot-balance: {exc}")
+    try:
+        _record(funding_id, _unpack_rows(client.funding_wallet()))
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"funding-balance: {exc}")
+    return errors
 
 
 def sync_binance(
@@ -992,6 +1128,7 @@ def sync_binance(
         errors: list[str] = []
 
         spot_id = account_ids[_SPOT_ACCOUNT_NAME]
+        funding_id = account_ids[_FUNDING_ACCOUNT_NAME]
         earn_id = account_ids[_EARN_ACCOUNT_NAME]
 
         conn.execute("BEGIN")
@@ -1007,11 +1144,12 @@ def sync_binance(
                 )
                 _ingest_p2p(
                     conn, client, start_ms=chunk_start, end_ms=chunk_end,
-                    spot_id=spot_id, stats=stats, errors=errors,
+                    funding_id=funding_id, stats=stats, errors=errors,
                 )
                 _ingest_converts(
                     conn, client, start_ms=chunk_start, end_ms=chunk_end,
-                    spot_id=spot_id, stats=stats, errors=errors,
+                    spot_id=spot_id, funding_id=funding_id,
+                    stats=stats, errors=errors,
                 )
                 _ingest_internal_transfers(
                     conn, client, start_ms=chunk_start, end_ms=chunk_end,
@@ -1028,7 +1166,7 @@ def sync_binance(
                 )
                 _ingest_pay(
                     conn, client, start_ms=chunk_start, end_ms=chunk_end,
-                    spot_id=spot_id,
+                    funding_id=funding_id,
                     twin_account_ids=sorted(account_ids.values()),
                     stats=stats, errors=errors,
                 )
@@ -1036,6 +1174,14 @@ def sync_binance(
             snapshot_at = datetime.now(tz=UTC)
             earn_stats = _ingest_earn_positions(
                 conn, client, earn_id=earn_id, snapshot_at=snapshot_at, errors=errors,
+            )
+
+            # What the exchange says Spot and Funding hold (ADR-023). Earn
+            # has had this since ADR-003 and it is what proved Earn right;
+            # the other two wallets had nothing to be measured against and
+            # were each out by two thousand dollars for a year.
+            errors.extend(
+                capture_exchange_balances(conn, client, captured_at=snapshot_at)
             )
 
             # Any P2P sell just ingested changes the realized VES cost basis
@@ -1100,6 +1246,7 @@ def sync_binance(
 
 __all__ = [
     "DEFAULT_LOOKBACK_DAYS",
+    "capture_exchange_balances",
     "RawBinanceConvertRow",
     "RawBinanceDepositRow",
     "RawBinanceEarnRewardRow",

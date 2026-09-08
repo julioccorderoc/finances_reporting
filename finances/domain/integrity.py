@@ -52,6 +52,13 @@ SAMPLE_LIMIT = 10
 # than this did not come from ``pair_reversal``.
 REVERSAL_NET_TOLERANCE = 0.005
 
+# How far a position may sit from the exchange's own figure before it is a
+# defect, in units of the asset. Every wallet carries dust and Earn accrues
+# reward continuously — the 2026-09-03 Earn comparison was a few tenths
+# apart — while the Spot/Funding split that motivated ADR-023 was out by two
+# thousand. A check that fires on cents is one nobody reads.
+EXCHANGE_BALANCE_TOLERANCE = 1.0
+
 # The statement wordings ADR-019 pairs on, as a SQL predicate over
 # ``description``. Built from the constant rather than restated, so
 # extending ``REVERSAL_MARKERS`` for a new RETORNO wording cannot leave
@@ -442,6 +449,63 @@ CHECKS: tuple[IntegrityCheck, ...] = (
                    SELECT MIN(id) FROM transactions
                     GROUP BY account_id, currency
              )
+             ORDER BY id
+        """,
+    ),
+    IntegrityCheck(
+        name="position_disagrees_with_exchange",
+        severity=Severity.ERROR,
+        description=(
+            "A position the exchange reports differently from the ledger "
+            "(ADR-023). Every other check here reasons about the ledger's "
+            "own rows, which stay internally consistent even when a booking "
+            "went to the wrong wallet — only an outside figure can see "
+            "that. Compared as of the capture, so a stale snapshot is not a "
+            "defect, and per (account, currency), because a combined total "
+            "can be right while both halves are wrong."
+        ),
+        # julianday() rather than string comparison: Provincial writes
+        # -04:00 and Binance writes +00:00, so a Caracas evening sorts
+        # before a UTC morning as text while being after it in fact.
+        #
+        # The reported id is the account's earliest row for the position —
+        # the same convention negative_asset_balance uses, since a position
+        # is not a transaction and the finding still has to point somewhere.
+        # A position the exchange reports and the ledger has no row for at
+        # all is therefore invisible here; it has no id to name, and
+        # `finances report balances` is where an absent position shows.
+        sql=f"""
+            WITH latest AS (
+                SELECT account_id, currency, MAX(captured_at) AS captured_at
+                  FROM exchange_balances
+                 GROUP BY account_id, currency
+            ),
+            claim AS (
+                SELECT b.account_id, b.currency, b.captured_at,
+                       CAST(b.balance AS REAL) AS reported
+                  FROM exchange_balances AS b
+                  JOIN latest AS l
+                    ON l.account_id = b.account_id
+                   AND l.currency = b.currency
+                   AND l.captured_at = b.captured_at
+            )
+            SELECT (
+                       SELECT MIN(t.id) FROM transactions AS t
+                        WHERE t.account_id = c.account_id
+                          AND t.currency = c.currency
+                   ) AS id
+              FROM claim AS c
+             WHERE id IS NOT NULL
+               AND ABS(
+                       COALESCE((
+                           SELECT SUM(CAST(t.amount AS REAL))
+                             FROM transactions AS t
+                            WHERE t.account_id = c.account_id
+                              AND t.currency = c.currency
+                              AND julianday(t.occurred_at)
+                                  <= julianday(c.captured_at)
+                       ), 0) - c.reported
+                   ) > {EXCHANGE_BALANCE_TOLERANCE}
              ORDER BY id
         """,
     ),

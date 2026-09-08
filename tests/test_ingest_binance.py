@@ -154,7 +154,7 @@ def test_p2p_sell_row_emits_expense_with_user_rate_and_remark() -> None:
         fiat="VES",
         createTime=1_700_000_000_000,
     )
-    txn = row.to_transaction(spot_account_id=1)
+    txn = row.to_transaction(funding_account_id=1)
     assert txn.kind == TransactionKind.EXPENSE
     assert txn.amount == Decimal("-10.00")
     assert txn.currency == "USDT"
@@ -174,7 +174,7 @@ def test_p2p_buy_row_emits_income() -> None:
         fiat="VES",
         createTime=1_700_000_000_000,
     )
-    txn = row.to_transaction(spot_account_id=1)
+    txn = row.to_transaction(funding_account_id=1)
     assert txn.kind == TransactionKind.INCOME
     assert txn.amount == Decimal("10.00")
 
@@ -192,7 +192,7 @@ def test_convert_row_emits_both_legs() -> None:
         toAmount="0.0015",
         createTime=1_700_000_000_000,
     )
-    legs = row.to_transactions(spot_account_id=1)
+    legs = row.to_transactions(spot_account_id=1, funding_account_id=3)
     assert len(legs) == 2
     from_leg, to_leg = legs
     # Both legs are transfer legs sharing one transfer_id. A conversion moves
@@ -231,7 +231,7 @@ def test_convert_row_parses_real_trade_flow_shape() -> None:
             "walletType": "SPOT",
         }
     )
-    legs = row.to_transactions(spot_account_id=1)
+    legs = row.to_transactions(spot_account_id=1, funding_account_id=3)
     assert legs[0].source_ref == "convert:940708407462087195:from"
     assert legs[1].source_ref == "convert:940708407462087195:to"
 
@@ -308,7 +308,7 @@ def test_pay_row_positive_amount_is_income() -> None:
         currency="USDT",
         transactionTime=1_700_000_000_000,
     )
-    txn = row.to_transaction(spot_account_id=1)
+    txn = row.to_transaction(funding_account_id=1)
     assert txn.kind == TransactionKind.INCOME
     assert txn.amount == Decimal("5.00")
     assert txn.source_ref == "pay:PAY-1"
@@ -327,7 +327,7 @@ def test_pay_row_negative_amount_is_expense() -> None:
         currency="USDT",
         transactionTime=1_700_000_000_000,
     )
-    txn = row.to_transaction(spot_account_id=1)
+    txn = row.to_transaction(funding_account_id=1)
     assert txn.kind == TransactionKind.EXPENSE
     assert txn.amount == Decimal("-5.00")
     assert "(outgoing)" in txn.description

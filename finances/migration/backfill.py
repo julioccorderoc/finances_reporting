@@ -608,7 +608,9 @@ def _handle_binance_p2p_sell(
         fiat="VES",
         createTime=_ms(occurred),
     )
-    txn = raw.to_transaction(spot_account_id=account_id)
+    # The wallet comes from the legacy export's own `cuenta` column, which
+    # is stricter than ADR-024's constant: the record said where it settled.
+    txn = raw.to_transaction(funding_account_id=account_id)
     if unit_price == 0:
         txn = txn.model_copy(update={"user_rate": None})
     txn = txn.model_copy(update={"needs_review": True})
@@ -733,7 +735,9 @@ def _handle_binance_convert(
             toAmount=to_amount,
             createTime=_ms(occurred),
         )
-        sides = raw.to_transactions(spot_account_id=account_id)
+        sides = raw.to_transactions(
+            spot_account_id=account_id, funding_account_id=account_id
+        )
     else:
         raw = RawBinanceConvertRow(
             orderId=tran_id,
@@ -743,7 +747,9 @@ def _handle_binance_convert(
             toAmount=Decimal("0") if is_out else abs(amount),
             createTime=_ms(occurred),
         )
-        legs = raw.to_transactions(spot_account_id=account_id)
+        legs = raw.to_transactions(
+            spot_account_id=account_id, funding_account_id=account_id
+        )
         sides = [legs[0] if is_out else legs[1]]
 
     for side in sides:

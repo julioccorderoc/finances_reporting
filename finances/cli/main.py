@@ -442,6 +442,50 @@ def reconcile_reversals(
         raise typer.Exit(code=1)
 
 
+@reconcile_app.command("wallets")
+def reconcile_wallets(
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Report what would move, then roll back without writing.",
+    ),
+) -> None:
+    """Move P2P and Pay rows onto the wallet that funded them (ADR-024).
+
+    Binance settles P2P in the Funding wallet and spends Binance Pay from
+    it; the ingest filed both against Spot for a year. New rows land
+    correctly now — this repairs the history. Idempotent: eligibility is
+    "sits on Spot", so a second run moves nothing.
+
+    Read the dry run against `finances doctor` before applying, and
+    restate the opening positions (`finances reconcile opening`) only
+    afterwards — sizing one against a ledger still misfiled is what
+    produced the plugs that had to be reversed.
+    """
+    from finances.domain.wallet_attribution import repair_wallet_attribution
+
+    conn = get_connection(DB_PATH)
+    apply_migrations(conn)
+    try:
+        conn.execute("BEGIN")
+        try:
+            report = repair_wallet_attribution(conn)
+            if dry_run:
+                conn.execute("ROLLBACK")
+            else:
+                conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+    finally:
+        conn.close()
+
+    suffix = " (dry run -- rolled back)" if dry_run else ""
+    typer.echo(f"wallet attribution: {report.moved} row(s) moved to Funding{suffix}")
+    for currency, total in sorted(report.totals_by_currency.items()):
+        typer.echo(f"  {currency}: {format(total, 'f')}")
+
+
 @reconcile_app.command("categories")
 def reconcile_categories(
     dry_run: bool = typer.Option(
