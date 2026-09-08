@@ -326,20 +326,54 @@ def test_signal_declares_the_series_tokens() -> None:
     assert "--series-other:" in css
 
 
-def test_chart_script_reads_tokens_rather_than_hex() -> None:
-    """The drawing code must not carry its own copy of the palette.
-
-    signal.css is the sheet of record; a hex literal in the template is a
-    second source of truth that drifts silently.
-    """
+def test_chart_script_reads_every_palette_token() -> None:
+    """The palette is read from the sheet, not invented by the script."""
     html = CHART_HTML.read_text(encoding="utf-8")
-    script = html[html.index("<script>") :]
-    stray = re.findall(r"#[0-9a-fA-F]{6}\b", script)
-    assert not stray, f"hard-coded colours in the chart script: {stray}"
-
     for n in range(1, 6):
         assert f"--series-{n}" in html
     assert "--series-other" in html
+
+
+def test_every_token_read_carries_a_fallback() -> None:
+    """``tok(name)`` with no fallback is how the chart lost all its colour.
+
+    A browser holding a signal.css older than this template resolves the
+    custom property to the empty string. ``tok`` then returns ``undefined``,
+    and Chart.js paints a dataset with no ``backgroundColor`` in its own
+    default faint gray — a chart with no colour, no console error, and a
+    green suite. Shipped once (2026-09-07); never again.
+    """
+    html = CHART_HTML.read_text(encoding="utf-8")
+    bare = re.findall(r"tok\(\s*'(--[\w-]+)'\s*\)", html)
+    assert not bare, f"token reads with no fallback: {bare}"
+
+
+def test_fallbacks_match_the_sheet() -> None:
+    """The literals are a safety net, so they have to be the sheet's values.
+
+    This is the cost of keeping fallbacks: two copies that can drift. The
+    test is what makes the copy safe rather than a second source of truth.
+    """
+    css = SIGNAL_CSS.read_text(encoding="utf-8")
+    html = CHART_HTML.read_text(encoding="utf-8")
+
+    def declared(token: str) -> str | None:
+        m = re.search(rf"{re.escape(token)}:\s*([^;]+);", css)
+        if m is None:
+            return None
+        value = m.group(1).strip()
+        # Resolve one level of aliasing (--series-other: var(--ink-200)).
+        alias = re.fullmatch(r"var\((--[\w-]+)\)", value)
+        return declared(alias.group(1)) if alias else value
+
+    pairs = re.findall(r"tok\(\s*'(--[\w-]+)'\s*,\s*'(#[0-9a-fA-F]{6})'\s*\)", html)
+    assert pairs, "expected the chart to read tokens with fallbacks"
+    for token, fallback in pairs:
+        expected = declared(token)
+        assert expected is not None, f"{token} is not declared in signal.css"
+        assert fallback.lower() == expected.lower(), (
+            f"{token}: chart falls back to {fallback}, sheet says {expected}"
+        )
 
 
 # ---------------------------------------------------------------------------
