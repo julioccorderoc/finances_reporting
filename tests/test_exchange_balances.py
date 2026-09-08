@@ -378,6 +378,34 @@ class TestCaptureFromTheSdk:
         }
         assert "BNB" not in assets
 
+    def test_earn_shadow_balances_are_not_recorded_as_spot_positions(
+        self, seeded_db: sqlite3.Connection, client
+    ):
+        """Binance reports Simple Earn principal inside the Spot wallet as
+        an ``LD``-prefixed asset — LDUSDT 1,763.26 and LDUSDC 4,523.42 on
+        the live account. That is the Earn account's money, already
+        modelled by ADR-003 and already checked against the position
+        endpoint. Recording it here would assert Spot holds an asset it
+        does not, and double-count Earn for anything summing this table."""
+        client.account.return_value = {
+            "balances": [
+                {"asset": "USDT", "free": "0.55", "locked": "0"},
+                {"asset": "LDUSDT", "free": "1763.25644955", "locked": "0"},
+                {"asset": "LDUSDC", "free": "4523.41746174", "locked": "0"},
+            ]
+        }
+        from finances.ingest.binance import capture_exchange_balances
+
+        capture_exchange_balances(seeded_db, client, captured_at=CAPTURED_AT)
+
+        assets = {
+            row[0]
+            for row in seeded_db.execute(
+                "SELECT DISTINCT currency FROM exchange_balances"
+            )
+        }
+        assert assets == {"USDT"}
+
     def test_an_sdk_failure_is_reported_not_raised(
         self, seeded_db: sqlite3.Connection, client
     ):

@@ -43,6 +43,14 @@ _FUNDING_ACCOUNT_NAME = "Binance Funding"
 _EARN_ACCOUNT_NAME = "Binance Earn"
 _INTEREST_CATEGORY = ("income", "Interest")
 
+# Binance reports Simple Earn principal inside the Spot wallet under an
+# ``LD``-prefixed asset (LDUSDT, LDUSDC). It is not a Spot holding: the
+# same money is the Earn account (ADR-003), already checked against the
+# position endpoint. Recording it as a Spot balance would assert Spot
+# holds an asset it does not, and double-count Earn for anything summing
+# ``exchange_balances``.
+_EARN_SHADOW_ASSET_PREFIX = "LD"
+
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -998,7 +1006,7 @@ def capture_exchange_balances(
         held = _held_currencies(conn, account_id)
         for item in rows:
             asset = str(item.get("asset", "")).upper()
-            if not asset:
+            if not asset or asset.startswith(_EARN_SHADOW_ASSET_PREFIX):
                 continue
             total = (
                 _coerce_decimal(item.get("free", "0"))
