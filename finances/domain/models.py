@@ -85,7 +85,7 @@ class Category(BaseModel):
     chip_eligible: bool = True
     icon: str | None = None
     # The group this category rolls up into on the /monthly chart (migration
-    # 026, ADR-023). A label on the category, not a table of its own; ``None``
+    # 027, ADR-023). A label on the category, not a table of its own; ``None``
     # means "stands for itself" and is the majority case, not an error.
     group_name: str | None = None
     created_at: datetime | None = None

@@ -53,7 +53,7 @@ and it is the axis the /monthly chart draws.**
 
 ### 2.1 The column
 
-Migration 026 adds `categories.group_name TEXT NULL`. Null means "this
+Migration 027 adds `categories.group_name TEXT NULL`. Null means "this
 category stands for itself" — it is not an error state, and the majority
 of income and transfer categories will keep it.
 
@@ -127,7 +127,7 @@ changed.
 ### 2.7 The mapping is data, not code
 
 Group membership lives in rows, so it can be edited without a deploy, and
-a future viewer surface can edit it. Migration 026 seeds the table above;
+a future viewer surface can edit it. Migration 027 seeds the table above;
 it does not own it afterwards.
 
 ## 3. Consequences
@@ -168,7 +168,7 @@ it does not own it afterwards.
 
 ## 5. Verification
 
-- Migration 026 is idempotent and re-runnable; re-applying changes no rows.
+- Migration 027 is idempotent and re-runnable; re-applying changes no rows.
 - `build_chart` groups: with the seed above, a month's series are the
   groups plus ungrouped categories, ranked together.
 - The July 2026 regression: Other is under 5% of the month.

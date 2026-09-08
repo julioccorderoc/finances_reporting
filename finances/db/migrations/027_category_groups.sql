@@ -1,4 +1,4 @@
--- 026_category_groups.sql
+-- 027_category_groups.sql
 --
 -- Categories roll up into groups (ADR-023).
 --

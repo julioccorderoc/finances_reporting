@@ -5,7 +5,7 @@ That is the cheap choice, and its cost is named in the ADR (§3): a
 category can be renamed while ``group_name`` still points at the old
 label, and nothing structural will notice. The guard is a doctor check
 that every non-NULL ``group_name`` sits on a category the seed (migration
-026) knows.
+027) knows.
 
 A warning, not an error: the ledger is not wrong when this fires — the
 taxonomy has drifted from what the seed described, and the owner should
@@ -42,7 +42,7 @@ def test_the_check_exists_as_a_warning() -> None:
 
 
 def test_the_seeded_mapping_is_clean(seeded_db: sqlite3.Connection) -> None:
-    """Fresh from migration 026, every grouped category is one the seed knows."""
+    """Fresh from migration 027, every grouped category is one the seed knows."""
     assert _finding(seeded_db) is None
 
 

@@ -1,4 +1,4 @@
-"""Migration 026 — categories roll up into groups (ADR-023).
+"""Migration 027 — categories roll up into groups (ADR-023).
 
 The /monthly chart draws the top five categories and folds the rest into
 "Other". On the owner's ledger Other was the largest block in four of six
@@ -29,7 +29,8 @@ from finances.domain.integrity import GROUPED_CATEGORIES
 HOME = ("Rent", "Utilities", "Transport", "Personal Care")
 SOCIAL = ("Dating", "Going Out", "Leisure", "Family", "Gifts")
 STANDALONE = ("Purchases", "Groceries", "Health")
-LONG_TAIL = ("Lending", "Fees", "Other Expense", "Education", "Subscriptions")
+# Lending left this list on 2026-09-08: migration 028 stores it as Other.
+LONG_TAIL = ("Fees", "Other Expense", "Education", "Subscriptions")
 
 
 @pytest.fixture()
@@ -84,14 +85,17 @@ def test_purchases_groceries_and_health_stand_alone(
 def test_the_long_tail_stays_ungrouped(
     migrated_db: sqlite3.Connection, name: str
 ) -> None:
-    """"Lending can go into others" is honoured by leaving it ungrouped —
-    there is no ``Other`` group (ADR-023 §2.6)."""
+    """The tail falls into the computed Other on its own; nothing is
+    written down for it (ADR-023 §2.6)."""
     assert _group_of(migrated_db, name) is None
 
 
-def test_no_other_group_is_stored(migrated_db: sqlite3.Connection) -> None:
-    """Other is computed by the chart, never stored (ADR-023 §2.6)."""
-    assert "Other" not in _grouped(migrated_db).values()
+def test_other_is_not_a_group_that_competes(migrated_db: sqlite3.Connection) -> None:
+    """A stored ``Other`` (migration 028) is an instruction to fold, not a
+    fifth group: the seed here stores none, and 028 adds exactly one."""
+    assert "Other" not in {
+        _group_of(migrated_db, name) for name in HOME + SOCIAL + STANDALONE + LONG_TAIL
+    }
 
 
 def test_only_expense_categories_carry_a_group(
@@ -112,7 +116,7 @@ def test_the_seed_and_the_doctor_agree_on_what_is_grouped(
 
 def test_the_migration_is_recorded_once(migrated_db: sqlite3.Connection) -> None:
     row = migrated_db.execute(
-        "SELECT COUNT(*) AS c FROM _migrations WHERE filename LIKE '026_%'"
+        "SELECT COUNT(*) AS c FROM _migrations WHERE filename LIKE '027_%'"
     ).fetchone()
     assert row["c"] == 1
 
@@ -143,7 +147,7 @@ def test_the_seed_statements_are_idempotent_on_their_own(
     conn.row_factory = sqlite3.Row
     apply_migrations(conn)
 
-    sql = (MIGRATIONS_DIR / "026_category_groups.sql").read_text(encoding="utf-8")
+    sql = (MIGRATIONS_DIR / "027_category_groups.sql").read_text(encoding="utf-8")
     seed_only = "\n".join(
         line for line in sql.splitlines() if not line.lstrip().upper().startswith("ALTER TABLE")
     )
