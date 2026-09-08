@@ -22,8 +22,11 @@
    tooltip: the canvas one cannot be styled to the sheet, clips against
    the plot floor (the bug triage's rate reading hit), and listed the
    month in stack order with no total and no shares. This one ranks the
-   month by size, gives each row its share, and opens "Other" — which on a
-   real ledger is routinely the largest block on the chart.
+   month by size, gives each row its share, and opens any series that has
+   members (ADR-023 §2.4): a group into its categories, "Other" into what
+   missed the cap. A series is a group or an ungrouped category; a click
+   on a segment drills through the series' own URL for that month, one
+   categories= parameter per member.
 
    The drawing script lives INSIDE the section: the pivot partial carries
    this file as an out-of-band twin (`chart_oob`) when the filters change,
@@ -43,12 +46,11 @@
     "months": {{ chart.months | tojson }},
     "series": [
       {%- for s in chart.series -%}
-        {"category": {{ s.category | tojson }}, "slot": {{ s.color_slot }}, "values": [{% for v in s.values %}{{ v }}{% if not loop.last %},{% endif %}{% endfor %}]}{% if not loop.last %},{% endif %}
-      {%- endfor -%}
-    ],
-    "other_members": [
-      {%- for s in chart.other_members -%}
-        {"category": {{ s.category | tojson }}, "values": [{% for v in s.values %}{{ v }}{% if not loop.last %},{% endif %}{% endfor %}]}{% if not loop.last %},{% endif %}
+        {"category": {{ s.category | tojson }}, "slot": {{ s.color_slot }}, "values": [{% for v in s.values %}{{ v }}{% if not loop.last %},{% endif %}{% endfor %}], "drill_urls": {{ s.drill_urls | tojson }}, "members": [
+          {%- for m in s.members -%}
+            {"category": {{ m.category | tojson }}, "values": [{% for v in m.values %}{{ v }}{% if not loop.last %},{% endif %}{% endfor %}]}{% if not loop.last %},{% endif %}
+          {%- endfor -%}
+        ]}{% if not loop.last %},{% endif %}
       {%- endfor -%}
     ],
     "fallback_per_month": [{% for v in chart.fallback_per_month %}{{ v }}{% if not loop.last %},{% endif %}{% endfor %}],
@@ -171,7 +173,12 @@
     if (!month) return '';
 
     var rows = (payload.series || []).map(function (s) {
-      return { name: s.category, value: Number(s.values[index]), color: colorFor(s.slot) };
+      return {
+        name: s.category,
+        value: Number(s.values[index]),
+        color: colorFor(s.slot),
+        members: s.members || []
+      };
     }).filter(function (r) { return r.value !== 0; });
 
     var total = rows.reduce(function (a, r) { return a + r.value; }, 0);
@@ -184,20 +191,19 @@
     html += '<div class="mth-tip-rows">';
     rows.forEach(function (r) {
       html += row(r.color, r.name, r.value, pct(r.value, total));
-      // Open the remainder in place. The cap hides most of the ledger
-      // otherwise: Other is often the biggest block on the chart.
-      if (r.name === 'Other') {
-        var members = (payload.other_members || []).map(function (m) {
-          return { name: m.category, value: Number(m.values[index]) };
-        }).filter(function (m) { return m.value !== 0; });
-        members.sort(function (a, b) { return Math.abs(b.value) - Math.abs(a.value); });
-        members.forEach(function (m) {
-          html += '<i></i>'
-            + '<span class="mth-tip-row is-member">' + m.name + '</span>'
-            + '<span class="mth-tip-num is-member">' + fmt(m.value) + '</span>'
-            + '<span class="mth-tip-share">' + pct(m.value, total) + '</span>';
-        });
-      }
+      // Open the block in place: a group into its categories, Other into
+      // what missed the cap. Either is one series with members (ADR-023
+      // §2.4), so there is one way to open a block, not two.
+      var members = r.members.map(function (m) {
+        return { name: m.category, value: Number(m.values[index]) };
+      }).filter(function (m) { return m.value !== 0; });
+      members.sort(function (a, b) { return Math.abs(b.value) - Math.abs(a.value); });
+      members.forEach(function (m) {
+        html += '<i></i>'
+          + '<span class="mth-tip-row is-member">' + m.name + '</span>'
+          + '<span class="mth-tip-num is-member">' + fmt(m.value) + '</span>'
+          + '<span class="mth-tip-share">' + pct(m.value, total) + '</span>';
+      });
     });
     html += '</div>';
 
@@ -269,6 +275,17 @@
         tooltip: { enabled: false, external: renderTip }
       },
       onClick: function (evt) {
+        // A segment names its series, and the series carries a drill URL
+        // per month with one categories= parameter per member — so a click
+        // on Home lands on Rent, Utilities, Transport and Personal Care for
+        // that month. The BCV shadow has no series and falls through.
+        var hit = this.getElementsAtEventForMode(evt, 'nearest', { intersect: true }, true);
+        if (hit && hit.length) {
+          var s = (payload.series || [])[hit[0].datasetIndex];
+          var url = s && s.drill_urls ? s.drill_urls[hit[0].index] : null;
+          if (url) { window.location.href = url; return; }
+        }
+        // Off the bars but in the column: the month as a whole.
         var pts = this.getElementsAtEventForMode(evt, 'index', { intersect: false }, true);
         if (!pts || !pts.length) return;
         var idx = pts[0].index;

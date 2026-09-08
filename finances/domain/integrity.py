@@ -68,6 +68,36 @@ _REVERSAL_MARKER_PREDICATE = " OR ".join(
     for marker in REVERSAL_MARKERS
 )
 
+# The categories migration 027 placed in a group (ADR-023 §2.2), plus the
+# one 028 stored as Other (§2.6 as amended), as (kind, name). Only the
+# members are listed: the group labels themselves are data the owner may
+# rename with an UPDATE (§2.7), so nothing here spells them.
+# ``tests/test_migration_027_category_groups.py`` pins this to the seed.
+GROUPED_CATEGORIES: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("expense", "Rent"),
+        ("expense", "Utilities"),
+        ("expense", "Transport"),
+        ("expense", "Personal Care"),
+        ("expense", "Dating"),
+        ("expense", "Going Out"),
+        ("expense", "Leisure"),
+        ("expense", "Family"),
+        ("expense", "Gifts"),
+        ("expense", "Lending"),
+    }
+)
+
+# "Is this a category the seed grouped?", as a SQL predicate over
+# ``categories``. Built from the constant rather than restated, so the
+# migration test that pins the constant to the seed also pins this check.
+_GROUPED_CATEGORY_PREDICATE = " OR ".join(
+    "(kind = '{}' AND name = '{}')".format(
+        kind.replace("'", "''"), name.replace("'", "''")
+    )
+    for kind, name in sorted(GROUPED_CATEGORIES)
+)
+
 # How far a cross-currency transfer pair may fail to net to zero in USD
 # before it is worth the owner's attention. Priced through the resolver, the
 # live ledger's 95 cross-currency pairs net to $0.72 in total and the worst
@@ -686,6 +716,28 @@ CHECKS: tuple[IntegrityCheck, ...] = (
              WHERE t.transfer_id IS NULL
                 OR t.transfer_id <> p.transfer_id
              ORDER BY p.transaction_id
+        """,
+    ),
+    IntegrityCheck(
+        name="category_group_unknown",
+        severity=Severity.WARNING,
+        description=(
+            "Categories carrying a group the seed never gave them (ADR-023). "
+            "The group is a plain string on the category row, so a renamed "
+            "category keeps pointing at its old group and nothing structural "
+            "notices; a category grouped by hand looks the same. The ids "
+            "are category ids, not transaction ids. Update "
+            "GROUPED_CATEGORIES in domain/integrity.py once the change is "
+            "confirmed as intended."
+        ),
+        # The group's own label is deliberately not checked: Home and Social
+        # are data the owner may rename with an UPDATE (ADR-023 §2.7), and a
+        # check that spelled them would turn that edit into a finding.
+        sql=f"""
+            SELECT id FROM categories
+             WHERE group_name IS NOT NULL
+               AND NOT ({_GROUPED_CATEGORY_PREDICATE})
+             ORDER BY id
         """,
     ),
 )

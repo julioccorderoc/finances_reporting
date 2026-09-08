@@ -3,8 +3,9 @@
 **Date:** 2026-09-07
 **Status:** Accepted 2026-09-07 — the owner confirmed the mapping and the
 storage choice, then delegated the remaining calls ("do what's best").
-Implementation handed off to its own session: see
-[the handoff prompt](../plans/2026-09-07-category-groups-prompt.md)
+Implemented 2026-09-08 (migrations 027 and 028) from
+[the handoff prompt](../plans/2026-09-07-category-groups-prompt.md).
+§2.6 amended 2026-09-08: Lending is folded into Other by data.
 **Amends:** [ADR-006](./ADR-006-category-taxonomy-revamp.md) — a category is still
 the unit a transaction carries; the group is a second, coarser axis over it,
 never a replacement
@@ -53,7 +54,7 @@ and it is the axis the /monthly chart draws.**
 
 ### 2.1 The column
 
-Migration 026 adds `categories.group_name TEXT NULL`. Null means "this
+Migration 027 adds `categories.group_name TEXT NULL`. Null means "this
 category stands for itself" — it is not an error state, and the majority
 of income and transfer categories will keep it.
 
@@ -72,14 +73,16 @@ Confirmed with the owner, 2026-09-07:
 | **Home** | Rent, Utilities, Transport, Personal Care |
 | **Social** | Dating, Going Out, Leisure, Family, Gifts |
 | *(none)* | Purchases, Groceries, Health — each stands alone |
-| *(none)* | Lending, Fees, Other Expense, Education, Subscriptions |
+| *(none)* | Fees, Other Expense, Education, Subscriptions |
+| **Other** *(folded, 2026-09-08)* | Lending — see §2.6 |
 
 Five things then compete for the chart's five slots, and the remainder is
 genuinely minor: July's Other falls from -$696.11 (45.8%) to roughly
 -$58 (3.8%).
 
-"Lending can go into others" is honoured by leaving it ungrouped, not by
-inventing an `Other` group — see §2.6.
+"Lending can go into others" was first honoured by leaving it ungrouped
+and expecting the ranking to do the rest. It did not — §2.6 records why,
+and what replaced it.
 
 ### 2.3 What reads the group
 
@@ -124,10 +127,31 @@ colour because it is a remainder rather than a thing that happened. A
 stored `Other` group would be a lie the moment the cap or the mapping
 changed.
 
+**Amended 2026-09-08.** Lending did not fall into Other on its own. The
+chart ranks a series by its total over the whole window, not the month
+being read, and one large loan month kept Lending in the top five for six
+months while Health — larger in July — fell into Other: the opposite of
+the request. On the live ledger the first implementation read July's
+Other at 5.3% (Health, Other Expense, Fees), not the 3.8% above. Owner
+decision: Lending goes into Other regardless of rank.
+
+The mechanism is the same column with the label `Other` (migration 028).
+This does not contradict the paragraph above, because a stored `Other` is
+not a group. It is an *instruction to fold* the category into the computed
+remainder whatever its rank: it never competes for a slot, holds no
+palette rank, draws as Other even when it is the only category selected
+(the §2.5 rule), and its categories sit flat under the one Other series
+beside whatever missed the cap, largest first. The remainder is still
+computed for everything else — nothing is written down for Fees, Other
+Expense, Education or Subscriptions. The lie the paragraph above guards
+against cannot arise: the instruction is unconditional, so it stays true
+however the cap or the mapping moves. `finances doctor` knows Lending as
+a grouped category from 028 on.
+
 ### 2.7 The mapping is data, not code
 
 Group membership lives in rows, so it can be edited without a deploy, and
-a future viewer surface can edit it. Migration 026 seeds the table above;
+a future viewer surface can edit it. Migration 027 seeds the table above;
 it does not own it afterwards.
 
 ## 3. Consequences
@@ -168,7 +192,7 @@ it does not own it afterwards.
 
 ## 5. Verification
 
-- Migration 026 is idempotent and re-runnable; re-applying changes no rows.
+- Migration 027 is idempotent and re-runnable; re-applying changes no rows.
 - `build_chart` groups: with the seed above, a month's series are the
   groups plus ungrouped categories, ranked together.
 - The July 2026 regression: Other is under 5% of the month.
@@ -179,5 +203,9 @@ it does not own it afterwards.
   Personal Care; opening Other lists what missed the cap.
 - A category filter narrows a group rather than dissolving it: filtering to
   Rent alone still draws a **Home** series.
+- A category stored as `Other` (Lending, migration 028) never takes a slot
+  or a palette rank, draws as Other even when filtered to alone, and sits
+  flat under the one Other series with whatever missed the cap. Migration
+  028 is idempotent.
 - Colour slots stay stable under the category filter (ADR-unnumbered
   behaviour pinned by `tests/web/test_monthly_chart_palette.py`).
