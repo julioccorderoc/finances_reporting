@@ -735,7 +735,9 @@ def _handle_binance_convert(
             toAmount=to_amount,
             createTime=_ms(occurred),
         )
-        sides = raw.to_transactions(spot_account_id=account_id)
+        sides = raw.to_transactions(
+            spot_account_id=account_id, funding_account_id=account_id
+        )
     else:
         raw = RawBinanceConvertRow(
             orderId=tran_id,
@@ -745,7 +747,9 @@ def _handle_binance_convert(
             toAmount=Decimal("0") if is_out else abs(amount),
             createTime=_ms(occurred),
         )
-        legs = raw.to_transactions(spot_account_id=account_id)
+        legs = raw.to_transactions(
+            spot_account_id=account_id, funding_account_id=account_id
+        )
         sides = [legs[0] if is_out else legs[1]]
 
     for side in sides:

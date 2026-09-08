@@ -203,6 +203,9 @@ class RawBinanceConvertRow(_RawBase):
     toAsset: str
     toAmount: Decimal
     createTime: int
+    # Absent on older payloads, which predate the field entirely -- that is
+    # the old behaviour, not an unknown wallet.
+    walletType: str = "SPOT"
 
     @field_validator("fromAmount", "toAmount", mode="before")
     @classmethod
@@ -214,7 +217,27 @@ class RawBinanceConvertRow(_RawBase):
     def _str_id(cls, v: Any) -> str:
         return str(v)
 
-    def to_transactions(self, *, spot_account_id: int) -> list[Transaction]:
+    def to_transactions(
+        self, *, spot_account_id: int, funding_account_id: int
+    ) -> list[Transaction]:
+        # Binance names the wallet on the record and the ledger ignored it
+        # for a year (ADR-025). SPOT_FUNDING is the combined-wallet mode: a
+        # conversion allowed to draw across both. The one live instance
+        # consumed 400.19 USDC when Funding held 400.00 and Spot held dust,
+        # and the proceeds were credited to Spot -- so the outgoing leg is
+        # Funding's and the incoming leg Spot's, which makes this an
+        # ordinary cross-account pair under rule-002.
+        #
+        # An unrecognised wallet raises rather than defaulting to Spot:
+        # filing the unknown as Spot is precisely the defect corrected here,
+        # and the ingest loop turns this into an import_runs error.
+        if self.walletType not in _CONVERT_SOURCE_WALLETS:
+            raise ValueError(f"unknown convert walletType: {self.walletType}")
+        from_account_id = (
+            funding_account_id
+            if _CONVERT_SOURCE_WALLETS[self.walletType] == "funding"
+            else spot_account_id
+        )
         occurred_at = _from_ms(self.createTime)
         description = (
             f"Convert {format(self.fromAmount, 'f')} {self.fromAsset.upper()} → "
@@ -228,7 +251,7 @@ class RawBinanceConvertRow(_RawBase):
         # phantom earning, for a conversion that actually cost about $1.81.
         transfer_id = f"convert:{self.orderId}"
         from_leg = Transaction(
-            account_id=spot_account_id,
+            account_id=from_account_id,
             occurred_at=occurred_at,
             kind=TransactionKind.TRANSFER,
             amount=-self.fromAmount,
@@ -251,6 +274,14 @@ class RawBinanceConvertRow(_RawBase):
         )
         return [from_leg, to_leg]
 
+
+# Which wallet a conversion drew from. ``SPOT_FUNDING`` is Binance's
+# combined-wallet mode; the ledger books the outgoing leg where the money
+# actually was. Anything absent from this map is refused, not assumed.
+_CONVERT_SOURCE_WALLETS = {
+    "SPOT": "spot",
+    "SPOT_FUNDING": "funding",
+}
 
 _TRANSFER_DIRECTIONS = {
     "MAIN_FUNDING": ("spot", "funding"),
@@ -645,6 +676,7 @@ def _ingest_converts(
     start_ms: int,
     end_ms: int,
     spot_id: int,
+    funding_id: int,
     stats: dict[str, int],
     errors: list[str],
 ) -> None:
@@ -657,10 +689,13 @@ def _ingest_converts(
             continue
         try:
             row = RawBinanceConvertRow.model_validate(item)
+            legs = row.to_transactions(
+                spot_account_id=spot_id, funding_account_id=funding_id
+            )
         except Exception as exc:  # noqa: BLE001
             errors.append(f"convert: {exc}")
             continue
-        for leg in row.to_transactions(spot_account_id=spot_id):
+        for leg in legs:
             result = transactions_repo.upsert_by_source_ref(conn, leg)
             _tally(stats, result)
 
@@ -1113,7 +1148,8 @@ def sync_binance(
                 )
                 _ingest_converts(
                     conn, client, start_ms=chunk_start, end_ms=chunk_end,
-                    spot_id=spot_id, stats=stats, errors=errors,
+                    spot_id=spot_id, funding_id=funding_id,
+                    stats=stats, errors=errors,
                 )
                 _ingest_internal_transfers(
                     conn, client, start_ms=chunk_start, end_ms=chunk_end,
