@@ -74,19 +74,30 @@
   }
 
   // signal.css's tokens, read once, so the chart cannot drift from the sheet.
+  //
+  // Every read carries the sheet's own value as a fallback, and that is not
+  // belt-and-braces: a browser holding a cached signal.css older than this
+  // template resolves the custom property to '', and a dataset whose
+  // backgroundColor is undefined is drawn by Chart.js in its default faint
+  // gray. The chart then renders with no colour at all and nothing anywhere
+  // reports an error. Keep these literals in step with signal.css —
+  // tests/web/test_monthly_chart_palette.py fails if they drift.
   var styles = getComputedStyle(document.documentElement);
   function tok(name, fallback) {
     var value = styles.getPropertyValue(name).trim();
     return value || fallback;
   }
   var series = [
-    tok('--series-1'), tok('--series-2'), tok('--series-3'),
-    tok('--series-4'), tok('--series-5')
+    tok('--series-1', '#1f8fc4'),
+    tok('--series-2', '#a58515'),
+    tok('--series-3', '#63509f'),
+    tok('--series-4', '#1f7032'),
+    tok('--series-5', '#cc6e8b')
   ];
-  var neutral = tok('--series-other');
-  var paper = tok('--surface-raised');
-  var grid = tok('--border-subtle');
-  var tick = tok('--text-tertiary');
+  var neutral = tok('--series-other', '#c7c6c0');
+  var paper = tok('--surface-raised', '#f5f5f3');
+  var grid = tok('--border-subtle', '#dbdad5');
+  var tick = tok('--text-tertiary', '#666662');
   var mono = "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
 
   function colorFor(slot) {
@@ -128,8 +139,8 @@
     datasets.push({
       label: 'BCV fallback',
       data: payload.fallback_per_month,
-      backgroundColor: fillFor(tok('--red-050')),
-      borderColor: tok('--red-600'),
+      backgroundColor: fillFor(tok('--red-050', '#fbe9e8')),
+      borderColor: tok('--red-600', '#c51a13'),
       borderWidth: 1,
       stack: 'stack-b'
     });
