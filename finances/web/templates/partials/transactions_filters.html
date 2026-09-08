@@ -4,58 +4,12 @@
 
    A raised panel with a hairline; labels are eyebrows; the controls are
    the house field (.flow-input, 32px, radius 2, red border on focus). The
-   four multi-selects are dropdowns (owner, 2026-09-03): a native
-   <details> whose summary is the house field reading "Any", the one value
-   or "N selected", over a raised menu of house checkboxes. The repeated
-   param contract (accounts=…&accounts=…) is unchanged. Styles: .flow-dd*
-   in static/css/flow.css.
+   five multi-selects are dropdowns (owner, 2026-09-03); the macro moved to
+   _macros.html when /monthly gained a category filter and needed the same
+   control. The repeated param contract (accounts=…&accounts=…) is unchanged.
+   Styles: .flow-dd* in static/css/flow.css.
 #}
-{#- An option is either a plain string (value == label, the four original
-    groups) or a (value, label) pair. Categories needs the pair: its
-    "Uncategorized" entry is the sentinel __none__, which the WHERE
-    builder reads and the owner must never see. -#}
-{%- macro dropdown(name, label, options, selected) -%}
-  {%- set labels = {} -%}
-  {%- for opt in options -%}
-    {%- set _ = labels.update({(opt if opt is string else opt[0]): (opt if opt is string else opt[1])}) -%}
-  {%- endfor -%}
-  {%- set n = selected | length -%}
-  {%- set text = 'Any' if n == 0 else (labels.get(selected[0], selected[0]) if n == 1 else (n ~ ' selected')) -%}
-  <fieldset class="flow-fieldset">
-    <legend class="teyebrow">{{ label }}</legend>
-    {# Alpine keeps the summary honest after a change — the form is never
-       re-rendered by a list swap. x-init seeds it from the same boxes the
-       server checked, so the text never flashes. #}
-    <details
-      class="flow-dd"
-      data-filter-group="{{ name }}"
-      x-data="{
-        text: '',
-        sync() {
-          const on = Array.from(this.$el.querySelectorAll('input:checked'));
-          // data-label where the value is a sentinel (categories'
-          // __none__); the value itself everywhere else.
-          this.text = on.length === 0 ? 'Any' : (on.length === 1 ? (on[0].dataset.label || on[0].value) : on.length + ' selected');
-        }
-      }"
-      x-init="sync()"
-      @change="sync()"
-      @click.outside="$el.open = false"
-      @keydown.escape="$el.open = false"
-    >
-      <summary class="flow-input flow-dd-summary{% if n %} is-set{% endif %}" x-bind:class="{ 'is-set': text !== 'Any' }">
-        <span class="flow-dd-value" x-text="text">{{ text }}</span>
-      </summary>
-      <div class="flow-dd-menu" role="group" aria-label="{{ label }}">
-        {%- for opt in options %}
-        {%- set val = opt if opt is string else opt[0] %}
-        {%- set opt_label = opt if opt is string else opt[1] %}
-        <label class="flow-dd-option"><input type="checkbox" class="tcheck" name="{{ name }}" value="{{ val }}"{% if val != opt_label %} data-label="{{ opt_label }}"{% endif %}{% if val in selected %} checked{% endif %}><span>{{ opt_label }}</span></label>
-        {%- endfor %}
-      </div>
-    </details>
-  </fieldset>
-{%- endmacro -%}
+{%- from "_macros.html" import dropdown -%}
 <form
   id="tx-filters"
   class="flow-filters"

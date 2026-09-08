@@ -284,14 +284,17 @@ def test_monthly_filters_keep_their_field_names_and_hx_contract(
     assert radios == ["3m", "6m", "12m", "ytd", "all", "custom"]
     assert form_html.count('name="range_preset"') == 6
     assert re.search(r'<input type="radio" name="range_preset" value="3m"[^>]*checked', form_html)
-    assert form_html.count("checked") == 1 + form_html.count('name="include_bcv_fallback" value="true" checked')
+    # Exactly one preset is checked. Count the attribute on the radios rather
+    # than the bare word: the dropdowns carry an ``input:checked`` selector in
+    # their Alpine handler, which a substring count reads as state.
+    assert (
+        len(re.findall(r'name="range_preset"[^>]*\schecked', form_html)) == 1
+    )
     assert form_html.count('class="tbtn tbtn-sm rpt-tab"') == 6
 
     for field in (
         '<input type="month" name="since" value=""',
         '<input type="month" name="until" value=""',
-        '<select name="accounts" multiple',
-        '<select name="currencies" multiple',
         'name="include_bcv_fallback"',
         '<input type="hidden" name="kind" value="expense">',
         '<a href="/monthly" data-clear-filters',
@@ -299,6 +302,15 @@ def test_monthly_filters_keep_their_field_names_and_hx_contract(
         assert field in form_html, field
     assert 'class="teyebrow"' in form_html
     assert 'class="rpt-input' in form_html
+
+    # Accounts / Categories / Currencies are the shared .flow-dd dropdown
+    # (_macros.html) rather than a <select multiple>, so /monthly and
+    # /transactions cannot drift apart. The wire contract is what matters and
+    # is unchanged: repeated params under the same names.
+    for group in ("accounts", "categories", "currencies"):
+        assert f'data-filter-group="{group}"' in form_html, group
+        assert f'name="{group}"' in form_html, group
+    assert "<select name=" not in form_html
 
 
 def test_monthly_chart_payload_is_a_json_block_not_an_attribute(

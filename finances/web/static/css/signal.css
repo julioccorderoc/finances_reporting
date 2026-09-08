@@ -77,6 +77,40 @@
   --slate-200: var(--ink-100);
   --slate-050: var(--paper-200);
 
+  /* ── Categorical series ───────────────────────────────────────────────────
+     Chart fills only. Nothing outside a plot may wear these: the rest of the
+     viewer stays ink-and-red, and a hue appearing in the chrome would read as
+     a status the app does not have.
+
+     Why hues at all, in a monochrome system. The /monthly bars stacked six
+     steps of the ink ramp, and gray is a magnitude channel — it cannot carry
+     identity. Measured, the worst adjacent pair (--ink-300 against --ink-100)
+     sat at ΔE 9.0 in OKLab against a floor of 15, below which full colour
+     vision cannot separate two fills; three of the six also fell under 3:1
+     contrast on paper. No re-stepping of a gray ramp fixes that, because the
+     failure is the channel, not the steps.
+
+     These five were searched under the dataviz validator against this sheet's
+     own --surface-raised (#f5f5f3), and clear every check across ALL pairs,
+     not merely adjacent ones — worst normal-vision ΔE 17.3, worst CVD ΔE 8.7
+     (protanopia) against a target of 8.0, and all five above 3:1. All-pairs
+     matters here specifically: a stacked segment can touch any other when the
+     series between them is zero in a given month.
+
+     Kept clear of the signal red by 25 degrees of hue, so the BCV-fallback
+     overlay stays the only red on a plot and holds its meaning under
+     rule-005. Slots are assigned from a category's identity, never its rank —
+     see OTHER_COLOR_SLOT and _assign_color_slots in monthly_view.py. */
+  --series-1: #1f8fc4;
+  --series-2: #a58515;
+  --series-3: #63509f;
+  --series-4: #1f7032;
+  --series-5: #cc6e8b;
+  /* "Other" is a remainder, not an entity, so it takes no hue and recedes.
+     Its 1.57:1 against paper is the documented relief case: the legend, the
+     hover overlay and the pivot table below all name it in words. */
+  --series-other: var(--ink-200);
+
   /* ── Semantic: text ───────────────────────────────────────────────────── */
   --text-primary: var(--ink-900);
   --text-secondary: var(--ink-600);

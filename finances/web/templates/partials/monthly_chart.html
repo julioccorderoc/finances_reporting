@@ -6,25 +6,48 @@
    inline <script> instantiates the chart; a bar click drills into
    /transactions for that month and kind.
 
-   Colour is SIGNAL's: the categories are steps on the ink ramp, separated
-   by paper hairlines, and the BCV-fallback shadow is the one red on the
-   chart — the part of a month that only BCV could price.
+   Colour is the categorical palette from signal.css (--series-1..5), not
+   the ink ramp. Gray is a magnitude channel: stacked as six steps it put
+   the worst adjacent pair 9.0 apart in OKLab against a floor of 15, so
+   two categories could not be told apart by colour at all. The five hues
+   clear every separation check on every pair. The slot each series takes
+   is decided server-side (``color_slot``) on a ranking the category
+   filter cannot move, so narrowing the chart never repaints it. "Other"
+   keeps the neutral: it is a remainder, not a thing that happened.
+
+   The BCV-fallback shadow is still the one red on the chart — the part of
+   a month only BCV could price (rule-005).
+
+   The reading on hover is a DOM overlay, not Chart.js's in-canvas
+   tooltip: the canvas one cannot be styled to the sheet, clips against
+   the plot floor (the bug triage's rate reading hit), and listed the
+   month in stack order with no total and no shares. This one ranks the
+   month by size, gives each row its share, and opens "Other" — which on a
+   real ledger is routinely the largest block on the chart.
 
    The drawing script lives INSIDE the section: the pivot partial carries
    this file as an out-of-band twin (`chart_oob`) when the filters change,
    and htmx re-runs only the scripts inside the element it swaps. The
+   overlay node lives inside it for the same reason — parked outside, it
+   survives the swap as an orphan the re-run script never binds. The
    previous Chart instance is destroyed first — it was bound to the canvas
    this swap replaces.
 #}
 <section id="monthly-chart" class="rpt-chart-card"{% if chart_oob is defined and chart_oob %} hx-swap-oob="true"{% endif %}>
   <div class="rpt-chart">
     <canvas data-monthly-chart aria-label="Totals by category and month"></canvas>
+    <div data-monthly-tip class="rpt-chart-tip mth-tip" hidden></div>
   </div>
   <script id="monthly-chart-data" type="application/json">
   {
     "months": {{ chart.months | tojson }},
     "series": [
       {%- for s in chart.series -%}
+        {"category": {{ s.category | tojson }}, "slot": {{ s.color_slot }}, "values": [{% for v in s.values %}{{ v }}{% if not loop.last %},{% endif %}{% endfor %}]}{% if not loop.last %},{% endif %}
+      {%- endfor -%}
+    ],
+    "other_members": [
+      {%- for s in chart.other_members -%}
         {"category": {{ s.category | tojson }}, "values": [{% for v in s.values %}{{ v }}{% if not loop.last %},{% endif %}{% endfor %}]}{% if not loop.last %},{% endif %}
       {%- endfor -%}
     ],
@@ -42,6 +65,7 @@
   var canvas = section.querySelector('canvas[data-monthly-chart]');
   if (!canvas || canvas.dataset.bound === 'true') return;
   canvas.dataset.bound = 'true';
+  var tipEl = section.querySelector('[data-monthly-tip]');
   var payload;
   try { payload = JSON.parse(dataEl.textContent); } catch (e) { return; }
   if (window.__monthlyChart) {
@@ -55,38 +79,154 @@
     var value = styles.getPropertyValue(name).trim();
     return value || fallback;
   }
-  var ink = [
-    tok('--ink-900', '#131312'),
-    tok('--ink-600', '#4b4b46'),
-    tok('--ink-500', '#6d6d69'),
-    tok('--ink-400', '#9a9a95'),
-    tok('--ink-300', '#bebdb8'),
-    tok('--ink-100', '#dbdad5')
+  var series = [
+    tok('--series-1'), tok('--series-2'), tok('--series-3'),
+    tok('--series-4'), tok('--series-5')
   ];
-  var paper = tok('--surface-raised', '#f5f5f3');
-  var grid = tok('--border-subtle', '#dbdad5');
-  var tick = tok('--text-tertiary', '#666662');
+  var neutral = tok('--series-other');
+  var paper = tok('--surface-raised');
+  var grid = tok('--border-subtle');
+  var tick = tok('--text-tertiary');
   var mono = "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
 
-  var datasets = (payload.series || []).map(function (s, i) {
+  function colorFor(slot) {
+    if (slot === null || slot === undefined || slot < 0) return neutral;
+    return series[slot % series.length] || neutral;
+  }
+
+  // Dimming the months you are not reading. Chart.js has no opacity channel
+  // per element, so the fill itself is mixed toward paper — color-mix keeps
+  // it in the sheet's own colour space rather than guessing an rgba.
+  function dimmed(color) {
+    return 'color-mix(in srgb, ' + color + ' 26%, ' + paper + ')';
+  }
+
+  // Which month the pointer is over, or null. Scriptable colours read it, so
+  // a hover is one update() with no re-layout.
+  var hovered = null;
+
+  function fillFor(base) {
+    return function (ctx) {
+      if (hovered === null || ctx.dataIndex === undefined) return base;
+      return ctx.dataIndex === hovered ? base : dimmed(base);
+    };
+  }
+
+  var datasets = (payload.series || []).map(function (s) {
+    var base = colorFor(s.slot);
     return {
       label: s.category,
       data: s.values,
-      backgroundColor: ink[i % ink.length],
+      backgroundColor: fillFor(base),
       borderColor: paper,
       borderWidth: 1,
       stack: 'stack-a'
     };
   });
-  if ((payload.fallback_per_month || []).some(function (v) { return Number(v) !== 0; })) {
+  var hasFallback = (payload.fallback_per_month || []).some(function (v) { return Number(v) !== 0; });
+  if (hasFallback) {
     datasets.push({
       label: 'BCV fallback',
       data: payload.fallback_per_month,
-      backgroundColor: tok('--red-050', '#fbe9e8'),
-      borderColor: tok('--red-600', '#c51a13'),
+      backgroundColor: fillFor(tok('--red-050')),
+      borderColor: tok('--red-600'),
       borderWidth: 1,
       stack: 'stack-b'
     });
+  }
+
+  // ── the reading ────────────────────────────────────────────────────────
+  var money = new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 2, maximumFractionDigits: 2
+  });
+  function fmt(v) {
+    var n = Number(v);
+    return (n < 0 ? '-$' : '$') + money.format(Math.abs(n));
+  }
+  function pct(part, whole) {
+    if (!whole) return '';
+    return (Math.abs(part) / Math.abs(whole) * 100).toFixed(1) + '%';
+  }
+
+  function row(color, name, value, share) {
+    return '<i class="mth-tip-chip" style="background:' + color + '"></i>'
+      + '<span class="mth-tip-row">' + name + '</span>'
+      + '<span class="mth-tip-num">' + fmt(value) + '</span>'
+      + '<span class="mth-tip-share">' + share + '</span>';
+  }
+
+  function render(index) {
+    var month = (payload.months || [])[index];
+    if (!month) return '';
+
+    var rows = (payload.series || []).map(function (s) {
+      return { name: s.category, value: Number(s.values[index]), color: colorFor(s.slot) };
+    }).filter(function (r) { return r.value !== 0; });
+
+    var total = rows.reduce(function (a, r) { return a + r.value; }, 0);
+    // Ranked by size, because the question on hover is what the month was
+    // made of — stack order answers a different question.
+    rows.sort(function (a, b) { return Math.abs(b.value) - Math.abs(a.value); });
+
+    var html = '<p class="mth-tip-head"><span>' + month + '</span>'
+      + '<span>' + fmt(total) + '</span></p>';
+    html += '<div class="mth-tip-rows">';
+    rows.forEach(function (r) {
+      html += row(r.color, r.name, r.value, pct(r.value, total));
+      // Open the remainder in place. The cap hides most of the ledger
+      // otherwise: Other is often the biggest block on the chart.
+      if (r.name === 'Other') {
+        var members = (payload.other_members || []).map(function (m) {
+          return { name: m.category, value: Number(m.values[index]) };
+        }).filter(function (m) { return m.value !== 0; });
+        members.sort(function (a, b) { return Math.abs(b.value) - Math.abs(a.value); });
+        members.forEach(function (m) {
+          html += '<i></i>'
+            + '<span class="mth-tip-row is-member">' + m.name + '</span>'
+            + '<span class="mth-tip-num is-member">' + fmt(m.value) + '</span>'
+            + '<span class="mth-tip-share">' + pct(m.value, total) + '</span>';
+        });
+      }
+    });
+    html += '</div>';
+
+    var fb = Number((payload.fallback_per_month || [])[index] || 0);
+    if (fb !== 0) {
+      html += '<p class="mth-tip-foot">BCV-priced ' + fmt(fb)
+        + ' · ' + pct(fb, total) + ' of the month</p>';
+    }
+    return html;
+  }
+
+  // Chart.js hands us its tooltip model; we draw our own node from it. The
+  // bubble is placed on the far side of the column it describes so it never
+  // covers the bars being read.
+  function renderTip(context) {
+    var model = context.tooltip;
+    if (!model || model.opacity === 0) {
+      if (hovered !== null) { hovered = null; context.chart.update('none'); }
+      tipEl.hidden = true;
+      return;
+    }
+    var index = model.dataPoints && model.dataPoints.length
+      ? model.dataPoints[0].dataIndex
+      : null;
+    if (index === null) return;
+    if (index !== hovered) {
+      hovered = index;
+      tipEl.innerHTML = render(index);
+      // update() re-enters this callback; the guard above stops the loop.
+      context.chart.update('none');
+    }
+    tipEl.hidden = false;
+
+    var area = context.chart.chartArea;
+    var onLeft = model.caretX > (area.left + area.right) / 2;
+    tipEl.style.left = onLeft ? '' : 'auto';
+    tipEl.style.right = onLeft ? 'auto' : '';
+    if (onLeft) { tipEl.style.left = (area.left + 4) + 'px'; }
+    else { tipEl.style.right = '4px'; }
+    tipEl.style.top = (area.top + 4) + 'px';
   }
 
   window.__monthlyChart = new window.Chart(canvas, {
@@ -95,6 +235,7 @@
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
       scales: {
         x: {
           stacked: true,
@@ -114,7 +255,7 @@
           position: 'bottom',
           labels: { boxWidth: 10, boxHeight: 10, color: tick, font: { family: mono, size: 11 } }
         },
-        tooltip: { mode: 'index', intersect: false, bodyFont: { family: mono, size: 11 }, titleFont: { family: mono, size: 11 } }
+        tooltip: { enabled: false, external: renderTip }
       },
       onClick: function (evt) {
         var pts = this.getElementsAtEventForMode(evt, 'index', { intersect: false }, true);
@@ -128,6 +269,12 @@
         window.location.href = url;
       }
     }
+  });
+
+  // The canvas keeps no pointerleave of its own once the tooltip is ours.
+  canvas.addEventListener('mouseleave', function () {
+    if (hovered !== null) { hovered = null; window.__monthlyChart.update('none'); }
+    tipEl.hidden = true;
   });
 })();
 </script>

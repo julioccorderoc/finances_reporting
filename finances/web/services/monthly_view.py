@@ -29,6 +29,7 @@ from urllib.parse import urlencode
 from pydantic import BaseModel, ConfigDict, Field
 
 from finances.reports import monthly as monthly_report
+from finances.web.services.transactions_query import UNCATEGORIZED
 
 # ---------------------------------------------------------------------------
 # Tunable caps. Documented choices, not free knobs.
@@ -40,7 +41,24 @@ from finances.reports import monthly as monthly_report
 PIVOT_TOP_N: int = 25
 
 #: Cap chart series to top 5 categories + 1 "Other" bucket.
+#:
+#: This is not a free knob. The palette holds exactly five entity hues
+#: (``--series-1``..``--series-5`` in signal.css) because six could not be
+#: found that clear the colour-separation floors on every pair. Raising the
+#: cap without adding validated hues means two categories drawn in the same
+#: colour, which is worse than folding one of them into Other. The category
+#: filter is the way into the tail; ``MonthlyChart.other_members`` is the way
+#: to read it without leaving the chart.
 CHART_TOP_N: int = 5
+
+#: Number of entity hues in the categorical palette.
+CHART_COLOR_SLOTS: int = 5
+
+#: The slot "Other" always takes — a neutral, outside the hue range. Other is
+#: a remainder rather than a thing that happened, so giving it a hue would
+#: claim an identity it does not have, and would spend one of five scarce
+#: slots on the bucket that means least.
+OTHER_COLOR_SLOT: int = -1
 
 _KIND_INCOME = "income"
 _KIND_EXPENSE = "expense"
@@ -139,6 +157,11 @@ class MonthlyChartSeries(BaseModel):
 
     category: str
     values: list[Decimal]
+    #: Palette slot, 0-based, or ``OTHER_COLOR_SLOT`` for the remainder.
+    #: Decided on a ranking the category filter cannot move, so deselecting
+    #: one category does not repaint the rest — see
+    #: :func:`_assign_color_slots`.
+    color_slot: int = OTHER_COLOR_SLOT
 
 
 class MonthlyChart(BaseModel):
@@ -148,6 +171,12 @@ class MonthlyChart(BaseModel):
     series: list[MonthlyChartSeries]
     fallback_per_month: list[Decimal]
     filter: MonthlyFilter
+    #: The categories folded into "Other", largest first, with their own
+    #: per-month values. Empty when nothing was folded. The hover overlay
+    #: opens this: on a real ledger Other is routinely the largest block on
+    #: the chart, and a bucket that big has to be readable without leaving
+    #: the page.
+    other_members: list[MonthlyChartSeries] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -280,9 +309,14 @@ def _row_matches_filter(
     if f.accounts and row.account_name not in f.accounts:
         return False
     if f.categories:
+        # ``__none__`` is the absence of a category, the same sentinel the
+        # /transactions WHERE builder reads. Without this the Uncategorized
+        # option renders and then matches nothing, which reads as a broken
+        # filter rather than an empty category.
         if row.category_name is None:
-            return False
-        if row.category_name not in f.categories:
+            if UNCATEGORIZED not in f.categories:
+                return False
+        elif row.category_name not in f.categories:
             return False
     if f.currencies and row.currency not in f.currencies:
         return False
@@ -337,6 +371,65 @@ def _month_last_day(month: str) -> str:
     from datetime import date as _date, timedelta as _td
 
     return (_date(ny, nm, 1) - _td(days=1)).isoformat()
+
+
+def _assign_color_slots(labels: Iterable[str]) -> dict[str, int]:
+    """Map categories to palette slots from a filter-independent ordering.
+
+    The property that matters is that **the category filter must not repaint
+    the chart**. The old ``ink[i % len]`` keyed colour to a series' position
+    among the *visible* ones, so deselecting the largest category shifted a
+    colour onto every survivor.
+
+    ``labels`` therefore arrives ranked over the window with the category
+    filter lifted, and the slot is that position. Because the ordering does
+    not depend on which categories are selected, a category keeps its colour
+    however the owner narrows the chart.
+
+    Slots repeat every fifth rank, so a filter can still surface two
+    categories that want the same one — Dating at rank 3 and Rent at rank 8
+    drew identically on the owner's ledger. :func:`_resolve_slot_collisions`
+    settles that among the categories actually on screen; this map is the
+    preference it starts from.
+
+    A digest of the name would key colour to identity outright, but hashing
+    five categories into five slots leaves them all distinct only about 4% of
+    the time, so a filtered chart would collide far more often than a rank
+    does.
+    """
+    return {
+        label: index % CHART_COLOR_SLOTS for index, label in enumerate(labels)
+    }
+
+
+def _resolve_slot_collisions(
+    visible: list[str], preferred: dict[str, int]
+) -> dict[str, int]:
+    """Give every visible category its own slot, moving as few as possible.
+
+    Two categories in the same colour makes the legend a lie, so uniqueness
+    among what is drawn has to win. The cost is paid by whichever of a
+    colliding pair sits deeper in the stable ordering: ``visible`` arrives in
+    that order, so the category that owns the slot keeps it and the intruder
+    walks to the next free one. The reader tracking the bigger category — the
+    likelier one — never sees it move.
+
+    Nothing moves in the default view, where the top five already hold the
+    five slots.
+    """
+    taken: set[int] = set()
+    out: dict[str, int] = {}
+    for label in visible:
+        want = preferred.get(label, 0) % CHART_COLOR_SLOTS
+        for step in range(CHART_COLOR_SLOTS):
+            slot = (want + step) % CHART_COLOR_SLOTS
+            if slot not in taken:
+                taken.add(slot)
+                out[label] = slot
+                break
+        else:  # pragma: no cover - CHART_TOP_N == CHART_COLOR_SLOTS
+            out[label] = want
+    return out
 
 
 def _drill_url(
@@ -511,15 +604,28 @@ def build_chart(
     by_cat: dict[str, dict[str, Decimal]] = defaultdict(
         lambda: defaultdict(lambda: Decimal("0"))
     )
+    # The same accumulation with the *category* filter lifted. Only the colour
+    # assignment reads it: a category's slot has to be decided on a basis the
+    # category filter cannot move, or deselecting one category repaints the
+    # rest. Every other part of the filter still applies, so the basis follows
+    # the range, kind, accounts and currencies on screen.
+    by_cat_unfiltered: dict[str, dict[str, Decimal]] = defaultdict(
+        lambda: defaultdict(lambda: Decimal("0"))
+    )
     cat_first_seen: dict[str, str | None] = {}
     fallback_per_month: dict[str, Decimal] = {m: Decimal("0") for m in months}
 
+    palette_filter = f.model_copy(update={"categories": []})
     for r in report.rows:
-        if not _row_matches_filter(r, f, kinds=kinds):
+        if not _row_matches_filter(r, palette_filter, kinds=kinds):
             continue
         key = _category_key(r.category_name)
         cat_first_seen.setdefault(key, r.category_name)
         total, fallback = _signed_total(r, f.kind)
+        by_cat_unfiltered[key][r.month] += total
+
+        if not _row_matches_filter(r, f, kinds=kinds):
+            continue
         by_cat[key][r.month] += total
         if r.month in fallback_per_month:
             fallback_per_month[r.month] += abs(fallback)
@@ -533,25 +639,65 @@ def build_chart(
     head = ranked[:CHART_TOP_N]
     tail = ranked[CHART_TOP_N:]
 
-    series: list[MonthlyChartSeries] = []
-    for key, by_month in head:
-        label = _category_label(cat_first_seen[key])
-        values = [by_month.get(m, Decimal("0")) for m in months]
-        series.append(MonthlyChartSeries(category=label, values=values))
+    # Slots are decided on the unfiltered ranking, so a category keeps its
+    # colour whichever of its neighbours the owner deselects.
+    palette_ranked = sorted(
+        by_cat_unfiltered.items(),
+        key=lambda kv: abs(sum(kv[1].values(), Decimal("0"))),
+        reverse=True,
+    )
+    palette_labels = [_category_label(cat_first_seen[key]) for key, _ in palette_ranked]
+    preferred = _assign_color_slots(palette_labels)
+    stable_rank = {label: i for i, label in enumerate(palette_labels)}
 
+    head_labels = [_category_label(cat_first_seen[key]) for key, _ in head]
+    # Settle collisions in the stable order, not the filtered one: the
+    # category that owns a slot keeps it whoever else is on screen.
+    slots = _resolve_slot_collisions(
+        sorted(head_labels, key=lambda label: stable_rank.get(label, len(stable_rank))),
+        preferred,
+    )
+
+    series: list[MonthlyChartSeries] = []
+    for (key, by_month), label in zip(head, head_labels):
+        values = [by_month.get(m, Decimal("0")) for m in months]
+        series.append(
+            MonthlyChartSeries(
+                category=label, values=values, color_slot=slots[label]
+            )
+        )
+
+    other_members: list[MonthlyChartSeries] = []
     if tail:
         other_values: list[Decimal] = []
         for m in months:
             other_values.append(
                 sum((by_month.get(m, Decimal("0")) for _, by_month in tail), Decimal("0"))
             )
-        series.append(MonthlyChartSeries(category="Other", values=other_values))
+        series.append(
+            MonthlyChartSeries(
+                category="Other",
+                values=other_values,
+                color_slot=OTHER_COLOR_SLOT,
+            )
+        )
+        # Ranked already — ``tail`` is the far end of the same sort. Every
+        # member shares Other's neutral: they are drawn as one block.
+        for key, by_month in tail:
+            other_members.append(
+                MonthlyChartSeries(
+                    category=_category_label(cat_first_seen[key]),
+                    values=[by_month.get(m, Decimal("0")) for m in months],
+                    color_slot=OTHER_COLOR_SLOT,
+                )
+            )
 
     return MonthlyChart(
         months=months,
         series=series,
         fallback_per_month=[fallback_per_month[m] for m in months],
         filter=f,
+        other_members=other_members,
     )
 
 
