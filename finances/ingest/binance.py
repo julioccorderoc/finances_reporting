@@ -1004,15 +1004,27 @@ def capture_exchange_balances(
 
     def _record(account_id: int, rows: list[dict[str, Any]]) -> None:
         held = _held_currencies(conn, account_id)
+        reported: dict[str, Decimal] = {}
         for item in rows:
             asset = str(item.get("asset", "")).upper()
             if not asset or asset.startswith(_EARN_SHADOW_ASSET_PREFIX):
                 continue
-            total = (
+            reported[asset] = (
                 _coerce_decimal(item.get("free", "0"))
                 + _coerce_decimal(item.get("locked", "0"))
                 + _coerce_decimal(item.get("freeze", "0"))
             )
+
+        # An asset the exchange holds none of is simply absent from the
+        # response — it does not come back as zero. Against a position the
+        # ledger thinks it holds, that absence is a flat contradiction and
+        # the most important one there is, so it is recorded as the zero it
+        # means. Without this, Funding USDC (ledger 400.00, exchange
+        # nothing) produces no snapshot and no finding.
+        for asset in sorted(held - reported.keys()):
+            reported[asset] = Decimal(0)
+
+        for asset, total in reported.items():
             if total == 0 and asset not in held:
                 continue
             exchange_balances_repo.insert(

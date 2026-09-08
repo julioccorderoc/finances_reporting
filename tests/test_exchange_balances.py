@@ -406,6 +406,34 @@ class TestCaptureFromTheSdk:
         }
         assert assets == {"USDT"}
 
+    def test_a_position_the_exchange_omits_is_recorded_as_zero(
+        self, seeded_db: sqlite3.Connection, client
+    ):
+        """The exchange lists nothing for an asset it holds none of. That
+        is not silence — against a ledger that thinks it holds 400 USDC it
+        is a flat contradiction, and the most important one there is. On
+        the live account this is exactly Funding USDC: ledger 400.00,
+        exchange nothing at all."""
+        _txn(
+            seeded_db,
+            account="Binance Funding",
+            amount="400",
+            currency="USDC",
+            occurred_at=datetime(2026, 8, 22, tzinfo=UTC),
+            source_ref="earn-redeem:989421227:to",
+        )
+        client.funding_wallet.return_value = [
+            {"asset": "USDT", "free": "272.55998864", "locked": "0", "freeze": "0"}
+        ]
+        from finances.ingest.binance import capture_exchange_balances
+
+        capture_exchange_balances(seeded_db, client, captured_at=CAPTURED_AT)
+
+        latest = balances_repo.latest_per_position(seeded_db)
+        funding = _account_id(seeded_db, "Binance Funding")
+        assert latest[(funding, "USDC")].balance == Decimal("0")
+        assert _finding(seeded_db, "position_disagrees_with_exchange") is not None
+
     def test_an_sdk_failure_is_reported_not_raised(
         self, seeded_db: sqlite3.Connection, client
     ):
