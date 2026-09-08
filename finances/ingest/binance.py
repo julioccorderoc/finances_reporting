@@ -159,7 +159,10 @@ class RawBinanceP2pRow(_RawBase):
     def _dec(cls, v: Any) -> Decimal:
         return _coerce_decimal(v)
 
-    def to_transaction(self, *, spot_account_id: int) -> Transaction:
+    def to_transaction(self, *, funding_account_id: int) -> Transaction:
+        # Funding, not Spot (ADR-024). Binance settles C2C/P2P in the
+        # Funding wallet; booking it against Spot left that wallet holding
+        # -2,017 USDT and Funding holding money nothing ever spent.
         if self.tradeType == "SELL":
             kind = TransactionKind.EXPENSE
             amount = -self.amount
@@ -172,7 +175,7 @@ class RawBinanceP2pRow(_RawBase):
             f"(order {self.orderNumber})"
         )
         return Transaction(
-            account_id=spot_account_id,
+            account_id=funding_account_id,
             occurred_at=_from_ms(self.createTime),
             kind=kind,
             amount=amount,
@@ -380,7 +383,11 @@ class RawBinancePayRow(_RawBase):
     def _dec(cls, v: Any) -> Decimal:
         return _coerce_decimal(v)
 
-    def to_transaction(self, *, spot_account_id: int) -> Transaction:
+    def to_transaction(self, *, funding_account_id: int) -> Transaction:
+        # Funding, not Spot (ADR-024): Binance Pay spends the Funding
+        # wallet. The backfill had already placed five of ten legacy Pay
+        # rows there, which is why the twin guard never keyed on account.
+        #
         # Binance Pay's transaction history returns a *signed* ``amount``:
         # positive = money in (income), negative = money out (expense). Trust
         # the sign — not ``orderType``. A C2C *send* carries a negative amount
@@ -393,7 +400,7 @@ class RawBinancePayRow(_RawBase):
             kind = TransactionKind.INCOME
             direction = "incoming"
         return Transaction(
-            account_id=spot_account_id,
+            account_id=funding_account_id,
             occurred_at=_from_ms(self.transactionTime),
             kind=kind,
             amount=self.amount,
@@ -598,7 +605,7 @@ def _ingest_p2p(
     *,
     start_ms: int,
     end_ms: int,
-    spot_id: int,
+    funding_id: int,
     stats: dict[str, int],
     errors: list[str],
 ) -> None:
@@ -618,7 +625,7 @@ def _ingest_p2p(
                 errors.append(f"p2p {trade_type}: {exc}")
                 continue
             result = transactions_repo.upsert_by_source_ref(
-                conn, row.to_transaction(spot_account_id=spot_id)
+                conn, row.to_transaction(funding_account_id=funding_id)
             )
             _tally(stats, result)
 
@@ -879,7 +886,7 @@ def _ingest_pay(
     *,
     start_ms: int,
     end_ms: int,
-    spot_id: int,
+    funding_id: int,
     twin_account_ids: list[int],
     stats: dict[str, int],
     errors: list[str],
@@ -903,7 +910,7 @@ def _ingest_pay(
         except Exception as exc:  # noqa: BLE001
             errors.append(f"pay: {exc}")
             continue
-        txn = row.to_transaction(spot_account_id=spot_id)
+        txn = row.to_transaction(funding_account_id=funding_id)
         if _pay_twin_exists(conn, txn, account_ids=twin_account_ids):
             stats["rows_skipped_pay_twin"] += 1
             continue
@@ -1066,6 +1073,7 @@ def sync_binance(
         errors: list[str] = []
 
         spot_id = account_ids[_SPOT_ACCOUNT_NAME]
+        funding_id = account_ids[_FUNDING_ACCOUNT_NAME]
         earn_id = account_ids[_EARN_ACCOUNT_NAME]
 
         conn.execute("BEGIN")
@@ -1081,7 +1089,7 @@ def sync_binance(
                 )
                 _ingest_p2p(
                     conn, client, start_ms=chunk_start, end_ms=chunk_end,
-                    spot_id=spot_id, stats=stats, errors=errors,
+                    funding_id=funding_id, stats=stats, errors=errors,
                 )
                 _ingest_converts(
                     conn, client, start_ms=chunk_start, end_ms=chunk_end,
@@ -1102,7 +1110,7 @@ def sync_binance(
                 )
                 _ingest_pay(
                     conn, client, start_ms=chunk_start, end_ms=chunk_end,
-                    spot_id=spot_id,
+                    funding_id=funding_id,
                     twin_account_ids=sorted(account_ids.values()),
                     stats=stats, errors=errors,
                 )

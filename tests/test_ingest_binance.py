@@ -154,7 +154,7 @@ def test_p2p_sell_row_emits_expense_with_user_rate_and_remark() -> None:
         fiat="VES",
         createTime=1_700_000_000_000,
     )
-    txn = row.to_transaction(spot_account_id=1)
+    txn = row.to_transaction(funding_account_id=1)
     assert txn.kind == TransactionKind.EXPENSE
     assert txn.amount == Decimal("-10.00")
     assert txn.currency == "USDT"
@@ -174,7 +174,7 @@ def test_p2p_buy_row_emits_income() -> None:
         fiat="VES",
         createTime=1_700_000_000_000,
     )
-    txn = row.to_transaction(spot_account_id=1)
+    txn = row.to_transaction(funding_account_id=1)
     assert txn.kind == TransactionKind.INCOME
     assert txn.amount == Decimal("10.00")
 
@@ -308,7 +308,7 @@ def test_pay_row_positive_amount_is_income() -> None:
         currency="USDT",
         transactionTime=1_700_000_000_000,
     )
-    txn = row.to_transaction(spot_account_id=1)
+    txn = row.to_transaction(funding_account_id=1)
     assert txn.kind == TransactionKind.INCOME
     assert txn.amount == Decimal("5.00")
     assert txn.source_ref == "pay:PAY-1"
@@ -327,7 +327,7 @@ def test_pay_row_negative_amount_is_expense() -> None:
         currency="USDT",
         transactionTime=1_700_000_000_000,
     )
-    txn = row.to_transaction(spot_account_id=1)
+    txn = row.to_transaction(funding_account_id=1)
     assert txn.kind == TransactionKind.EXPENSE
     assert txn.amount == Decimal("-5.00")
     assert "(outgoing)" in txn.description

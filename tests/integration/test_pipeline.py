@@ -72,8 +72,10 @@ _PIPELINE_BUDGET_SECONDS = 30.0
 # surface as a mismatch here.
 _EXPECTED_BALANCES: dict[str, Decimal] = {
     "Provincial Bolivares": Decimal("513000.00"),  # VES: 500k salary - 1.2k - 2k - 5.5k - 0.8k + 15k + 7.5k
-    "Binance Spot": Decimal("20.00"),              # USDT
-    "Binance Funding": Decimal("30.00"),           # USDT
+    # ADR-024 moved P2P off Spot: the two fixture SELLs (-50, -100) now
+    # settle in Funding, which is where Binance funds a C2C trade from.
+    "Binance Spot": Decimal("170.00"),             # USDT
+    "Binance Funding": Decimal("-120.00"),         # USDT
     "Binance Earn": Decimal("0.25"),               # USDT (rewards only; principal tracked on earn_positions)
     "Cash USD": Decimal("0.00"),                   # USD — no cash fixture
 }
