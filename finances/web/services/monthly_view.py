@@ -7,7 +7,9 @@ this module only re-shapes them into:
 
 * :class:`MonthlyPivot` — category × month grid for the desktop view.
 * :class:`MonthlyChart` — top-5 + Other stacked-bar series, plus a
-  per-month BCV fallback shadow series.
+  per-month BCV fallback shadow series. A series is a *group* for grouped
+  categories and a *category* for ungrouped ones (ADR-023); the pivot and
+  the mobile view stay per-category on purpose.
 * :class:`MonthlyMobile` — single-month category list for the mobile view.
 
 The DTOs are Pydantic v2 (rule-009) so FastAPI can use them as
@@ -28,6 +30,7 @@ from urllib.parse import urlencode
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from finances.db.repos import categories as categories_repo
 from finances.reports import monthly as monthly_report
 from finances.web.services.transactions_query import UNCATEGORIZED
 
@@ -40,15 +43,17 @@ from finances.web.services.transactions_query import UNCATEGORIZED
 #: own (smaller) cap below — the two are intentionally independent.
 PIVOT_TOP_N: int = 25
 
-#: Cap chart series to top 5 categories + 1 "Other" bucket.
+#: Cap chart series to top 5 + 1 "Other" bucket.
 #:
 #: This is not a free knob. The palette holds exactly five entity hues
 #: (``--series-1``..``--series-5`` in signal.css) because six could not be
 #: found that clear the colour-separation floors on every pair. Raising the
-#: cap without adding validated hues means two categories drawn in the same
-#: colour, which is worse than folding one of them into Other. The category
-#: filter is the way into the tail; ``MonthlyChart.other_members`` is the way
-#: to read it without leaving the chart.
+#: cap without adding validated hues means two series drawn in the same
+#: colour, which is worse than folding one of them into Other. What competes
+#: for the slots is a *series* — a group or an ungrouped category (ADR-023),
+#: which is how the owner's fixed household costs became visible without a
+#: sixth hue. The category filter is the way into the tail; a series'
+#: ``members`` is the way to read it without leaving the chart.
 CHART_TOP_N: int = 5
 
 #: Number of entity hues in the categorical palette.
@@ -155,6 +160,10 @@ class MonthlyPivot(BaseModel):
 class MonthlyChartSeries(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    #: The series' label: a group, an ungrouped category, or ``"Other"``.
+    #: A series is a group for grouped categories and a category for
+    #: ungrouped ones (ADR-023); the field keeps its original name because
+    #: every consumer reads it as "the thing drawn".
     category: str
     values: list[Decimal]
     #: Palette slot, 0-based, or ``OTHER_COLOR_SLOT`` for the remainder.
@@ -162,6 +171,16 @@ class MonthlyChartSeries(BaseModel):
     #: one category does not repaint the rest — see
     #: :func:`_assign_color_slots`.
     color_slot: int = OTHER_COLOR_SLOT
+    #: What is inside this series, largest first; empty when nothing is. A
+    #: group fills it with its categories; "Other" fills it with the series
+    #: that missed the cap. One mechanism for the overlay to open a block
+    #: (ADR-023 §2.4) — on a real ledger the block that most needs opening
+    #: has been the largest one on the chart. Members carry their parent's
+    #: slot: they are the contents of one block, not blocks of their own.
+    members: list[MonthlyChartSeries] = Field(default_factory=list)
+    #: One /transactions URL per month, aligned with ``values``, carrying
+    #: one ``categories=`` parameter per category the series stands for.
+    drill_urls: list[str] = Field(default_factory=list)
 
 
 class MonthlyChart(BaseModel):
@@ -171,12 +190,6 @@ class MonthlyChart(BaseModel):
     series: list[MonthlyChartSeries]
     fallback_per_month: list[Decimal]
     filter: MonthlyFilter
-    #: The categories folded into "Other", largest first, with their own
-    #: per-month values. Empty when nothing was folded. The hover overlay
-    #: opens this: on a real ledger Other is routinely the largest block on
-    #: the chart, and a bucket that big has to be readable without leaving
-    #: the page.
-    other_members: list[MonthlyChartSeries] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -435,12 +448,40 @@ def _resolve_slot_collisions(
 def _drill_url(
     *, month: str, category: str | None, kind: MonthlyKind
 ) -> str:
-    """Build the /transactions drill URL for one cell."""
+    """Build the /transactions drill URL for one pivot or mobile cell.
+
+    ``None`` keeps its long-standing meaning here — no category parameter,
+    the month as a whole. The chart's Uncategorized series drills with the
+    sentinel instead; see :func:`_filter_value`.
+    """
+    return _series_drill_url(
+        month=month,
+        categories=[] if category is None else [category],
+        kind=kind,
+    )
+
+
+def _filter_value(category_name: str | None) -> str:
+    """The ``categories=`` value that selects a category's rows on
+    /transactions: its name, or the sentinel for "no category"."""
+    return UNCATEGORIZED if category_name is None else category_name
+
+
+def _series_drill_url(
+    *, month: str, categories: Iterable[str], kind: MonthlyKind
+) -> str:
+    """Build the /transactions drill URL for one month of one chart series.
+
+    One ``categories=`` parameter per category the series stands for — a
+    group's members, a category itself, everything in Other's tail — which
+    the repeated-parameter contract on /transactions already accepts
+    (ADR-023 §2.5).
+    """
     params: list[tuple[str, str]] = [
         ("date_from", _month_first_day(month)),
         ("date_to", _month_last_day(month)),
     ]
-    if category is not None:
+    for category in categories:
         params.append(("categories", category))
     # NET cells naturally span both kinds; default the link to expense
     # so the user lands on the most useful drill, but include a hint.
@@ -588,116 +629,196 @@ def build_pivot(
 # ---------------------------------------------------------------------------
 
 
+# A chart series is keyed by what it stands for: ``("group", name)`` for
+# the categories that roll up into a group, ``("category", category_key)``
+# for the ones that stand alone. Keying on the label alone would let a
+# group and a category with the same name silently merge.
+_SeriesKey = tuple[str, str]
+_GROUP = "group"
+_CATEGORY = "category"
+
+_MonthTotals = dict[str, Decimal]
+
+
+def _group_by_category_id(conn: sqlite3.Connection) -> dict[int, str]:
+    """``category_id -> group_name`` for every grouped category (ADR-023).
+
+    Read by id, not name: the report rows carry both, and a name is only
+    unique within a kind.
+    """
+    return {
+        c.id: c.group_name
+        for c in categories_repo.list_all(conn, include_inactive=True)
+        if c.id is not None and c.group_name is not None
+    }
+
+
+def _series_key_for(
+    row: monthly_report.MonthlyRow, group_of: dict[int, str]
+) -> _SeriesKey:
+    group = group_of.get(row.category_id) if row.category_id is not None else None
+    if group is not None:
+        return (_GROUP, group)
+    return (_CATEGORY, _category_key(row.category_name))
+
+
+def _magnitude(by_month: _MonthTotals) -> Decimal:
+    return abs(sum(by_month.values(), Decimal("0")))
+
+
 def build_chart(
     conn: sqlite3.Connection,
     f: MonthlyFilter,
     *,
     today: date | None = None,
 ) -> MonthlyChart:
-    """Top-5 + Other stacked-bar series + per-month BCV fallback shadow."""
+    """Top-5 + Other stacked-bar series + per-month BCV fallback shadow.
+
+    A series is a **group** for grouped categories and a **category** for
+    ungrouped ones (ADR-023 §2.3). Groups and ungrouped categories rank
+    together, and the cap and the Other remainder apply to that list. The
+    category filter still filters *categories* (§2.5): selecting Rent alone
+    draws a Home series containing Rent, so the chart never changes shape
+    because a filter is on.
+    """
     since, until = resolve_month_range(f, today=today, conn=conn)
     report = monthly_report.build_report(conn, since=since, until=until)
     months = _months_between(since, until)
     kinds = _kinds_for(f.kind)
+    group_of = _group_by_category_id(conn)
 
-    # category_key -> month -> total_usd  (signed per kind for NET).
-    by_cat: dict[str, dict[str, Decimal]] = defaultdict(
+    # series -> month -> total_usd  (signed per kind for NET).
+    totals: dict[_SeriesKey, _MonthTotals] = defaultdict(
         lambda: defaultdict(lambda: Decimal("0"))
     )
+    # series -> category_key -> month -> total_usd. Every series has at least
+    # one category under it; a group has several, and those are its members.
+    member_totals: dict[_SeriesKey, dict[str, _MonthTotals]] = defaultdict(
+        lambda: defaultdict(lambda: defaultdict(lambda: Decimal("0")))
+    )
     # The same accumulation with the *category* filter lifted. Only the colour
-    # assignment reads it: a category's slot has to be decided on a basis the
+    # assignment reads it: a series' slot has to be decided on a basis the
     # category filter cannot move, or deselecting one category repaints the
     # rest. Every other part of the filter still applies, so the basis follows
     # the range, kind, accounts and currencies on screen.
-    by_cat_unfiltered: dict[str, dict[str, Decimal]] = defaultdict(
+    totals_unfiltered: dict[_SeriesKey, _MonthTotals] = defaultdict(
         lambda: defaultdict(lambda: Decimal("0"))
     )
-    cat_first_seen: dict[str, str | None] = {}
+    labels: dict[_SeriesKey, str] = {}
+    category_names: dict[str, str | None] = {}
     fallback_per_month: dict[str, Decimal] = {m: Decimal("0") for m in months}
 
     palette_filter = f.model_copy(update={"categories": []})
     for r in report.rows:
         if not _row_matches_filter(r, palette_filter, kinds=kinds):
             continue
-        key = _category_key(r.category_name)
-        cat_first_seen.setdefault(key, r.category_name)
+        key = _series_key_for(r, group_of)
+        labels.setdefault(
+            key, key[1] if key[0] == _GROUP else _category_label(r.category_name)
+        )
+        cat_key = _category_key(r.category_name)
+        category_names.setdefault(cat_key, r.category_name)
         total, fallback = _signed_total(r, f.kind)
-        by_cat_unfiltered[key][r.month] += total
+        totals_unfiltered[key][r.month] += total
 
         if not _row_matches_filter(r, f, kinds=kinds):
             continue
-        by_cat[key][r.month] += total
+        totals[key][r.month] += total
+        member_totals[key][cat_key][r.month] += total
         if r.month in fallback_per_month:
             fallback_per_month[r.month] += abs(fallback)
 
-    # Rank by absolute row sum and slice top N.
-    ranked = sorted(
-        by_cat.items(),
-        key=lambda kv: abs(sum(kv[1].values(), Decimal("0"))),
-        reverse=True,
-    )
+    # Rank by absolute window sum and slice top N.
+    ranked = sorted(totals.items(), key=lambda kv: _magnitude(kv[1]), reverse=True)
     head = ranked[:CHART_TOP_N]
     tail = ranked[CHART_TOP_N:]
 
-    # Slots are decided on the unfiltered ranking, so a category keeps its
-    # colour whichever of its neighbours the owner deselects.
+    # Slots are decided on the unfiltered ranking of series, so a group or
+    # category keeps its colour whichever of its neighbours — or its own
+    # members — the owner deselects.
     palette_ranked = sorted(
-        by_cat_unfiltered.items(),
-        key=lambda kv: abs(sum(kv[1].values(), Decimal("0"))),
-        reverse=True,
+        totals_unfiltered.items(), key=lambda kv: _magnitude(kv[1]), reverse=True
     )
-    palette_labels = [_category_label(cat_first_seen[key]) for key, _ in palette_ranked]
+    palette_labels = [labels[key] for key, _ in palette_ranked]
     preferred = _assign_color_slots(palette_labels)
     stable_rank = {label: i for i, label in enumerate(palette_labels)}
 
-    head_labels = [_category_label(cat_first_seen[key]) for key, _ in head]
+    head_labels = [labels[key] for key, _ in head]
     # Settle collisions in the stable order, not the filtered one: the
-    # category that owns a slot keeps it whoever else is on screen.
+    # series that owns a slot keeps it whoever else is on screen.
     slots = _resolve_slot_collisions(
         sorted(head_labels, key=lambda label: stable_rank.get(label, len(stable_rank))),
         preferred,
     )
 
-    series: list[MonthlyChartSeries] = []
-    for (key, by_month), label in zip(head, head_labels):
-        values = [by_month.get(m, Decimal("0")) for m in months]
-        series.append(
-            MonthlyChartSeries(
-                category=label, values=values, color_slot=slots[label]
-            )
+    def values_for(by_month: _MonthTotals) -> list[Decimal]:
+        return [by_month.get(m, Decimal("0")) for m in months]
+
+    def selects_for(key: _SeriesKey) -> list[str]:
+        """The ``categories=`` values that pick this series' rows."""
+        return [_filter_value(category_names[cat_key]) for cat_key in member_totals[key]]
+
+    def drill_urls_for(selects: list[str]) -> list[str]:
+        return [
+            _series_drill_url(month=m, categories=selects, kind=f.kind) for m in months
+        ]
+
+    def series_for(key: _SeriesKey, by_month: _MonthTotals, slot: int) -> MonthlyChartSeries:
+        members: list[MonthlyChartSeries] = []
+        if key[0] == _GROUP:
+            # Largest first, in the group's own colour: the contents of one
+            # block, not blocks of their own.
+            for cat_key, cat_months in sorted(
+                member_totals[key].items(),
+                key=lambda kv: _magnitude(kv[1]),
+                reverse=True,
+            ):
+                name = category_names[cat_key]
+                members.append(
+                    MonthlyChartSeries(
+                        category=_category_label(name),
+                        values=values_for(cat_months),
+                        color_slot=slot,
+                        drill_urls=drill_urls_for([_filter_value(name)]),
+                    )
+                )
+        return MonthlyChartSeries(
+            category=labels[key],
+            values=values_for(by_month),
+            color_slot=slot,
+            members=members,
+            drill_urls=drill_urls_for(selects_for(key)),
         )
 
-    other_members: list[MonthlyChartSeries] = []
+    series: list[MonthlyChartSeries] = []
+    for key, by_month in head:
+        series.append(series_for(key, by_month, slots[labels[key]]))
+
     if tail:
-        other_values: list[Decimal] = []
-        for m in months:
-            other_values.append(
-                sum((by_month.get(m, Decimal("0")) for _, by_month in tail), Decimal("0"))
-            )
+        other_values = [
+            sum((by_month.get(m, Decimal("0")) for _, by_month in tail), Decimal("0"))
+            for m in months
+        ]
+        # Ranked already — ``tail`` is the far end of the same sort, so what
+        # missed the cap is a series: a small group folds in as itself,
+        # members and all. Every member shares Other's neutral.
         series.append(
             MonthlyChartSeries(
                 category="Other",
                 values=other_values,
                 color_slot=OTHER_COLOR_SLOT,
+                members=[series_for(key, by_month, OTHER_COLOR_SLOT) for key, by_month in tail],
+                drill_urls=drill_urls_for(
+                    [value for key, _ in tail for value in selects_for(key)]
+                ),
             )
         )
-        # Ranked already — ``tail`` is the far end of the same sort. Every
-        # member shares Other's neutral: they are drawn as one block.
-        for key, by_month in tail:
-            other_members.append(
-                MonthlyChartSeries(
-                    category=_category_label(cat_first_seen[key]),
-                    values=[by_month.get(m, Decimal("0")) for m in months],
-                    color_slot=OTHER_COLOR_SLOT,
-                )
-            )
 
     return MonthlyChart(
         months=months,
         series=series,
         fallback_per_month=[fallback_per_month[m] for m in months],
         filter=f,
-        other_members=other_members,
     )
 
 
