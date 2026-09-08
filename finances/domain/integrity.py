@@ -68,7 +68,7 @@ _REVERSAL_MARKER_PREDICATE = " OR ".join(
     for marker in REVERSAL_MARKERS
 )
 
-# The categories migration 027 placed in a group (ADR-023 §2.2), plus the
+# The categories migration 027 placed in a group (ADR-026 §2.2), plus the
 # one 028 stored as Other (§2.6 as amended), as (kind, name). Only the
 # members are listed: the group labels themselves are data the owner may
 # rename with an UPDATE (§2.7), so nothing here spells them.
@@ -722,7 +722,7 @@ CHECKS: tuple[IntegrityCheck, ...] = (
         name="category_group_unknown",
         severity=Severity.WARNING,
         description=(
-            "Categories carrying a group the seed never gave them (ADR-023). "
+            "Categories carrying a group the seed never gave them (ADR-026). "
             "The group is a plain string on the category row, so a renamed "
             "category keeps pointing at its old group and nothing structural "
             "notices; a category grouped by hand looks the same. The ids "
@@ -731,7 +731,7 @@ CHECKS: tuple[IntegrityCheck, ...] = (
             "confirmed as intended."
         ),
         # The group's own label is deliberately not checked: Home and Social
-        # are data the owner may rename with an UPDATE (ADR-023 §2.7), and a
+        # are data the owner may rename with an UPDATE (ADR-026 §2.7), and a
         # check that spelled them would turn that edit into a finding.
         sql=f"""
             SELECT id FROM categories

@@ -1,6 +1,6 @@
 """``categories.group_name`` crosses the repo boundary as a typed field.
 
-ADR-023 stores a category's group on the category row. rule-009 says the
+ADR-026 stores a category's group on the category row. rule-009 says the
 repo hands out Pydantic, never raw rows, so ``Category`` gains
 ``group_name`` and every read path carries it — a caller that got the
 column from one query and ``None`` from another would draw a category
@@ -18,7 +18,7 @@ from finances.domain.models import Category, TransactionKind
 
 
 def test_category_defaults_to_no_group() -> None:
-    """NULL is the majority case and not an error state (ADR-023 §2.1)."""
+    """NULL is the majority case and not an error state (ADR-026 §2.1)."""
     category = Category(kind=TransactionKind.EXPENSE, name="Anything")
     assert category.group_name is None
 

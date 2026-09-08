@@ -8,7 +8,7 @@ this module only re-shapes them into:
 * :class:`MonthlyPivot` — category × month grid for the desktop view.
 * :class:`MonthlyChart` — top-5 + Other stacked-bar series, plus a
   per-month BCV fallback shadow series. A series is a *group* for grouped
-  categories and a *category* for ungrouped ones (ADR-023); the pivot and
+  categories and a *category* for ungrouped ones (ADR-026); the pivot and
   the mobile view stay per-category on purpose.
 * :class:`MonthlyMobile` — single-month category list for the mobile view.
 
@@ -50,7 +50,7 @@ PIVOT_TOP_N: int = 25
 #: found that clear the colour-separation floors on every pair. Raising the
 #: cap without adding validated hues means two series drawn in the same
 #: colour, which is worse than folding one of them into Other. What competes
-#: for the slots is a *series* — a group or an ungrouped category (ADR-023),
+#: for the slots is a *series* — a group or an ungrouped category (ADR-026),
 #: which is how the owner's fixed household costs became visible without a
 #: sixth hue. The category filter is the way into the tail; a series'
 #: ``members`` is the way to read it without leaving the chart.
@@ -67,7 +67,7 @@ OTHER_COLOR_SLOT: int = -1
 
 #: The remainder's label. Stored as a category's ``group_name`` it is the
 #: instruction to fold that category into the remainder whatever its rank
-#: (ADR-023 §2.6 as amended 2026-09-08 — Lending). Not a group: it never
+#: (ADR-026 §2.6 as amended 2026-09-08 — Lending). Not a group: it never
 #: competes for a slot and never holds a palette rank. The remainder is
 #: still computed for everything else that misses the cap.
 OTHER_LABEL = "Other"
@@ -169,7 +169,7 @@ class MonthlyChartSeries(BaseModel):
 
     #: The series' label: a group, an ungrouped category, or ``"Other"``.
     #: A series is a group for grouped categories and a category for
-    #: ungrouped ones (ADR-023); the field keeps its original name because
+    #: ungrouped ones (ADR-026); the field keeps its original name because
     #: every consumer reads it as "the thing drawn".
     category: str
     values: list[Decimal]
@@ -181,7 +181,7 @@ class MonthlyChartSeries(BaseModel):
     #: What is inside this series, largest first; empty when nothing is. A
     #: group fills it with its categories; "Other" fills it with the series
     #: that missed the cap. One mechanism for the overlay to open a block
-    #: (ADR-023 §2.4) — on a real ledger the block that most needs opening
+    #: (ADR-026 §2.4) — on a real ledger the block that most needs opening
     #: has been the largest one on the chart. Members carry their parent's
     #: slot: they are the contents of one block, not blocks of their own.
     members: list[MonthlyChartSeries] = Field(default_factory=list)
@@ -482,7 +482,7 @@ def _series_drill_url(
     One ``categories=`` parameter per category the series stands for — a
     group's members, a category itself, everything in Other's tail — which
     the repeated-parameter contract on /transactions already accepts
-    (ADR-023 §2.5).
+    (ADR-026 §2.5).
     """
     params: list[tuple[str, str]] = [
         ("date_from", _month_first_day(month)),
@@ -648,7 +648,7 @@ _MonthTotals = dict[str, Decimal]
 
 
 def _group_by_category_id(conn: sqlite3.Connection) -> dict[int, str]:
-    """``category_id -> group_name`` for every grouped category (ADR-023).
+    """``category_id -> group_name`` for every grouped category (ADR-026).
 
     Read by id, not name: the report rows carry both, and a name is only
     unique within a kind.
@@ -682,7 +682,7 @@ def build_chart(
     """Top-5 + Other stacked-bar series + per-month BCV fallback shadow.
 
     A series is a **group** for grouped categories and a **category** for
-    ungrouped ones (ADR-023 §2.3). Groups and ungrouped categories rank
+    ungrouped ones (ADR-026 §2.3). Groups and ungrouped categories rank
     together, and the cap and the Other remainder apply to that list. The
     category filter still filters *categories* (§2.5): selecting Rent alone
     draws a Home series containing Rent, so the chart never changes shape

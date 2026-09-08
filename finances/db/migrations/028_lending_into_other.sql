@@ -1,6 +1,6 @@
 -- 028_lending_into_other.sql
 --
--- Lending is folded into the chart's Other, by data (ADR-023 §2.6 as
+-- Lending is folded into the chart's Other, by data (ADR-026 §2.6 as
 -- amended 2026-09-08).
 --
 -- The owner's request was "lending can go into others". Migration 027

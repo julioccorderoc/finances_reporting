@@ -1,6 +1,6 @@
-"""Migration 028 — Lending is folded into Other, by data (ADR-023 amended).
+"""Migration 028 — Lending is folded into Other, by data (ADR-026 amended).
 
-The owner asked for "lending can go into others". ADR-023 honoured that by
+The owner asked for "lending can go into others". ADR-026 honoured that by
 leaving Lending ungrouped, expecting it to miss the top five on its own.
 On the real ledger it did not: the chart ranks series by their total over
 the whole window, and one big loan in one month kept Lending in the top

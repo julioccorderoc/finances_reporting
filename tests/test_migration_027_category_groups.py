@@ -1,4 +1,4 @@
-"""Migration 027 — categories roll up into groups (ADR-023).
+"""Migration 027 — categories roll up into groups (ADR-026).
 
 The /monthly chart draws the top five categories and folds the rest into
 "Other". On the owner's ledger Other was the largest block in four of six
@@ -11,7 +11,7 @@ category, not a table of its own, and a transaction still carries exactly
 one ``category_id`` — nothing about ingest, categorization or triage learns
 that groups exist.
 
-The mapping is the owner's (ADR-023 §2.2), seeded once here and owned by
+The mapping is the owner's (ADR-026 §2.2), seeded once here and owned by
 the rows afterwards (§2.7): ``Home`` and ``Social`` are data, and the
 owner may rename them with an UPDATE.
 """
@@ -86,7 +86,7 @@ def test_the_long_tail_stays_ungrouped(
     migrated_db: sqlite3.Connection, name: str
 ) -> None:
     """The tail falls into the computed Other on its own; nothing is
-    written down for it (ADR-023 §2.6)."""
+    written down for it (ADR-026 §2.6)."""
     assert _group_of(migrated_db, name) is None
 
 
@@ -108,7 +108,7 @@ def test_only_expense_categories_carry_a_group(
 def test_the_seed_and_the_doctor_agree_on_what_is_grouped(
     migrated_db: sqlite3.Connection,
 ) -> None:
-    """The doctor's guard against a rename (ADR-023 §3) is only as good as
+    """The doctor's guard against a rename (ADR-026 §3) is only as good as
     its list of what the seed grouped — so that list is pinned to the seed
     here, and every member of it must be a category that exists."""
     assert set(_grouped(migrated_db)) == set(GROUPED_CATEGORIES)

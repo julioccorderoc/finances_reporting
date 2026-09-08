@@ -22,7 +22,7 @@ from the owner, one surface:
   the idiom rates_chart.html already established — ranked by size, and it can
   open "Other" because the tail that fed it is now on the wire.
 
-Since ADR-023 a series is a group or an ungrouped category, and the slot
+Since ADR-026 a series is a group or an ungrouped category, and the slot
 belongs to the *series*. The seeding helper below inserts fresh, ungrouped
 categories so each is its own series and the rank arithmetic these tests
 rely on stays exact whatever the seeded mapping says; the grouped cases
@@ -84,7 +84,7 @@ def _seed_categories(
     top-N slice is deterministic, which is what makes "is this slot stable
     under filtering" a question with one right answer. The categories are
     created here rather than taken from the taxonomy: a seeded one may
-    belong to a group (ADR-023), and a group is one series however many of
+    belong to a group (ADR-026), and a group is one series however many of
     its categories are in play, which would silently change the rank every
     assertion below counts on.
     """
@@ -274,7 +274,7 @@ def test_other_members_ride_along_with_the_chart(
 
     Other is routinely the largest block on the owner's real chart — the cap
     hides most of the story unless the hover can say what is in there. Since
-    ADR-023 §2.4 the tail is Other's ``members``: the same field a group
+    ADR-026 §2.4 the tail is Other's ``members``: the same field a group
     carries, so the overlay has one way to open a block.
     """
     from finances.web.services.monthly_view import (

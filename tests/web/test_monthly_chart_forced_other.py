@@ -1,6 +1,6 @@
 """A category stored as ``Other`` is folded into the remainder, always.
 
-ADR-023 §2.6 as amended 2026-09-08. The chart ranks series by their total
+ADR-026 §2.6 as amended 2026-09-08. The chart ranks series by their total
 over the window, so a category with one big month keeps a coloured slot
 for the whole window — which is how Lending held the fifth slot through
 six months while Health fell into Other, the opposite of what the owner

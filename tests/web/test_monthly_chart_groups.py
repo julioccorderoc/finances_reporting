@@ -1,4 +1,4 @@
-"""The /monthly chart draws groups (ADR-023).
+"""The /monthly chart draws groups (ADR-026).
 
 A series is now a **group** for grouped categories or a **category** for
 ungrouped ones. Groups and ungrouped categories rank together, and the
@@ -197,7 +197,7 @@ def test_other_lists_what_missed_the_cap_as_members(
 def test_the_chart_no_longer_carries_a_separate_other_members(
     web_db: sqlite3.Connection,
 ) -> None:
-    """Folded into ``members`` per ADR-023 §2.4 — one mechanism, not two."""
+    """Folded into ``members`` per ADR-026 §2.4 — one mechanism, not two."""
     assert "other_members" not in MonthlyChart.model_fields
 
 
@@ -220,7 +220,7 @@ def test_a_group_that_misses_the_cap_stays_a_group_inside_other(
 
 
 # ---------------------------------------------------------------------------
-# The category filter narrows a group; it never dissolves it (ADR-023 §2.5).
+# The category filter narrows a group; it never dissolves it (ADR-026 §2.5).
 # ---------------------------------------------------------------------------
 
 

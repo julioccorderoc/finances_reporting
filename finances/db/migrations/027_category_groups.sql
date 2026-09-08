@@ -1,6 +1,6 @@
 -- 027_category_groups.sql
 --
--- Categories roll up into groups (ADR-023).
+-- Categories roll up into groups (ADR-026).
 --
 -- The /monthly chart draws the top five categories and folds the rest into
 -- "Other". On the owner's ledger Other was the largest block in four of six
@@ -25,7 +25,7 @@
 --
 -- "Lending can go into others" is honoured by leaving it ungrouped, not by
 -- storing an `Other` group: Other stays what the chart computes when more
--- things are in play than there are slots (ADR-023 §2.6).
+-- things are in play than there are slots (ADR-026 §2.6).
 --
 -- The names `Home` and `Social` are data, not code (§2.7). This seed is the
 -- only place that spells them; the owner may rename them with an UPDATE and

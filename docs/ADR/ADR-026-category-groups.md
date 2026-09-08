@@ -1,4 +1,4 @@
-# ADR-023: Categories Roll Up Into Groups, and the Chart Reads Groups
+# ADR-026: Categories Roll Up Into Groups, and the Chart Reads Groups
 
 **Date:** 2026-09-07
 **Status:** Accepted 2026-09-07 — the owner confirmed the mapping and the

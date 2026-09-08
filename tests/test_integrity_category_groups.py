@@ -1,6 +1,6 @@
 """``finances doctor`` guards the category groups against a rename.
 
-ADR-023 stores a category's group as a plain string on the category row.
+ADR-026 stores a category's group as a plain string on the category row.
 That is the cheap choice, and its cost is named in the ADR (§3): a
 category can be renamed while ``group_name`` still points at the old
 label, and nothing structural will notice. The guard is a doctor check
@@ -62,7 +62,7 @@ def test_a_group_on_a_category_the_seed_never_grouped_is_reported(
 
 
 def test_a_renamed_category_is_reported(seeded_db: sqlite3.Connection) -> None:
-    """The rename ADR-023 §3 worries about: Rent becomes Housing, and the
+    """The rename ADR-026 §3 worries about: Rent becomes Housing, and the
     row still says Home. The seed never knew a Housing."""
     rent = _category_id(seeded_db, "Rent")
     seeded_db.execute("UPDATE categories SET name = 'Housing' WHERE id = ?", (rent,))

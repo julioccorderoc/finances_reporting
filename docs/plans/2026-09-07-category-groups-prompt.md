@@ -4,19 +4,19 @@ Paste the section below into a fresh session. It is self-contained; it
 assumes no memory of the session that wrote it.
 
 Decisions are settled in
-[ADR-023](../ADR/ADR-023-category-groups.md) (Accepted). Do not re-open them.
+[ADR-026](../ADR/ADR-026-category-groups.md) (Accepted). Do not re-open them.
 If you believe one is wrong, stop and say so before writing code.
 
 ---
 
 ## The task
 
-Implement ADR-023: categories roll up into groups, and the /monthly chart
+Implement ADR-026: categories roll up into groups, and the /monthly chart
 draws groups instead of raw categories.
 
 Read first, in this order:
 
-1. `docs/ADR/ADR-023-category-groups.md` — the decision, in full.
+1. `docs/ADR/ADR-026-category-groups.md` — the decision, in full.
 2. `finances/web/services/monthly_view.py` — `build_chart`, `_assign_color_slots`,
    `_resolve_slot_collisions`, `CHART_TOP_N`, `OTHER_COLOR_SLOT`.
 3. `finances/web/templates/partials/monthly_chart.html` — the payload block

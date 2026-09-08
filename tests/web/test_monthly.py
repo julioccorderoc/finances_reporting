@@ -418,7 +418,7 @@ def test_chart_series_top_5_plus_other(
 ) -> None:
     """7+ series → chart yields 6 (top 5 + Other).
 
-    A series is a group or an ungrouped category (ADR-023), so the seven
+    A series is a group or an ungrouped category (ADR-026), so the seven
     categories here are all ungrouped ones: Transport and Utilities would
     fold into one Home series, Lending is stored as Other (migration 028),
     and either way the cap would never be reached.
