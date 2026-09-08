@@ -23,7 +23,7 @@
    the plot floor (the bug triage's rate reading hit), and listed the
    month in stack order with no total and no shares. This one ranks the
    month by size, gives each row its share, and opens any series that has
-   members (ADR-023 §2.4): a group into its categories, "Other" into what
+   members (ADR-026 §2.4): a group into its categories, "Other" into what
    missed the cap. A series is a group or an ungrouped category; a click
    on a segment drills through the series' own URL for that month, one
    categories= parameter per member.
@@ -192,7 +192,7 @@
     rows.forEach(function (r) {
       html += row(r.color, r.name, r.value, pct(r.value, total));
       // Open the block in place: a group into its categories, Other into
-      // what missed the cap. Either is one series with members (ADR-023
+      // what missed the cap. Either is one series with members (ADR-026
       // §2.4), so there is one way to open a block, not two.
       var members = r.members.map(function (m) {
         return { name: m.category, value: Number(m.values[index]) };
