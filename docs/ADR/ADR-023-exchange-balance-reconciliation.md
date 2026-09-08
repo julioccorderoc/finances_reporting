@@ -1,7 +1,7 @@
 # ADR-023: The Ledger Reconciles Its Exchange Positions Against The Exchange
 
 **Date:** 2026-09-07
-**Status:** Proposed (awaiting owner)
+**Status:** Accepted (owner, 2026-09-08)
 **Related:** [ADR-003](./ADR-003-earn-positions-table.md) — the precedent this generalises; [ADR-018](./ADR-018-reconciliation-adjustments.md) — what to do with a difference once it is measured; [ADR-020](./ADR-020-opening-positions.md) — the other way a position gets closed
 **Rule:** [rule-003](../architecture/rules/rule-003-earn-position-source.md)
 

@@ -1,7 +1,7 @@
 # ADR-024: P2P Trades And Binance Pay Belong To The Funding Wallet
 
 **Date:** 2026-09-07
-**Status:** Proposed (awaiting owner)
+**Status:** Accepted (owner, 2026-09-08)
 **Related:** [ADR-023](./ADR-023-exchange-balance-reconciliation.md) — the measurement that made this visible and that verifies the repair; [ADR-020](./ADR-020-opening-positions.md) — what must be restated afterwards; [ADR-010](./ADR-010-idempotent-reingestion.md) — why the repair does not touch `source_ref`
 **Rule:** [rule-003](../architecture/rules/rule-003-earn-position-source.md)
 

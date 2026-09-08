@@ -1,7 +1,7 @@
 # ADR-025: A Conversion Is Booked To The Wallet Binance Says It Drew From
 
 **Date:** 2026-09-07
-**Status:** Proposed (awaiting owner)
+**Status:** Accepted (owner, 2026-09-08)
 **Related:** [ADR-024](./ADR-024-p2p-and-pay-debit-funding.md) — the same defect class, where no field exists to read; [ADR-017](./ADR-017-same-account-conversions.md) — the conversion-as-transfer shape this widens; [ADR-023](./ADR-023-exchange-balance-reconciliation.md) — what found it and what will judge the answer
 **Rule:** [rule-002](../architecture/rules/rule-002-transfers-double-entry.md)
 
@@ -16,7 +16,7 @@ After ADR-024 the two USDT positions agree with Binance to the cent. One differe
 
 Four hundred dollars in one wallet in the ledger and in neither at Binance. The rows say what happened, one minute apart:
 
-```
+```text
 2026-08-22 19:32  earn-redeem:989421227  +400 USDC   -> Funding   (destAccount=FUNDING)
 2026-08-22 19:33  convert:2342399485914713482  -400.191772 USDC  -> Spot
 ```
@@ -44,7 +44,9 @@ This is ADR-024's defect again, with one difference that matters: there, no fiel
 
 A `SPOT_FUNDING` conversion is therefore a **cross-account** transfer pair. That is not a new shape: rule-002 defines a transfer as movement between two `(account, currency)` positions, and ADR-017 already widened "two accounts" to include two positions on one. Value genuinely left Funding and arrived in Spot.
 
-No repair command ships with this. `upsert_by_source_ref` treats `account_id` as statement-sourced, and the default 35-day lookback still covers 2026-08-22, so the next ordinary `finances ingest binance` moves the leg itself. A deep `--since` re-sync is explicitly not wanted: one duplicated 105 events on 2026-08-08.
+No repair command ships with this. `upsert_by_source_ref` treats `account_id` as statement-sourced, so re-ingesting the conversion moves the leg — but it has to be asked for. **The 35-day lookback is a fallback, not a floor**: `_resolve_time_window` starts from `import_state.last_synced_at` whenever there is one, so an ordinary sync covers only the days since the last one and will never revisit 2026-08-22. This ADR first claimed otherwise; the ordinary sync was run, reported `updated=0`, and the leg did not move.
+
+The repair is therefore an explicit `finances ingest binance --since 2026-08-20`, which reported `inserted=0 updated=93` and left the row count unchanged at 3,046. The duplication hazard of a deep `--since` — 105 events on 2026-08-08 — needs legacy `:hash:` source_refs to collide with native ids, and there are none in this window; that was checked before running, not after.
 
 ## 3. Alternatives considered
 
@@ -55,6 +57,8 @@ No repair command ships with this. `upsert_by_source_ref` treats `account_id` as
 
 ## 4. Consequences
 
-- The USDC difference closes to dust: Spot −0.19 against 0.23, Funding −0.19 against 0.00, both inside `EXCHANGE_BALANCE_TOLERANCE`.
+- The USDC difference closed to dust, as predicted: Spot −0.19 against 0.27, Funding −0.19 against 0.00, both inside `EXCHANGE_BALANCE_TOLERANCE`, and `position_disagrees_with_exchange` went quiet.
+- That dust is this ADR's own approximation, and it is worth naming: the conversion drew 400.191772 USDC when Funding held exactly 400.00, so 0.191772 of it came from Spot and is booked to Funding anyway. `negative_asset_balance` has no dust floor and reported both positions at −0.19. The two USDC opening positions were restated against the custodian figure (Spot 5.58, Funding 0.191772), which is ADR-018 §2.3's protocol carried forward and the same step ADR-024 took for USDT — not a tolerance widened to make a check pass. The Funding figure is exactly the over-draw, and is an approximation absorbed at the ledger's start rather than pre-ledger value.
+- `finances doctor` reads **0 errors** for the first time, so `--strict` is usable as a gate again.
 - The rule for `SPOT_FUNDING` rests on a single observation, and this is stated rather than hidden. If it is wrong, `position_disagrees_with_exchange` says so the next time one happens — which is the reason ADR-023 was built first, and the difference between this and every earlier repair in this ledger's history.
 - An unrecognised `walletType` now fails loudly instead of defaulting, so the next wallet Binance invents surfaces as an ingest error rather than a slow drift.
