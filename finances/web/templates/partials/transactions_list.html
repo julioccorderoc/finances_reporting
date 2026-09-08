@@ -148,7 +148,7 @@
    header itself, and two elements with one id is the bug the rail badge
    guard already names. #}
 {% if header_oob is defined and header_oob %}
-  {% with total = page.total, filter = page.filter %}
+  {% with total = page.total, totals = page.totals, filter = page.filter %}
     {% include "partials/transactions_header.html" %}
   {% endwith %}
 {% endif %}

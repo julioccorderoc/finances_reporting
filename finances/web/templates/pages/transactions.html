@@ -1,13 +1,14 @@
 {% extends "base.html" %}
 {% block title %}Transactions{% endblock %}
 {% block content %}
-  {# The question, then THE one Doto figure of the view: how many rows the
-     current filter matches at render time — plus Add transaction, the one
+  {# The question, then THE one Doto figure of the view: what every row the
+     current filter matches adds up to, in dollars (2026-09-08; the count
+     it used to be sits in the meta line) — plus Add transaction, the one
      thing you can DO to this ledger by hand (ADR-008 amendment 2026-09-03).
      In its own partial because a hand-written entry moves the figure from
      outside it; the live count that survives list swaps is the "N matches"
      line inside #tx-list. #}
-  {% with total = page.total %}
+  {% with total = page.total, totals = page.totals %}
     {% include "partials/transactions_header.html" %}
   {% endwith %}
 

@@ -113,18 +113,27 @@ def _txn_id(conn: sqlite3.Connection, source_ref: str) -> int:
 # ---------------------------------------------------------------------------
 
 
-def test_page_opens_with_the_question_and_the_match_count(
+def test_page_opens_with_the_question_and_the_money(
     seeded_web_db: sqlite3.Connection, web_client_factory
 ) -> None:
+    """The Doto figure is what the matches add up to (2026-09-08); the
+    count it used to be sits in the meta line under it."""
+    from decimal import Decimal
+
+    from finances.format import fmt_usd
+
     client = web_client_factory()
     params = {"date_from": "2000-01-01"}
 
     body = client.get("/transactions", params=params).text
-    total = client.get("/api/transactions", params=params).json()["total"]
+    page = client.get("/api/transactions", params=params).json()
+    total = page["total"]
+    net = fmt_usd(Decimal(page["totals"]["net_usd"]), signed=True)
 
     assert total > 1
     assert '<span class="page-question">What happened?</span>' in body
-    assert f'<h1 class="page-answer">{total} rows</h1>' in body
+    assert f'<h1 class="page-answer">{net}</h1>' in body
+    assert f'<span class="flow-meta-count">{total} rows</span>' in body
     # The one Doto figure on the page.
     assert body.count('class="page-answer"') == 1
     # The live count inside the swap target is what stays truthful across
@@ -144,7 +153,8 @@ def test_answer_is_singular_for_one_row(
         "/transactions", params={"date_from": "2000-01-01", "q": "Earn payout"}
     ).text
 
-    assert '<h1 class="page-answer">1 row</h1>' in body
+    assert '<h1 class="page-answer">+$100.00</h1>' in body, "the one Earn payout"
+    assert '<span class="flow-meta-count">1 row</span>' in body
     assert "1 match<" in body or "1 match\n" in body
 
 

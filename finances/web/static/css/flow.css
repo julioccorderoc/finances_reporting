@@ -13,13 +13,26 @@
 
 /* ── Page header extras ─────────────────────────────────────────────────── */
 
-/* The active window in the header's meta line: two dates, mono. */
-.flow-window {
+/* The header's meta line, since the headline became money (2026-09-08):
+ * the row count, the active window, the native total, the out/in split
+ * and what was not counted — figures in mono, words in the caption face,
+ * every item tertiary and one line each, a middle dot between them. */
+.flow-window,
+.flow-total {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-size: var(--caption-size);
   color: var(--text-tertiary);
   white-space: nowrap;
+}
+.flow-meta-count,
+.flow-caveat {
+  white-space: nowrap;
+}
+#transactions-header .page-meta > * + *::before {
+  content: "·";
+  margin-right: var(--space-2);
+  color: var(--text-tertiary);
 }
 
 /* ── Rows ───────────────────────────────────────────────────────────────── */
