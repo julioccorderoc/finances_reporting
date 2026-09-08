@@ -150,7 +150,8 @@ def test_the_page_declares_an_icon_so_the_browser_stops_probing() -> None:
     head = (TEMPLATES / "base.html").read_text(encoding="utf-8")
 
     assert 'rel="icon"' in head
-    assert "/static/favicon.svg" in head
+    # Through the asset() global since 2026-09-07 (cache busting).
+    assert "asset('favicon.svg')" in head
     assert (STATIC / "favicon.svg").exists()
 
 
