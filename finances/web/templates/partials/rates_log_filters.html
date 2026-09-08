@@ -53,7 +53,14 @@
   {# The chart's window, carried through untouched. #}
   <input type="hidden" name="range_days" value="{{ range_days }}">
 
-  <div class="flow-filter-grid">
+  {# One row, not two. /transactions splits its dates from its dropdowns
+     because it carries eleven controls; four fit on a single line at the
+     1196px cap with room to spare, and stacking them left the panel half
+     white space. .rates-filter-row is the rates log's own class (in
+     reports.css) rather than .flow-filter-grid: those flow classes are
+     shared with /transactions, where the column count is a different
+     question with a different answer. #}
+  <div class="rates-filter-row">
     <label class="flow-field">
       <span class="teyebrow">From</span>
       <input
@@ -72,9 +79,6 @@
         class="flow-input"
       >
     </label>
-  </div>
-
-  <div class="flow-filter-groups">
     {% if options.pairs %}{{ dropdown("pairs", "Pairs", options.pairs, log.filter.pairs) }}{% endif %}
     {% if options.sources %}{{ dropdown("sources", "Sources", options.sources, log.filter.sources) }}{% endif %}
   </div>

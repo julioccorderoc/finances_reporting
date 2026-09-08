@@ -775,6 +775,27 @@
   color: var(--text-tertiary);
 }
 
+/* ── Rates: the log's filter panel ──────────────────────────────────────── */
+
+/* Four controls — From, To, Pairs, Sources — on one line. Its own class
+   rather than .flow-filter-grid because those flow classes are shared
+   with /transactions, which carries eleven controls and needs the two
+   rows this one does not. Own class also means owning the breakpoints:
+   flow.css narrows .flow-filter-grid at 1000px and 720px, and this sheet
+   loads after it, so any rule reused here would have overridden those
+   and then had nothing to fall back on. */
+.rates-filter-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+@media (max-width: 720px) {
+  .rates-filter-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 /* ── Rates: the history log ─────────────────────────────────────────────── */
 
 /* Card-rows on a grid, the .flow-rows idiom: date, pair, source, rate.
