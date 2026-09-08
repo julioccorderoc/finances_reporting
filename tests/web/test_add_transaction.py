@@ -530,6 +530,19 @@ def test_post_corrects_the_page_headline_out_of_band(
     assert 'class="flow-window"' not in resp.text
 
 
+def test_post_corrects_the_headline_figure_out_of_band(
+    entry_db: sqlite3.Connection, web_client_factory
+) -> None:
+    """The headline is dollars now (2026-09-08); a written row moves it too."""
+    client = web_client_factory()
+    resp = _post(
+        client, entry_db, headers={"HX-Current-URL": "http://testserver/transactions"}
+    )
+
+    assert 'id="transactions-header" hx-swap-oob="true"' in resp.text
+    assert '<h1 class="page-answer">−$12.50</h1>' in resp.text
+
+
 def test_post_keeps_the_date_window_the_page_was_showing(
     entry_db: sqlite3.Connection, web_client_factory
 ) -> None:

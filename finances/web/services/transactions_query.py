@@ -148,6 +148,48 @@ class TransactionCard(BaseModel):
     name a row rather than link to it."""
 
 
+class TransactionsTotals(BaseModel):
+    """What every row a filter matches adds up to — the page's answer.
+
+    "What happened?" was answered with a row count until 2026-09-08. The
+    owner filters Groceries for August to learn what groceries cost in
+    August, and the count is not that answer; this is.
+
+    The figure follows the house rule (``domain/money.py``), not a naive
+    sum. Four piles partition the matches exactly::
+
+        counted + moved + adjustments + unpriced == rows matched
+
+    * ``counted`` rows are priced and summed into ``in_usd`` (credits,
+      ≥ 0), ``out_usd`` (debits, ≤ 0) and ``net_usd`` (their sum);
+    * ``moved`` rows are currency movement — a transfer leg, or a row filed
+      under a transfer-kind category — and are excluded, because a paired
+      transfer cancels and an unpaired one inflates;
+    * ``adjustments`` assert the record is incomplete (ADR-018); never
+      money earned or spent;
+    * ``unpriced`` rows are spending no rate can price. Excluded from the
+      dollar figures and named, so the figure never quietly omits them.
+
+    ``native_total`` is the spending rows summed in their own currency,
+    set only when every one of them shares a currency the dollar figure
+    does not already say (bolívares, pesos — never USD/USDT/USDC, which
+    would be the same dollars twice). It covers the unpriced rows too:
+    summing bolívares needs no rate, only pricing them does.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    net_usd: Decimal
+    in_usd: Decimal
+    out_usd: Decimal
+    counted: int
+    moved: int
+    adjustments: int
+    unpriced: int
+    native_total: Decimal | None = None
+    native_currency: str | None = None
+
+
 class TransactionsPage(BaseModel):
     """Paginated result for /api/transactions and the HTMX fragment."""
 
@@ -159,6 +201,9 @@ class TransactionsPage(BaseModel):
     page_size: int
     total_pages: int
     filter: TransactionsFilter
+    totals: TransactionsTotals
+    """Every match summed by the house rule — the page, not just this page
+    of it. The header renders this; the rows render the page."""
     outside_window: int = 0
     """Matches this filter's date range is hiding, or 0.
 
@@ -423,6 +468,67 @@ def count_matching(conn: sqlite3.Connection, f: TransactionsFilter) -> int:
     )
 
 
+def totals_matching(
+    conn: sqlite3.Connection, f: TransactionsFilter
+) -> TransactionsTotals:
+    """Sum every row ``f`` matches by the house rule — see the model.
+
+    The same ``WHERE`` the list is built from, with no page: a total of
+    the fifty rows on screen would be a total of the wrong thing. Every
+    match is priced through the one resolver (rule-005); the whole live
+    ledger prices in under a tenth of a second, so no filter is too wide
+    to answer.
+    """
+    where_sql, where_params = _build_where(f)
+    rows = conn.execute(
+        f"{TXN_QUERY_BASE} WHERE {where_sql}", where_params
+    ).fetchall()
+    movement_ids = money.movement_category_ids(conn)
+
+    in_usd = Decimal("0")
+    out_usd = Decimal("0")
+    counted = moved = adjustments = unpriced = 0
+    native_total = Decimal("0")
+    currencies: set[str] = set()
+
+    for row in rows:
+        txn = _row_to_transaction(row)
+        if txn.kind is TransactionKind.ADJUSTMENT:
+            adjustments += 1
+            continue
+        if money.is_currency_movement(txn, movement_ids):
+            moved += 1
+            continue
+        # A spending row, priced or not, has a say in the native total.
+        currencies.add(txn.currency)
+        native_total += txn.amount
+        amount_usd, _source = money.to_usd(conn, txn)
+        if amount_usd is None:
+            unpriced += 1
+            continue
+        counted += 1
+        if amount_usd > 0:
+            in_usd += amount_usd
+        else:
+            out_usd += amount_usd
+
+    native_currency = next(iter(currencies)) if len(currencies) == 1 else None
+    if native_currency in _NATIVE_USD_CURRENCIES:
+        native_currency = None
+
+    return TransactionsTotals(
+        net_usd=in_usd + out_usd,
+        in_usd=in_usd,
+        out_usd=out_usd,
+        counted=counted,
+        moved=moved,
+        adjustments=adjustments,
+        unpriced=unpriced,
+        native_total=native_total if native_currency else None,
+        native_currency=native_currency,
+    )
+
+
 def query_transactions(
     conn: sqlite3.Connection, f: TransactionsFilter
 ) -> TransactionsPage:
@@ -481,6 +587,7 @@ def query_transactions(
         page_size=f.page_size,
         total_pages=total_pages,
         filter=f,
+        totals=totals_matching(conn, f),
         # Only when there is nothing to show and a window to blame. An
         # empty list is the one screen that has room for the extra count,
         # and paying for it on every populated page would be a second
@@ -494,9 +601,11 @@ __all__ = [
     "TransactionCard",
     "TransactionsFilter",
     "TransactionsPage",
+    "TransactionsTotals",
     "category_options",
     "count_matching",
     "query_transactions",
     "outside_window_count",
     "row_matches_filter",
+    "totals_matching",
 ]

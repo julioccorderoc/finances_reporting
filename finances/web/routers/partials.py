@@ -102,6 +102,7 @@ from finances.web.services.transactions_query import (
     count_matching,
     query_transactions,
     row_matches_filter,
+    totals_matching,
 )
 
 router = APIRouter(prefix="/_partial")
@@ -1047,6 +1048,9 @@ def transaction_add_partial(
     f = _filter_from_hx_current_url(request)
     visible = f.page == 1 and row_matches_filter(conn, card.id, f)
     total = count_matching(conn, f)
+    # The headline is dollars now, so a written row moves it whether or
+    # not the list shows the row — same filter, same rule as the list.
+    totals = totals_matching(conn, f)
 
     if visible:
         toast_message = f"Added “{card.description}”"
@@ -1075,6 +1079,7 @@ def transaction_add_partial(
             # the out-of-band corrections and the dialog closing.
             "card": card if visible else None,
             "total": total,
+            "totals": totals,
             "filter": f,
             # The new row is the only match, so what stood there was the
             # empty state. Emitting the OOB delete unconditionally would
