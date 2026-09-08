@@ -32,6 +32,15 @@ _NATIVE_USD_CURRENCIES = money.NATIVE_USD_CURRENCIES
 _NATIVE_USD_SOURCE = money.NATIVE_USD_SOURCE
 _BCV_SOURCE_PREFIX = "bcv"
 
+#: The ``categories`` value that means "no category at all".
+#:
+#: ``category_id IS NULL`` is not reachable by a name — SQL NULL equals
+#: nothing, including itself — so "show me the rows nobody has filed yet"
+#: needs a value the name branch can recognise and hand to a NULL test.
+#: The leading underscores are load-bearing: they are what makes a
+#: collision with a real category name impossible rather than unlikely.
+UNCATEGORIZED = "__none__"
+
 _KindLiteral = Literal["income", "expense", "transfer", "adjustment"]
 _NeedsReviewLiteral = Literal["any", "yes", "no"]
 _PairedLiteral = Literal["any", "yes", "no"]
@@ -179,6 +188,41 @@ def outside_window_count(
     return count_matching(conn, undated)
 
 
+def category_options(conn: sqlite3.Connection) -> list[tuple[str, str]]:
+    """``(value, label)`` pairs for the Categories dropdown.
+
+    Only categories that are *on a row*. Thirty exist in the live ledger
+    and five have never been used (Lifestyle, Tools, Clothing,
+    Reconciliation, FX Diff); offering those is offering a pick that can
+    only ever answer "no rows match these filters", which reads as a
+    broken filter rather than an empty category.
+
+    ``Uncategorized`` leads the list when there is anything to lead it
+    with — it is the absence of a category, so alphabetical order has no
+    opinion about where it goes, and it is the first thing the owner
+    reaches for. Same in-use rule: no unfiled rows, no option.
+    """
+    options: list[tuple[str, str]] = []
+
+    unfiled = conn.execute(
+        "SELECT 1 FROM transactions WHERE category_id IS NULL LIMIT 1"
+    ).fetchone()
+    if unfiled is not None:
+        options.append((UNCATEGORIZED, "Uncategorized"))
+
+    rows = conn.execute(
+        """
+        SELECT DISTINCT c.name AS name
+        FROM transactions t
+        JOIN categories c ON c.id = t.category_id
+        ORDER BY c.name
+        """
+    ).fetchall()
+    options.extend((row["name"], row["name"]) for row in rows)
+
+    return options
+
+
 # ---------------------------------------------------------------------------
 # SQL builder.
 # ---------------------------------------------------------------------------
@@ -201,9 +245,19 @@ def _build_where(f: TransactionsFilter) -> tuple[str, list[Any]]:
         params.extend(f.accounts)
 
     if f.categories:
-        placeholders = ",".join(["?"] * len(f.categories))
-        where.append(f"c.name IN ({placeholders})")
-        params.extend(f.categories)
+        # Names and the "no category" sentinel are a union, not a choice:
+        # picking Groceries AND Uncategorized asks for both piles, the way
+        # picking two accounts does. The parentheses are what keep that OR
+        # from swallowing every AND that follows it.
+        names = [c for c in f.categories if c != UNCATEGORIZED]
+        clauses: list[str] = []
+        if names:
+            placeholders = ",".join(["?"] * len(names))
+            clauses.append(f"c.name IN ({placeholders})")
+            params.extend(names)
+        if UNCATEGORIZED in f.categories:
+            clauses.append("t.category_id IS NULL")
+        where.append("(" + " OR ".join(clauses) + ")")
 
     if f.kinds:
         placeholders = ",".join(["?"] * len(f.kinds))
@@ -436,9 +490,11 @@ def query_transactions(
 
 
 __all__ = [
+    "UNCATEGORIZED",
     "TransactionCard",
     "TransactionsFilter",
     "TransactionsPage",
+    "category_options",
     "count_matching",
     "query_transactions",
     "outside_window_count",

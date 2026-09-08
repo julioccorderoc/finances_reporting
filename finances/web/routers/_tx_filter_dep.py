@@ -6,7 +6,6 @@ inject the same parser via ``Depends(filter_from_query)``.
 
 from __future__ import annotations
 
-from datetime import date
 from typing import Literal
 
 from fastapi import HTTPException, Query
@@ -21,6 +20,9 @@ _ALLOWED_PAGE_SIZES: frozenset[int] = frozenset({25, 50, 100})
 
 
 def filter_from_query(
+    # Taken as strings and parsed by hand: the filter form always sends
+    # these two, and an untouched date input sends "", which FastAPI's own
+    # date | None coercion answers with a 422. See _optional_date.
     date_from: str | None = Query(default=None),
     date_to: str | None = Query(default=None),
     accounts: list[str] = Query(default_factory=list),

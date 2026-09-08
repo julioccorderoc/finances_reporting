@@ -10,9 +10,17 @@
    param contract (accounts=…&accounts=…) is unchanged. Styles: .flow-dd*
    in static/css/flow.css.
 #}
+{#- An option is either a plain string (value == label, the four original
+    groups) or a (value, label) pair. Categories needs the pair: its
+    "Uncategorized" entry is the sentinel __none__, which the WHERE
+    builder reads and the owner must never see. -#}
 {%- macro dropdown(name, label, options, selected) -%}
+  {%- set labels = {} -%}
+  {%- for opt in options -%}
+    {%- set _ = labels.update({(opt if opt is string else opt[0]): (opt if opt is string else opt[1])}) -%}
+  {%- endfor -%}
   {%- set n = selected | length -%}
-  {%- set text = 'Any' if n == 0 else (selected[0] if n == 1 else (n ~ ' selected')) -%}
+  {%- set text = 'Any' if n == 0 else (labels.get(selected[0], selected[0]) if n == 1 else (n ~ ' selected')) -%}
   <fieldset class="flow-fieldset">
     <legend class="teyebrow">{{ label }}</legend>
     {# Alpine keeps the summary honest after a change — the form is never
@@ -25,7 +33,9 @@
         text: '',
         sync() {
           const on = Array.from(this.$el.querySelectorAll('input:checked'));
-          this.text = on.length === 0 ? 'Any' : (on.length === 1 ? on[0].value : on.length + ' selected');
+          // data-label where the value is a sentinel (categories'
+          // __none__); the value itself everywhere else.
+          this.text = on.length === 0 ? 'Any' : (on.length === 1 ? (on[0].dataset.label || on[0].value) : on.length + ' selected');
         }
       }"
       x-init="sync()"
@@ -38,7 +48,9 @@
       </summary>
       <div class="flow-dd-menu" role="group" aria-label="{{ label }}">
         {%- for opt in options %}
-        <label class="flow-dd-option"><input type="checkbox" class="tcheck" name="{{ name }}" value="{{ opt }}"{% if opt in selected %} checked{% endif %}><span>{{ opt }}</span></label>
+        {%- set val = opt if opt is string else opt[0] %}
+        {%- set opt_label = opt if opt is string else opt[1] %}
+        <label class="flow-dd-option"><input type="checkbox" class="tcheck" name="{{ name }}" value="{{ val }}"{% if val != opt_label %} data-label="{{ opt_label }}"{% endif %}{% if val in selected %} checked{% endif %}><span>{{ opt_label }}</span></label>
         {%- endfor %}
       </div>
     </details>
@@ -104,6 +116,7 @@
 
   <div class="flow-filter-groups">
     {% if accounts_options %}{{ dropdown("accounts", "Accounts", accounts_options, filter.accounts) }}{% endif %}
+    {% if categories_options %}{{ dropdown("categories", "Categories", categories_options, filter.categories) }}{% endif %}
     {% if kinds_options %}{{ dropdown("kinds", "Kinds", kinds_options, filter.kinds) }}{% endif %}
     {% if currencies_options %}{{ dropdown("currencies", "Currencies", currencies_options, filter.currencies) }}{% endif %}
     {% if sources_options %}{{ dropdown("sources", "Sources", sources_options, filter.sources) }}{% endif %}

@@ -103,10 +103,16 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The owner's own words about the row, so they are content, not chrome:
+ * secondary ink rather than --text-placeholder (which is the token for a
+ * field's prompt), and 12px rather than 10.5. Still under the
+ * description's 13px primary — the second line of the cell, not a rival
+ * headline. One line, elided at whatever width the column turns out to
+ * be; the full text is in the title. */
 .flow-row-note {
   font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--text-placeholder);
+  font-size: 12px;
+  color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -337,9 +343,12 @@ select.flow-input {
 }
 
 /* The four multi-selects, one row of four (two under 720px). */
+/* Five since 2026-09-07: Categories joined Accounts, Kinds, Currencies
+ * and Sources. At the 1196px cap that is ~215px per dropdown, which the
+ * summary elides into rather than wrapping the row. */
 .flow-filter-groups {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: var(--space-3);
 }
 .flow-fieldset {
