@@ -26,11 +26,12 @@ from pydantic import BaseModel, ConfigDict, field_validator
 from finances.config import BINANCE_DEFAULT_LOOKBACK_DAYS, CARACAS_TZ
 from finances.db.repos import accounts as accounts_repo
 from finances.db.repos import categories as categories_repo
+from finances.db.repos import exchange_balances as exchange_balances_repo
 from finances.db.repos import import_state as import_state_repo
 from finances.db.repos import transactions as transactions_repo
 from finances.domain import realized_rates
 from finances.domain.earn import EarnSnapshotRow, refresh_earn_positions
-from finances.domain.models import Transaction, TransactionKind
+from finances.domain.models import ExchangeBalance, Transaction, TransactionKind
 from finances.domain.reconciliation import run_reconciliation_pass
 from finances.domain.transfers import SameAccountConvertPairing, create_transfer
 
@@ -948,6 +949,79 @@ def _ingest_earn_positions(
     )
 
 
+def _held_currencies(conn: sqlite3.Connection, account_id: int) -> set[str]:
+    return {
+        str(row[0])
+        for row in conn.execute(
+            "SELECT DISTINCT currency FROM transactions WHERE account_id = ?",
+            (account_id,),
+        )
+    }
+
+
+def capture_exchange_balances(
+    conn: sqlite3.Connection,
+    client: Any,
+    *,
+    captured_at: datetime,
+) -> list[str]:
+    """Record what Binance says Spot and Funding hold (ADR-023).
+
+    Two read-only calls at the end of a sync that already makes a dozen.
+    Nothing here is derived: the number goes in as the exchange gave it,
+    because it is the figure the ledger's own rows are measured against.
+
+    Which assets get recorded is the one judgement call. A balance the
+    exchange reports as non-zero is a position by definition. A *zero* one
+    matters only when the ledger disagrees — Funding USDC reads 0.00 on
+    the exchange and 400.00 in the ledger, and skipping zeroes would hide
+    exactly that. Assets in neither set (a dust line for a coin never
+    traded) are left out, so the check is not permanently facing phantoms.
+
+    Errors are returned, never raised: a sync that has already written
+    rows must not be undone because the last read failed. Same contract as
+    every other step here.
+    """
+    errors: list[str] = []
+    account_ids = _resolve_accounts(conn)
+    spot_id = account_ids[_SPOT_ACCOUNT_NAME]
+    funding_id = account_ids[_FUNDING_ACCOUNT_NAME]
+
+    def _record(account_id: int, rows: list[dict[str, Any]]) -> None:
+        held = _held_currencies(conn, account_id)
+        for item in rows:
+            asset = str(item.get("asset", "")).upper()
+            if not asset:
+                continue
+            total = (
+                _coerce_decimal(item.get("free", "0"))
+                + _coerce_decimal(item.get("locked", "0"))
+                + _coerce_decimal(item.get("freeze", "0"))
+            )
+            if total == 0 and asset not in held:
+                continue
+            exchange_balances_repo.insert(
+                conn,
+                ExchangeBalance(
+                    account_id=account_id,
+                    currency=asset,
+                    balance=total,
+                    captured_at=captured_at,
+                    source=SOURCE,
+                ),
+            )
+
+    try:
+        _record(spot_id, list(client.account().get("balances", []) or []))
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"spot-balance: {exc}")
+    try:
+        _record(funding_id, _unpack_rows(client.funding_wallet()))
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"funding-balance: {exc}")
+    return errors
+
+
 def sync_binance(
     conn: sqlite3.Connection,
     *,
@@ -1038,6 +1112,14 @@ def sync_binance(
                 conn, client, earn_id=earn_id, snapshot_at=snapshot_at, errors=errors,
             )
 
+            # What the exchange says Spot and Funding hold (ADR-023). Earn
+            # has had this since ADR-003 and it is what proved Earn right;
+            # the other two wallets had nothing to be measured against and
+            # were each out by two thousand dollars for a year.
+            errors.extend(
+                capture_exchange_balances(conn, client, captured_at=snapshot_at)
+            )
+
             # Any P2P sell just ingested changes the realized VES cost basis
             # (ADR-013). Rebuilding inside the transaction keeps the derived
             # rates consistent with the fills they come from, and lets
@@ -1100,6 +1182,7 @@ def sync_binance(
 
 __all__ = [
     "DEFAULT_LOOKBACK_DAYS",
+    "capture_exchange_balances",
     "RawBinanceConvertRow",
     "RawBinanceDepositRow",
     "RawBinanceEarnRewardRow",

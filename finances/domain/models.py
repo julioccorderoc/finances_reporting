@@ -191,6 +191,41 @@ class EarnPosition(BaseModel):
         return v.upper()
 
 
+class ExchangeBalance(BaseModel):
+    """What the exchange said one position held, at one moment (ADR-023).
+
+    An external claim, never a derived figure — the ledger's own position
+    is the thing being measured against it. Recorded per moment rather
+    than kept as a current value on the account, because the check
+    compares the ledger *as of the capture*; that is what stops a stale
+    snapshot from reading as a defect.
+    """
+
+    model_config = ConfigDict(strict=False, extra="forbid")
+
+    id: int | None = None
+    account_id: int
+    currency: str
+    balance: Decimal
+    captured_at: datetime
+    source: str = "binance"
+
+    @field_validator("balance", mode="before")
+    @classmethod
+    def _decimal_balance(cls, v: Any) -> Any:
+        return _coerce_decimal(v)
+
+    @field_validator("captured_at")
+    @classmethod
+    def _aware_captured_at(cls, v: datetime) -> datetime:
+        return _require_aware(v)
+
+    @field_validator("currency")
+    @classmethod
+    def _upper_currency(cls, v: str) -> str:
+        return v.upper()
+
+
 class SavedView(BaseModel):
     """A named /transactions filter combination (Wave 2 Thing 2).
 
@@ -272,6 +307,7 @@ __all__ = [
     "AccountKind",
     "Category",
     "EarnPosition",
+    "ExchangeBalance",
     "Rate",
     "SavedView",
     "Tombstone",
