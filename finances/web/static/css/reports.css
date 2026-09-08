@@ -115,12 +115,8 @@
   border-color: var(--red-500);
   box-shadow: var(--focus-ring-flush);
 }
-.rpt-input-multi {
-  height: auto;
-  padding: 4px 6px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-}
+/* .rpt-input-multi is gone with the <select multiple> it dressed: /monthly's
+   Accounts / Categories / Currencies are the shared .flow-dd dropdown now. */
 
 .rpt-check {
   display: inline-flex;
@@ -928,5 +924,85 @@
   margin: 0;
   font-family: var(--font-sans);
   font-size: var(--caption-size);
+  color: var(--ink-300);
+}
+
+
+/* ── /monthly's hover overlay ───────────────────────────────────────────── */
+
+/* Shares the .rpt-chart-tip bubble above (ink ground, inverse text, the
+   --shadow-pop token) and adds the four-column reading: a colour chip, the
+   category, its amount, its share of the month. The chip is the only place
+   a series colour appears in text — names and figures wear text tokens, so
+   identity is carried beside the words rather than by them.
+
+   Positioned by the drawing script against the plot's chartArea, and free
+   to spill past the card: the card sets no overflow clip, which is what
+   keeps a reading near the plot floor legible. */
+.mth-tip {
+  top: 0;
+  min-width: 17rem;
+  max-width: min(24rem, 90%);
+}
+.mth-tip-head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin: 0 0 6px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--ink-700);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--caption-size);
+  font-weight: 500;
+  white-space: nowrap;
+}
+/* chip · name · amount · share */
+.mth-tip-rows {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: baseline;
+  gap: 3px var(--space-3);
+}
+.mth-tip-chip {
+  width: 8px;
+  height: 8px;
+  align-self: center;
+}
+.mth-tip-row {
+  font-family: var(--font-sans);
+  font-size: var(--caption-size);
+}
+.mth-tip-num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--caption-size);
+  white-space: nowrap;
+}
+.mth-tip-share {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--caption-size);
+  color: var(--ink-300);
+  white-space: nowrap;
+  text-align: right;
+}
+/* What was folded into "Other", indented under it. Recessive: these are the
+   contents of one block, not blocks of their own. */
+.mth-tip-row.is-member,
+.mth-tip-num.is-member {
+  color: var(--ink-300);
+}
+.mth-tip-row.is-member {
+  padding-left: var(--space-3);
+}
+.mth-tip-foot {
+  margin: 8px 0 0;
+  padding-top: 6px;
+  border-top: 1px solid var(--ink-700);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--caption-size);
+  /* rule-005: BCV is reference, and reads as it. */
   color: var(--ink-300);
 }

@@ -293,6 +293,10 @@ def monthly_page(
     accounts_options = [
         a.name for a in accounts_repo.list_all(conn, include_inactive=True)
     ]
+    # (value, label) pairs — "Uncategorized" rides in as the __none__
+    # sentinel, which the owner must never see. Same list /transactions
+    # offers, so a category that filters one page filters the other.
+    categories_options = category_options(conn)
     currencies_options = sorted(
         {
             row["currency"]
@@ -312,6 +316,7 @@ def monthly_page(
                 "mobile": mobile,
                 "filter": f,
                 "accounts_options": accounts_options,
+                "categories_options": categories_options,
                 "currencies_options": currencies_options,
             },
         )
@@ -327,6 +332,7 @@ def monthly_page(
             "chart": chart,
             "filter": f,
             "accounts_options": accounts_options,
+            "categories_options": categories_options,
             "currencies_options": currencies_options,
         },
     )

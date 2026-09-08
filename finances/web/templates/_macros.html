@@ -1,15 +1,76 @@
 {# Shared Jinja macros for the web viewer.
 
-   Two macros survive the viewer reskin (2026-09): the page header every
-   page opens with, and the monthly pivot's cell. The badge, chip, tab,
-   tile and select macros that used to live here drew the old Tailwind
-   viewer; the reskinned pages render their own markup on signal.css
-   tokens, and tests/web/test_reskin_sweep.py fails the suite if a macro
-   here is left without a caller again.
+   Three macros survive the viewer reskin (2026-09): the page header every
+   page opens with, the monthly pivot's cell, and the multi-select dropdown
+   both filter bars use. The badge, chip, tab, tile and select macros that
+   used to live here drew the old Tailwind viewer; the reskinned pages render
+   their own markup on signal.css tokens, and tests/web/test_reskin_sweep.py
+   fails the suite if a macro here is left without a caller again.
 
    Each macro must be import-safe (no reliance on a parent template's
    context).
 #}
+
+{# --- Filter bars: the multi-select dropdown ---------------------------- #}
+
+{# A native <details> whose summary is the house field reading "Any", the one
+   value, or "N selected", over a raised menu of house checkboxes. The
+   repeated-param contract (accounts=…&accounts=…) is what the query deps on
+   both pages already parse, so the control is a drop-in for a <select
+   multiple> without changing a single route.
+
+   Written for /transactions (owner, 2026-09-03) and moved here when /monthly
+   gained a category filter — two copies of a control this fiddly drift, and
+   the drift shows up as one page's filter behaving subtly unlike the other's.
+
+   An option is either a plain string (value == label) or a (value, label)
+   pair. Categories needs the pair: its "Uncategorized" entry is the sentinel
+   __none__, which the WHERE builder and the monthly row matcher both read,
+   and which the owner must never see.
+
+   Styles: .flow-dd* in static/css/flow.css. #}
+{%- macro dropdown(name, label, options, selected) -%}
+  {%- set labels = {} -%}
+  {%- for opt in options -%}
+    {%- set _ = labels.update({(opt if opt is string else opt[0]): (opt if opt is string else opt[1])}) -%}
+  {%- endfor -%}
+  {%- set n = selected | length -%}
+  {%- set text = 'Any' if n == 0 else (labels.get(selected[0], selected[0]) if n == 1 else (n ~ ' selected')) -%}
+  <fieldset class="flow-fieldset">
+    <legend class="teyebrow">{{ label }}</legend>
+    {# Alpine keeps the summary honest after a change — the form is never
+       re-rendered by a list swap. x-init seeds it from the same boxes the
+       server checked, so the text never flashes. #}
+    <details
+      class="flow-dd"
+      data-filter-group="{{ name }}"
+      x-data="{
+        text: '',
+        sync() {
+          const on = Array.from(this.$el.querySelectorAll('input:checked'));
+          // data-label where the value is a sentinel (categories'
+          // __none__); the value itself everywhere else.
+          this.text = on.length === 0 ? 'Any' : (on.length === 1 ? (on[0].dataset.label || on[0].value) : on.length + ' selected');
+        }
+      }"
+      x-init="sync()"
+      @change="sync()"
+      @click.outside="$el.open = false"
+      @keydown.escape="$el.open = false"
+    >
+      <summary class="flow-input flow-dd-summary{% if n %} is-set{% endif %}" x-bind:class="{ 'is-set': text !== 'Any' }">
+        <span class="flow-dd-value" x-text="text">{{ text }}</span>
+      </summary>
+      <div class="flow-dd-menu" role="group" aria-label="{{ label }}">
+        {%- for opt in options %}
+        {%- set val = opt if opt is string else opt[0] %}
+        {%- set opt_label = opt if opt is string else opt[1] %}
+        <label class="flow-dd-option"><input type="checkbox" class="tcheck" name="{{ name }}" value="{{ val }}"{% if val != opt_label %} data-label="{{ opt_label }}"{% endif %}{% if val in selected %} checked{% endif %}><span>{{ opt_label }}</span></label>
+        {%- endfor %}
+      </div>
+    </details>
+  </fieldset>
+{%- endmacro -%}
 
 {# --- /monthly: the pivot cell ------------------------------------------ #}
 

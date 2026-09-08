@@ -8,7 +8,13 @@
    ``range_preset`` value, and the checked one is drawn as the ink fill
    by reports.css (:has), so it stays right after a swap the server never
    re-renders this form for.
+
+   Accounts / Categories / Currencies are the shared dropdown from
+   _macros.html — the same control /transactions uses, so the two filter
+   bars cannot drift apart. Categories carries the __none__ sentinel for
+   unfiled rows, which monthly_view._row_matches_filter reads.
 #}
+{%- from "_macros.html" import dropdown -%}
 <form
   id="monthly-filters"
   class="rpt-filters"
@@ -38,26 +44,9 @@
       <span class="teyebrow">Until</span>
       <input type="month" name="until" value="{{ filter.until or '' }}" class="rpt-input">
     </label>
-    {% if accounts_options %}
-      <label class="rpt-field">
-        <span class="teyebrow">Accounts</span>
-        <select name="accounts" multiple size="3" class="rpt-input rpt-input-multi">
-          {% for opt in accounts_options %}
-            <option value="{{ opt }}" {% if opt in filter.accounts %}selected{% endif %}>{{ opt }}</option>
-          {% endfor %}
-        </select>
-      </label>
-    {% endif %}
-    {% if currencies_options %}
-      <label class="rpt-field">
-        <span class="teyebrow">Currencies</span>
-        <select name="currencies" multiple size="3" class="rpt-input rpt-input-multi">
-          {% for opt in currencies_options %}
-            <option value="{{ opt }}" {% if opt in filter.currencies %}selected{% endif %}>{{ opt }}</option>
-          {% endfor %}
-        </select>
-      </label>
-    {% endif %}
+    {% if accounts_options %}{{ dropdown("accounts", "Accounts", accounts_options, filter.accounts) }}{% endif %}
+    {% if categories_options %}{{ dropdown("categories", "Categories", categories_options, filter.categories) }}{% endif %}
+    {% if currencies_options %}{{ dropdown("currencies", "Currencies", currencies_options, filter.currencies) }}{% endif %}
   </div>
 
   <div class="rpt-filters-foot">
