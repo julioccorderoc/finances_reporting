@@ -8,21 +8,23 @@ dropdowns wrapping to a second line under the first row of fields.
 Nothing in the suite could see it. Every server-side test reads the CSS off
 disk, so disk and assertion agreed while the only surface that mattered
 disagreed with both. The fix is a version stamp on every asset URL, keyed to
-``app.state.boot_id`` — the identity of the process that rendered the page,
-already minted for the restart banner. A restart is exactly when the CSS on
-disk changes (watchfiles respawns the child on every edit), so a new boot_id
-is a new URL is a fresh fetch.
+the file's **mtime** — deliberately not to ``app.state.boot_id``, because
+``RELOAD_EXCLUDES`` keeps static/ out of the watcher and a stylesheet edit
+therefore does not respawn the child. A per-process stamp would have been as
+stale as no stamp; mtime moves when the bytes move, and only then.
 
 These tests own the two halves: base.html routes every asset through the
-``asset()`` global, and what it renders carries this process's stamp.
+``asset()`` global, and what it renders tracks the file on disk.
 """
 
 from __future__ import annotations
 
+import os
 import re
 import sqlite3
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -68,22 +70,26 @@ def test_base_html_still_links_every_sheet_it_did() -> None:
         assert f"asset('{path}')" in head, f"base.html no longer links {path}"
 
 
-def test_rendered_page_stamps_assets_with_this_process_boot_id(
+def test_every_rendered_asset_url_carries_its_files_mtime(
     seeded_web_db: sqlite3.Connection, web_client_factory
 ) -> None:
-    """Every asset URL on a real page carries the rendering process's id."""
+    """Every asset URL on a real page is stamped with the file it serves."""
     client: TestClient = web_client_factory()
     html = client.get("/transactions").text
 
-    boot_id = re.search(r'name="finances-boot" content="([0-9a-f]+)"', html)
-    assert boot_id, "the page no longer declares its boot id"
-    stamp = f"?v={boot_id.group(1)}"
+    urls = re.findall(r'(?:href|src)="/static/([^"?]+)\?v=([^"]+)"', html)
+    assert urls, "the page linked no stamped static asset at all"
 
-    urls = re.findall(r'(?:href|src)="(/static/[^"]+)"', html)
-    assert urls, "the page linked no static asset at all"
+    static = ROOT / "finances" / "web" / "static"
+    wrong = [
+        (rel, stamp)
+        for rel, stamp in urls
+        if stamp != str(int((static / rel).stat().st_mtime))
+    ]
+    assert not wrong, f"assets stamped with something other than their mtime: {wrong}"
 
-    unstamped = [u for u in urls if not u.endswith(stamp)]
-    assert not unstamped, f"assets served without this boot's stamp: {unstamped}"
+    unstamped = re.findall(r'(?:href|src)="(/static/[^"?]+)"', html)
+    assert not unstamped, f"assets served with no version at all: {unstamped}"
 
 
 def test_the_stamped_url_still_resolves(
@@ -92,7 +98,7 @@ def test_the_stamped_url_still_resolves(
     """A query string must not turn a served file into a 404."""
     client: TestClient = web_client_factory()
     html = client.get("/transactions").text
-    flow_css = re.search(r'href="(/static/css/flow\.css\?v=[0-9a-f]+)"', html)
+    flow_css = re.search(r'href="(/static/css/flow\.css\?v=[0-9]+)"', html)
     assert flow_css, "flow.css is no longer linked from the page"
 
     resp = client.get(flow_css.group(1))
@@ -101,23 +107,41 @@ def test_the_stamped_url_still_resolves(
     assert "flow-filter-groups" in resp.text
 
 
-def test_two_processes_stamp_differently(
-    seeded_web_db: sqlite3.Connection, web_client_factory
+def test_editing_a_stylesheet_changes_its_url(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The point of the stamp: a restart invalidates what the browser holds.
+    """The whole point: new bytes on disk, new URL, no restart required.
 
-    Building a second app stands in for the respawn that watchfiles performs
-    on every edit.
+    static/ is in RELOAD_EXCLUDES, so this is the case a boot-id stamp
+    would have got wrong — the child that served the stale sheet is still
+    the child serving the fixed one.
     """
-    pattern = r'href="/static/css/flow\.css\?v=([0-9a-f]+)"'
-    one: TestClient = web_client_factory()
-    two: TestClient = web_client_factory()
+    from finances.web import app as app_module
 
-    first = re.findall(pattern, one.get("/transactions").text)
-    second = re.findall(pattern, two.get("/transactions").text)
+    sheet = tmp_path / "css" / "flow.css"
+    sheet.parent.mkdir()
+    sheet.write_text(".flow-filter-groups { grid-template-columns: repeat(4, 1fr); }")
+    monkeypatch.setattr(app_module, "STATIC_DIR", tmp_path)
+    asset = app_module._asset_url("bootid")
 
-    assert first and second
-    assert first[0] != second[0], (
-        "two processes stamped the same version — a restart would not "
-        "invalidate the browser's cached stylesheet"
+    before = asset("css/flow.css")
+    os.utime(sheet, (0, 0))  # an edit, two seconds of wall clock ago or ten
+    after = asset("css/flow.css")
+
+    assert before != after, (
+        "a stylesheet edit did not change its URL — the browser would go on "
+        "painting the version it already holds"
     )
+
+
+def test_an_asset_that_does_not_exist_still_renders(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A typo'd asset name is a dead link, never a 500 mid-page."""
+    from finances.web import app as app_module
+
+    monkeypatch.setattr(app_module, "STATIC_DIR", tmp_path)
+
+    url = app_module._asset_url("bootid")("css/nope.css")
+
+    assert url == "/static/css/nope.css?v=bootid"

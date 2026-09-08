@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import sys
 from contextlib import asynccontextmanager
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from uuid import uuid4
 
@@ -61,6 +61,37 @@ IMPORT_STRING = "finances.web.app:create_app_from_env"
 RELOAD_DIRS = (str(PACKAGE_DIR),)
 RELOAD_INCLUDES = ("*.html", "*.j2")  # uvicorn adds "*.py" implicitly
 RELOAD_EXCLUDES = (str(STATIC_DIR),)
+
+
+def _asset_url(fallback: str) -> Callable[[str], str]:
+    """Build the ``asset()`` template global: a /static URL that expires.
+
+    Without a version in the URL a browser holds app.css and flow.css for
+    as long as it likes, and a landed fix goes on rendering broken until
+    someone thinks to hard refresh — that is the whole story of the
+    three-row filter panel (2026-09-07), where the server had been serving
+    the corrected grid for hours.
+
+    The version is the file's mtime, NOT this process's boot id, because
+    RELOAD_EXCLUDES keeps static/ out of the watcher: a stylesheet edit
+    deliberately does not respawn the child, so a per-process stamp would
+    be exactly as stale as no stamp at all. mtime changes when, and only
+    when, the bytes do — which also means a restart alone does not throw
+    away a cache that is still correct.
+
+    ``fallback`` (the boot id) stands in for a path that does not resolve,
+    so a typo'd asset name renders a dead link rather than raising mid-page.
+    """
+
+    def asset(path: str) -> str:
+        rel = path.lstrip("/").removeprefix("static/")
+        try:
+            version = str(int((STATIC_DIR / rel).stat().st_mtime))
+        except OSError:
+            version = fallback
+        return f"/static/{rel}?v={version}"
+
+    return asset
 
 
 def _regen_report_on_shutdown(settings: WebSettings) -> None:
@@ -177,6 +208,15 @@ def create_app(settings: WebSettings) -> FastAPI:
             # the current filter minus its window, written back as a URL.
             "transactions_url": transactions_url,
             "rail_state": build_rail,
+            # Every /static URL in base.html. The query string is what
+            # makes a stylesheet edit visible: without it the browser
+            # holds app.css and flow.css until the user thinks to hard
+            # refresh, and a fixed layout goes on rendering broken for
+            # hours (the three-row filter panel, 2026-09-07). Keyed to
+            # this process, because a restart is exactly when the file
+            # on disk can have changed — under the reload supervisor
+            # watchfiles respawns the child on every edit.
+            "asset": _asset_url(app.state.boot_id),
         }
     )
 

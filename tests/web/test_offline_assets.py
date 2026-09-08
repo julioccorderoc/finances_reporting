@@ -56,12 +56,14 @@ def test_no_template_or_stylesheet_calls_out_to_a_cdn(path: Path) -> None:
 def test_base_html_links_the_signal_foundation() -> None:
     head = (TEMPLATES / "base.html").read_text(encoding="utf-8")
 
-    assert '<link rel="stylesheet" href="/static/css/fonts.css">' in head
-    assert '<link rel="stylesheet" href="/static/css/signal.css">' in head
+    # URLs go through the asset() global since 2026-09-07 (cache busting),
+    # so a link is matched by the sheet it names, not by a literal href.
+    assert "<link rel=\"stylesheet\" href=\"{{ asset('css/fonts.css') }}\">" in head
+    assert "<link rel=\"stylesheet\" href=\"{{ asset('css/signal.css') }}\">" in head
     # After the existing sheets: tokens and faces must not be overridden by a
     # stylesheet that loads later.
-    assert head.index("/static/css/tailwind.css") < head.index("/static/css/fonts.css")
-    assert head.index("/static/css/app.css") < head.index("/static/css/signal.css")
+    assert head.index("css/tailwind.css") < head.index("css/fonts.css")
+    assert head.index("css/app.css") < head.index("css/signal.css")
 
 
 def test_every_vendored_font_file_exists() -> None:

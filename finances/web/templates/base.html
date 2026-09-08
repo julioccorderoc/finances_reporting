@@ -10,25 +10,25 @@
          since the viewer shipped (criterion L5). Served from /static like
          every other asset, so it works with the Wi-Fi off and needs no
          route of its own. -->
-    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="icon" type="image/svg+xml" href="{{ asset('favicon.svg') }}">
 
     <!-- Tailwind CSS compiled offline from the used utility classes
          (tailwind/ build config; regenerate per tailwind/README.md). No CDN —
          the viewer stays fully styled with Wi-Fi off (Thing 5C). -->
-    <link rel="stylesheet" href="/static/css/tailwind.css">
+    <link rel="stylesheet" href="{{ asset('css/tailwind.css') }}">
 
     <!-- Vendored client libraries (offline-capable, version pinned in
          finances/web/static/vendor/VERSIONS.txt). -->
-    <script src="/static/vendor/htmx.min.js"></script>
+    <script src="{{ asset('vendor/htmx.min.js') }}"></script>
     {# Without a timeout htmx waits forever. Under the reload supervisor a
        request can land while the server is respawning, or while a child is
        dead on a broken edit — an unbounded wait shows an infinite spinner
        and no explanation. 15 s is far above any real request here. #}
     <script>htmx.config.timeout = 15000;</script>
-    <script defer src="/static/vendor/alpine.min.js"></script>
-    <script src="/static/vendor/chart.umd.min.js"></script>
+    <script defer src="{{ asset('vendor/alpine.min.js') }}"></script>
+    <script src="{{ asset('vendor/chart.umd.min.js') }}"></script>
 
-    <link rel="stylesheet" href="/static/css/app.css">
+    <link rel="stylesheet" href="{{ asset('css/app.css') }}">
 
     <!-- SIGNAL foundation (Triage redesign, Wave 1.3). fonts.css declares
          @font-face over woff2 vendored under static/fonts/ — no Google Fonts
@@ -36,29 +36,29 @@
          token layer: custom properties, the :focus-visible ring and the
          reduced-motion override, nothing else. Loading them globally is inert
          for pages that reference no variable. -->
-    <link rel="stylesheet" href="/static/css/fonts.css">
-    <link rel="stylesheet" href="/static/css/signal.css">
+    <link rel="stylesheet" href="{{ asset('css/fonts.css') }}">
+    <link rel="stylesheet" href="{{ asset('css/signal.css') }}">
 
     <!-- The shell (viewer reskin, 2026-09): the rail, the content column
          and its 1196px cap, the page header. Reads signal.css's tokens, so
          it loads after them. -->
-    <link rel="stylesheet" href="/static/css/shell.css">
+    <link rel="stylesheet" href="{{ asset('css/shell.css') }}">
 
     <!-- Triage component layer (Wave 2). Loads after signal.css because it
          reads its tokens; scoped to .triage-* / .t* classes, so it is inert
          on every other page. -->
-    <link rel="stylesheet" href="/static/css/triage.css">
-    <script src="/static/js/triage.js"></script>
+    <link rel="stylesheet" href="{{ asset('css/triage.css') }}">
+    <script src="{{ asset('js/triage.js') }}"></script>
 
     <!-- Page sheets (viewer reskin, 2026-09). Global rather than per-page
          on purpose: partials cross pages (the dashboard's recent activity
          is the Flow row), so a sheet that loaded on one page only would
          leave the same partial unstyled on another. Each is scoped by its
          own class prefix and inert elsewhere. -->
-    <link rel="stylesheet" href="/static/css/today.css">
-    <link rel="stylesheet" href="/static/css/flow.css">
-    <link rel="stylesheet" href="/static/css/reports.css">
-    <link rel="stylesheet" href="/static/css/placeholders.css">
+    <link rel="stylesheet" href="{{ asset('css/today.css') }}">
+    <link rel="stylesheet" href="{{ asset('css/flow.css') }}">
+    <link rel="stylesheet" href="{{ asset('css/reports.css') }}">
+    <link rel="stylesheet" href="{{ asset('css/placeholders.css') }}">
 
     {# Identity of the server process that rendered this page. Read from
        request.app.state rather than a context key on purpose: Starlette

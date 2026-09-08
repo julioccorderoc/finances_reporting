@@ -340,9 +340,11 @@ def test_shell_css_caps_the_content_column_at_the_design_frame() -> None:
 def test_base_html_links_shell_css_after_the_tokens() -> None:
     head = (TEMPLATES / "base.html").read_text(encoding="utf-8")
 
-    assert '<link rel="stylesheet" href="/static/css/shell.css">' in head
-    assert head.index("/static/css/signal.css") < head.index("/static/css/shell.css")
-    assert head.index("/static/css/shell.css") < head.index("/static/css/triage.css")
+    # URLs go through the asset() global since 2026-09-07 (cache busting),
+    # so the link is matched by the sheet it names, not by a literal href.
+    assert "<link rel=\"stylesheet\" href=\"{{ asset('css/shell.css') }}\">" in head
+    assert head.index("css/signal.css") < head.index("css/shell.css")
+    assert head.index("css/shell.css") < head.index("css/triage.css")
 
 
 def test_the_triage_queue_is_capped_inside_a_full_width_scroller(
