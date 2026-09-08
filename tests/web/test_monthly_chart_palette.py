@@ -223,6 +223,39 @@ def test_colour_survives_filtering_another_category_out(
         )
 
 
+def test_two_visible_categories_never_share_a_slot(
+    web_db: sqlite3.Connection,
+) -> None:
+    """Slots repeat every fifth rank, so a filter can surface a colliding pair.
+
+    Seen live: Dating (rank 3) and Rent (rank 8) both resolved to slot 3 and
+    drew in the same colour, which makes the legend a lie. The deeper of the
+    two gives way; the one that owns the slot in the stable ordering keeps it,
+    so the repair costs at most one category its colour and never the one the
+    reader is most likely to be tracking.
+    """
+    from finances.web.services.monthly_view import (
+        CHART_COLOR_SLOTS,
+        MonthlyFilter,
+        MonthlyKind,
+        build_chart,
+    )
+
+    today, names = _seed_categories(web_db, count=CHART_COLOR_SLOTS * 2 + 1)
+
+    owner = names[3]
+    intruder = names[3 + CHART_COLOR_SLOTS]
+
+    chart = build_chart(
+        web_db,
+        MonthlyFilter(kind=MonthlyKind.EXPENSE, categories=[owner, intruder]),
+        today=today.date(),
+    )
+    slots = {s.category: s.color_slot for s in chart.series}
+    assert slots[owner] != slots[intruder]
+    assert slots[owner] == 3, "the slot's owner in the stable ordering keeps it"
+
+
 # ---------------------------------------------------------------------------
 # What is inside "Other".
 # ---------------------------------------------------------------------------

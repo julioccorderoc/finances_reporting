@@ -386,23 +386,50 @@ def _assign_color_slots(labels: Iterable[str]) -> dict[str, int]:
     not depend on which categories are selected, a category keeps its colour
     however the owner narrows the chart.
 
-    The honest limitation: with five slots and more than five categories in
-    the ledger, slots repeat every fifth rank, so a filter that selects two
-    categories exactly five apart draws them the same colour. Guaranteeing
-    uniqueness instead would mean re-packing the survivors onto free slots,
-    which is precisely the repaint this exists to prevent — the two
-    properties cannot both hold while the visible set changes. The default
-    view, where the top five occupy the five slots, is always unique, and
-    that is the view the chart is read in.
+    Slots repeat every fifth rank, so a filter can still surface two
+    categories that want the same one — Dating at rank 3 and Rent at rank 8
+    drew identically on the owner's ledger. :func:`_resolve_slot_collisions`
+    settles that among the categories actually on screen; this map is the
+    preference it starts from.
 
     A digest of the name would key colour to identity outright, but hashing
     five categories into five slots leaves them all distinct only about 4% of
-    the time; a filtered chart would show duplicate colours far more often
-    than this does.
+    the time, so a filtered chart would collide far more often than a rank
+    does.
     """
     return {
         label: index % CHART_COLOR_SLOTS for index, label in enumerate(labels)
     }
+
+
+def _resolve_slot_collisions(
+    visible: list[str], preferred: dict[str, int]
+) -> dict[str, int]:
+    """Give every visible category its own slot, moving as few as possible.
+
+    Two categories in the same colour makes the legend a lie, so uniqueness
+    among what is drawn has to win. The cost is paid by whichever of a
+    colliding pair sits deeper in the stable ordering: ``visible`` arrives in
+    that order, so the category that owns the slot keeps it and the intruder
+    walks to the next free one. The reader tracking the bigger category — the
+    likelier one — never sees it move.
+
+    Nothing moves in the default view, where the top five already hold the
+    five slots.
+    """
+    taken: set[int] = set()
+    out: dict[str, int] = {}
+    for label in visible:
+        want = preferred.get(label, 0) % CHART_COLOR_SLOTS
+        for step in range(CHART_COLOR_SLOTS):
+            slot = (want + step) % CHART_COLOR_SLOTS
+            if slot not in taken:
+                taken.add(slot)
+                out[label] = slot
+                break
+        else:  # pragma: no cover - CHART_TOP_N == CHART_COLOR_SLOTS
+            out[label] = want
+    return out
 
 
 def _drill_url(
@@ -619,11 +646,17 @@ def build_chart(
         key=lambda kv: abs(sum(kv[1].values(), Decimal("0"))),
         reverse=True,
     )
-    slots = _assign_color_slots(
-        _category_label(cat_first_seen[key]) for key, _ in palette_ranked
-    )
+    palette_labels = [_category_label(cat_first_seen[key]) for key, _ in palette_ranked]
+    preferred = _assign_color_slots(palette_labels)
+    stable_rank = {label: i for i, label in enumerate(palette_labels)}
 
     head_labels = [_category_label(cat_first_seen[key]) for key, _ in head]
+    # Settle collisions in the stable order, not the filtered one: the
+    # category that owns a slot keeps it whoever else is on screen.
+    slots = _resolve_slot_collisions(
+        sorted(head_labels, key=lambda label: stable_rank.get(label, len(stable_rank))),
+        preferred,
+    )
 
     series: list[MonthlyChartSeries] = []
     for (key, by_month), label in zip(head, head_labels):
