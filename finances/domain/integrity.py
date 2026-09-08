@@ -61,6 +61,25 @@ _REVERSAL_MARKER_PREDICATE = " OR ".join(
     for marker in REVERSAL_MARKERS
 )
 
+# The categories migration 026 placed in a group (ADR-023 §2.2), as
+# (kind, name). Only the members are listed: the group labels themselves
+# are data the owner may rename with an UPDATE (§2.7), so nothing here
+# spells them. ``tests/test_migration_026_category_groups.py`` pins this
+# to the seed.
+GROUPED_CATEGORIES: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("expense", "Rent"),
+        ("expense", "Utilities"),
+        ("expense", "Transport"),
+        ("expense", "Personal Care"),
+        ("expense", "Dating"),
+        ("expense", "Going Out"),
+        ("expense", "Leisure"),
+        ("expense", "Family"),
+        ("expense", "Gifts"),
+    }
+)
+
 # How far a cross-currency transfer pair may fail to net to zero in USD
 # before it is worth the owner's attention. Priced through the resolver, the
 # live ledger's 95 cross-currency pairs net to $0.72 in total and the worst

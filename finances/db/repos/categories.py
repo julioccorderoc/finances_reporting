@@ -7,6 +7,12 @@ from finances.domain.models import Category, TransactionKind
 
 _PICKER_COLUMNS = "auto_only, chip_eligible, icon"
 
+# Every read path selects these. The picker columns stay optional in the
+# SELECT (see ``_row_to_category``); the group is not — a caller that got it
+# from one query and ``None`` from another would draw a category grouped on
+# one screen and standing alone on the next.
+_BASE_COLUMNS = "id, kind, name, active, group_name"
+
 
 def _row_to_category(row: sqlite3.Row) -> Category:
     """Project a row into ``Category``.
@@ -25,20 +31,26 @@ def _row_to_category(row: sqlite3.Row) -> Category:
         auto_only=bool(row["auto_only"]) if "auto_only" in keys else False,
         chip_eligible=bool(row["chip_eligible"]) if "chip_eligible" in keys else True,
         icon=row["icon"] if "icon" in keys else None,
+        group_name=row["group_name"] if "group_name" in keys else None,
     )
 
 
 def insert(conn: sqlite3.Connection, category: Category) -> Category:
     cur = conn.execute(
-        "INSERT INTO categories (kind, name, active) VALUES (?, ?, ?)",
-        (category.kind.value, category.name, 1 if category.active else 0),
+        "INSERT INTO categories (kind, name, active, group_name) VALUES (?, ?, ?, ?)",
+        (
+            category.kind.value,
+            category.name,
+            1 if category.active else 0,
+            category.group_name,
+        ),
     )
     return category.model_copy(update={"id": cur.lastrowid})
 
 
 def get_by_id(conn: sqlite3.Connection, category_id: int) -> Category | None:
     row = conn.execute(
-        "SELECT id, kind, name, active FROM categories WHERE id = ?",
+        f"SELECT {_BASE_COLUMNS} FROM categories WHERE id = ?",
         (category_id,),
     ).fetchone()
     return _row_to_category(row) if row else None
@@ -49,7 +61,7 @@ def get_by_name(
 ) -> Category | None:
     kind_value = kind.value if isinstance(kind, TransactionKind) else kind
     row = conn.execute(
-        "SELECT id, kind, name, active FROM categories WHERE kind = ? AND name = ?",
+        f"SELECT {_BASE_COLUMNS} FROM categories WHERE kind = ? AND name = ?",
         (kind_value, name),
     ).fetchone()
     return _row_to_category(row) if row else None
@@ -73,7 +85,7 @@ def list_for_kind(
     """
     kind_value = kind.value if isinstance(kind, TransactionKind) else kind
     transfer = TransactionKind.TRANSFER.value
-    sql = "SELECT id, kind, name, active FROM categories WHERE kind IN (?, ?)"
+    sql = f"SELECT {_BASE_COLUMNS} FROM categories WHERE kind IN (?, ?)"
     if not include_inactive:
         sql += " AND active = 1"
     sql += " ORDER BY kind, name"
@@ -100,7 +112,7 @@ def list_pickable(conn: sqlite3.Connection) -> list[Category]:
     constantly never ranks it onto a number key.
     """
     rows = conn.execute(
-        f"SELECT id, kind, name, active, {_PICKER_COLUMNS} FROM categories"
+        f"SELECT {_BASE_COLUMNS}, {_PICKER_COLUMNS} FROM categories"
         " WHERE active = 1 AND auto_only = 0 ORDER BY kind, name"
     ).fetchall()
     return [_row_to_category(r) for r in rows]
@@ -109,10 +121,10 @@ def list_pickable(conn: sqlite3.Connection) -> list[Category]:
 def list_all(conn: sqlite3.Connection, *, include_inactive: bool = False) -> list[Category]:
     if include_inactive:
         rows = conn.execute(
-            "SELECT id, kind, name, active FROM categories ORDER BY kind, name"
+            f"SELECT {_BASE_COLUMNS} FROM categories ORDER BY kind, name"
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT id, kind, name, active FROM categories WHERE active = 1 ORDER BY kind, name"
+            f"SELECT {_BASE_COLUMNS} FROM categories WHERE active = 1 ORDER BY kind, name"
         ).fetchall()
     return [_row_to_category(r) for r in rows]
