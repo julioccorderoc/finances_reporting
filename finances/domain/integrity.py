@@ -36,9 +36,30 @@ from typing import NamedTuple
 
 from pydantic import BaseModel, ConfigDict
 
+from finances.domain import money
+from finances.domain.reversals import REVERSAL_MARKERS
+
 # How many offending ids to carry per finding. Enough to start
 # investigating, not enough to bury the summary.
 SAMPLE_LIMIT = 10
+
+# How far a reversal pair may drift from zero, in the account's own
+# currency, and still read as the exact repayment ADR-019 requires.
+# ``pair_reversal`` compares Decimals and demands an exact zero; this is
+# half a cent of slack for the REAL cast the SQL does, nothing more, and
+# is deliberately tighter than the cent
+# ``transfer_same_currency_imbalance`` allows — a pair that misses by more
+# than this did not come from ``pair_reversal``.
+REVERSAL_NET_TOLERANCE = 0.005
+
+# The statement wordings ADR-019 pairs on, as a SQL predicate over
+# ``description``. Built from the constant rather than restated, so
+# extending ``REVERSAL_MARKERS`` for a new RETORNO wording cannot leave
+# this check calling the new pairs broken.
+_REVERSAL_MARKER_PREDICATE = " OR ".join(
+    "description LIKE '%{}%'".format(marker.replace("'", "''"))
+    for marker in REVERSAL_MARKERS
+)
 
 # How far a cross-currency transfer pair may fail to net to zero in USD
 # before it is worth the owner's attention. Priced through the resolver, the
@@ -122,11 +143,10 @@ def _transfer_usd_imbalance(conn: sqlite3.Connection) -> list[int]:
     different problem with a different remedy, and it already has its own
     surface.
     """
-    # Imported here rather than at module scope: money imports the resolver,
-    # which imports the rates repo, and integrity is imported by the CLI at
-    # startup. Keeping it local holds the import graph flat.
+    # ``_row_to_transaction`` is private to the repo and wanted by exactly
+    # one check; importing it here keeps that borrowing where it is
+    # explained rather than at the top of the module.
     from finances.db.repos.transactions import _row_to_transaction
-    from finances.domain import money
 
     rows = conn.execute(
         """
@@ -217,9 +237,22 @@ CHECKS: tuple[IntegrityCheck, ...] = (
             "one currency. Nothing moved, and a real movement is hidden. A "
             "conversion (one account, two currencies) is not this: it moves "
             "value between two positions the owner holds, and is the case "
-            "the ledger previously could not express at all."
+            "the ledger previously could not express at all. A bank "
+            "reversal (ADR-019) is not this either: the charge and the "
+            "REVERSO that undoes it are one position by construction."
         ),
-        sql="""
+        # ADR-019 landed after this check and states the opposite rule for
+        # one shape: ``pair_reversal`` *requires* both legs on one account,
+        # in one currency, summing to exactly zero. Sixteen such pairs read
+        # as a permanent ERROR here, which is worse than noise — it retires
+        # ``doctor --strict`` as a gate for the defect the check does catch.
+        #
+        # The exemption is deliberately narrow: a zero sum alone would leave
+        # nothing behind (``transfer_same_currency_imbalance`` already owns
+        # every same-currency pair that does *not* net), so it also demands
+        # the reversal wording the pairer itself matches on. A mis-pair
+        # hiding a real movement carries neither.
+        sql=f"""
             SELECT id FROM transactions
              WHERE transfer_id IN (
                    SELECT transfer_id FROM transactions
@@ -227,6 +260,14 @@ CHECKS: tuple[IntegrityCheck, ...] = (
                     GROUP BY transfer_id
                    HAVING COUNT(DISTINCT account_id) = 1
                       AND COUNT(DISTINCT currency) = 1
+                      AND NOT (
+                          ABS(SUM(CAST(amount AS REAL)))
+                              < {REVERSAL_NET_TOLERANCE}
+                          AND SUM(
+                              CASE WHEN {_REVERSAL_MARKER_PREDICATE}
+                                   THEN 1 ELSE 0 END
+                          ) > 0
+                      )
              )
              ORDER BY id
         """,
@@ -394,13 +435,24 @@ CHECKS: tuple[IntegrityCheck, ...] = (
             "expense filed under an income category, or the reverse. A "
             "transfer-kind category is deliberately not counted: on an "
             "income or expense row it is how money movement is declared, and "
-            "the reports act on it."
+            "the reports act on it. Nor is a transfer *row* counted — it "
+            "makes no income or expense claim for its category to "
+            "contradict."
         ),
+        # The row's kind, not the movement rule: this check asks whether a
+        # row's category contradicts the claim the row makes, and a
+        # kind='transfer' row makes no such claim. Pairing is what promotes
+        # a row to that kind, and both pairers leave the original category
+        # in place on purpose — ADR-019 because the charge leg may be hand
+        # triage, worth keeping. Every aggregate drops the row by kind
+        # before ever reading the column (money.SQL_NOT_CURRENCY_MOVEMENT),
+        # so nothing downstream can be misled by it.
         sql="""
             SELECT t.id FROM transactions t
               JOIN categories c ON c.id = t.category_id
              WHERE c.kind <> t.kind
                AND c.kind <> 'transfer'
+               AND t.kind <> 'transfer'
              ORDER BY t.id
         """,
     ),
@@ -501,13 +553,30 @@ CHECKS: tuple[IntegrityCheck, ...] = (
             "not. Each is a currency conversion still counted as an "
             "expense. Sells that no deposit could ever match are excluded: "
             "those predating the first bank statement the ledger holds, and "
-            "those priced in a fiat no bank account is denominated in."
+            "those priced in a fiat no bank account is denominated in. So "
+            "are sells the owner has already filed under a transfer-kind "
+            "category — that is the same answer pairing would give."
         ),
-        sql="""
+        sql=f"""
             SELECT sell.id FROM transactions AS sell
              WHERE sell.source_ref LIKE 'p2p:%'
                AND CAST(sell.amount AS REAL) < 0
                AND sell.transfer_id IS NULL
+               -- A transfer-kind category is the owner asserting "this
+               -- moved, it was not spent" — the movement rule in
+               -- money.SQL_NOT_CURRENCY_MOVEMENT, which every aggregate
+               -- applies, so such a row is not "counted as an expense" and
+               -- this warning would be describing something untrue of it.
+               -- Same reasoning as convert_leg_without_counterpart's
+               -- exclusion of already-paired legs: without it the check
+               -- reports finished work forever.
+               AND (
+                   sell.category_id IS NULL
+                   OR sell.category_id NOT IN (
+                       SELECT id FROM categories
+                        WHERE kind = '{money.MOVEMENT_CATEGORY_KIND.value}'
+                   )
+               )
                -- Statements start when they start. A sell from before the
                -- earliest one has no deposit to pair with and never will,
                -- so it is history, not a backlog item.
