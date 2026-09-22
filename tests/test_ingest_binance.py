@@ -179,6 +179,65 @@ def test_p2p_buy_row_emits_income() -> None:
     assert txn.amount == Decimal("10.00")
 
 
+def test_p2p_sell_uses_taker_amount_when_present() -> None:
+    """ADR-027: the C2C history carries ``takerAmount``, the amount that
+    actually moved, and ``amount`` is the order size. On a SELL the taker
+    pays the commission in crypto, so takerAmount = amount + commission —
+    eight sells since 2026-09-08 left 0.48 USDT unrecorded without it."""
+    row = RawBinanceP2pRow(
+        orderNumber="O-3",
+        tradeType="SELL",
+        asset="USDT",
+        amount="20.89",
+        takerAmount="20.95",
+        takerCommission="0.06",
+        unitPrice="954.31",
+        fiat="VES",
+        createTime=1_700_000_000_000,
+    )
+    txn = row.to_transaction(funding_account_id=1)
+    assert txn.kind == TransactionKind.EXPENSE
+    assert txn.amount == Decimal("-20.95")
+    assert txn.user_rate == Decimal("954.31")
+    assert txn.description == "P2P SELL USDT @ 954.31 VES (order O-3)"
+
+
+def test_p2p_buy_uses_taker_amount_when_present() -> None:
+    """On a BUY the commission is taken out of the crypto received, so
+    takerAmount = amount − commission."""
+    row = RawBinanceP2pRow(
+        orderNumber="O-4",
+        tradeType="BUY",
+        asset="USDT",
+        amount="10.00",
+        takerAmount="9.94",
+        takerCommission="0.06",
+        unitPrice="950.00",
+        fiat="VES",
+        createTime=1_700_000_000_000,
+    )
+    txn = row.to_transaction(funding_account_id=1)
+    assert txn.kind == TransactionKind.INCOME
+    assert txn.amount == Decimal("9.94")
+    assert txn.user_rate == Decimal("950.00")
+
+
+def test_p2p_row_without_taker_amount_falls_back_to_amount() -> None:
+    """Older payloads predate the field entirely. Absence is the old
+    behaviour, not a zero."""
+    row = RawBinanceP2pRow(
+        orderNumber="O-5",
+        tradeType="SELL",
+        asset="USDT",
+        amount="10.00",
+        unitPrice="150.00",
+        fiat="VES",
+        createTime=1_700_000_000_000,
+    )
+    txn = row.to_transaction(funding_account_id=1)
+    assert txn.amount == Decimal("-10.00")
+
+
 # ---------------------------------------------------------------------------
 # RawBinanceConvertRow — produces two legs
 # ---------------------------------------------------------------------------
@@ -279,7 +338,11 @@ def test_transfer_row_rejects_unknown_type() -> None:
 # RawBinanceEarnRewardRow
 # ---------------------------------------------------------------------------
 
-def test_earn_reward_row_to_transaction_is_interest_income_on_earn() -> None:
+def test_bonus_reward_row_lands_on_spot_as_interest_income() -> None:
+    """ADR-027: Binance pays BONUS rewards into the Spot wallet (they
+    appear as "Flexible" dividends in ``assetDividend`` and the Spot
+    balance grows by exactly the reward). Booking them to Earn put money
+    on an account Binance says does not hold it."""
     row = RawBinanceEarnRewardRow(
         asset="USDT",
         rewards="0.12345678",
@@ -287,12 +350,30 @@ def test_earn_reward_row_to_transaction_is_interest_income_on_earn() -> None:
         type="BONUS",
         projectId="PROJECT-X",
     )
-    txn = row.to_transaction(earn_account_id=3, interest_category_id=7)
-    assert txn.account_id == 3
+    txn = row.to_transaction(
+        spot_account_id=2, earn_account_id=3, interest_category_id=7
+    )
+    assert txn.account_id == 2
     assert txn.kind == TransactionKind.INCOME
     assert txn.amount == Decimal("0.12345678")
     assert txn.category_id == 7
     assert txn.source_ref.startswith("earn-reward:")
+
+
+def test_realtime_reward_row_stays_on_earn() -> None:
+    """The daily REALTIME stream is Earn interest accruing in place; it
+    has never left the Earn wallet."""
+    row = RawBinanceEarnRewardRow(
+        asset="USDT",
+        rewards="0.004",
+        time=1_700_000_000_000,
+        type="REALTIME",
+        projectId="PROJECT-X",
+    )
+    txn = row.to_transaction(
+        spot_account_id=2, earn_account_id=3, interest_category_id=7
+    )
+    assert txn.account_id == 3
 
 
 # ---------------------------------------------------------------------------
@@ -485,10 +566,13 @@ def test_sync_binance_creates_paired_transfer_with_shared_transfer_id(
     assert transfer_legs[1].kind == TransactionKind.TRANSFER
 
 
-def test_sync_binance_earn_rewards_become_interest_income_on_earn_account(
+def test_sync_binance_earn_rewards_land_where_binance_pays_them(
     in_memory_db: sqlite3.Connection,
     mocked_binance_sdk: MagicMock,
 ) -> None:
+    """ADR-027: BONUS is paid into Spot, REALTIME accrues on Earn. The
+    source_ref scheme is untouched, so a re-ingest moves the existing
+    reward rows instead of duplicating them."""
     acct_ids = _seed_binance_accounts(in_memory_db)
     interest = categories_repo.get_by_name(
         in_memory_db, TransactionKind.INCOME, "Interest"
@@ -496,31 +580,63 @@ def test_sync_binance_earn_rewards_become_interest_income_on_earn_account(
     assert interest is not None
     mocked_binance_sdk.time.return_value = {"serverTime": 1_700_000_000_000}
     def _rewards_history(*_args: Any, type: str, **_kwargs: Any) -> dict[str, Any]:
-        if type != "BONUS":
-            return {"rows": [], "total": 0}
-        return {
-            "rows": [
-                {
-                    "asset": "USDT",
-                    "rewards": "0.50",
-                    "time": 1_699_300_000_000,
-                    "type": "BONUS",
-                    "projectId": "PROJ-A",
-                },
-            ],
-            "total": 1,
-        }
+        if type == "BONUS":
+            return {
+                "rows": [
+                    {
+                        "asset": "USDT",
+                        "rewards": "0.50",
+                        "time": 1_699_300_000_000,
+                        "type": "BONUS",
+                        "projectId": "PROJ-A",
+                    },
+                ],
+                "total": 1,
+            }
+        if type == "REALTIME":
+            return {
+                "rows": [
+                    {
+                        "asset": "USDT",
+                        "rewards": "0.004",
+                        "time": 1_699_200_000_000,
+                        "type": "REALTIME",
+                        "projectId": "PROJ-A",
+                    },
+                ],
+                "total": 1,
+            }
+        return {"rows": [], "total": 0}
 
     mocked_binance_sdk.get_flexible_rewards_history.side_effect = _rewards_history
 
     sync_binance(in_memory_db, client=mocked_binance_sdk, lookback_days=35)
 
+    spot_txns = transactions_repo.list_by_account(in_memory_db, acct_ids["Binance Spot"])
     earn_txns = transactions_repo.list_by_account(in_memory_db, acct_ids["Binance Earn"])
-    reward = next((t for t in earn_txns if t.source_ref.startswith("earn-reward:")), None)
-    assert reward is not None
-    assert reward.kind == TransactionKind.INCOME
-    assert reward.amount == Decimal("0.50")
-    assert reward.category_id == interest.id
+    bonus = next(
+        (
+            t
+            for t in spot_txns
+            if t.source_ref.startswith("earn-reward:")
+            and t.amount == Decimal("0.50")
+        ),
+        None,
+    )
+    realtime = next(
+        (
+            t
+            for t in earn_txns
+            if t.source_ref.startswith("earn-reward:")
+            and t.amount == Decimal("0.004")
+        ),
+        None,
+    )
+    assert bonus is not None, "the BONUS reward must land on Binance Spot"
+    assert realtime is not None, "the REALTIME reward must stay on Binance Earn"
+    assert bonus.kind == TransactionKind.INCOME
+    assert bonus.category_id == interest.id
+    assert realtime.category_id == interest.id
 
 
 def test_sync_binance_refreshes_earn_positions_from_snapshot(

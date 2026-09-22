@@ -4,8 +4,9 @@ Pulls Binance SDK endpoints, parses each row into a ``RawBinance*Row`` Pydantic
 model, and writes canonical :class:`Transaction` rows via
 ``repos.transactions.upsert_by_source_ref`` using stable SDK-provided IDs as
 ``source_ref`` (ADR-010). Funding↔Spot internal transfers emit a paired row via
-``domain.transfers.create_transfer``. Earn rewards become ``Interest`` income on
-the Binance Earn account and the ``earn_positions`` table is refreshed from
+``domain.transfers.create_transfer``. Earn rewards become ``Interest`` income —
+on Binance Spot for BONUS, on the Binance Earn account for REALTIME/REWARDS
+(ADR-027) — and the ``earn_positions`` table is refreshed from
 ``get_flexible_product_position``.
 
 Per ADR-002 amendment: P2P sells do **not** create a bank-side leg here — the
@@ -158,25 +159,42 @@ class RawBinanceP2pRow(_RawBase):
     tradeType: Literal["BUY", "SELL"]
     asset: str
     amount: Decimal
+    # The C2C history reports the order's size in ``amount`` and the amount
+    # that actually moved in ``takerAmount``; the two differ by the taker
+    # commission. Absent on older payloads, which predate the fields.
+    takerAmount: Decimal | None = None
+    takerCommission: Decimal | None = None
     unitPrice: Decimal
     fiat: str
     createTime: int
 
-    @field_validator("amount", "unitPrice", mode="before")
+    @field_validator(
+        "amount", "takerAmount", "takerCommission", "unitPrice", mode="before"
+    )
     @classmethod
-    def _dec(cls, v: Any) -> Decimal:
+    def _dec(cls, v: Any) -> Any:
+        if v is None:
+            return None
         return _coerce_decimal(v)
 
     def to_transaction(self, *, funding_account_id: int) -> Transaction:
         # Funding, not Spot (ADR-024). Binance settles C2C/P2P in the
         # Funding wallet; booking it against Spot left that wallet holding
         # -2,017 USDT and Funding holding money nothing ever spent.
+        #
+        # The signed amount is ``takerAmount`` when Binance sends one
+        # (ADR-027): the taker commission is charged in crypto, so a SELL
+        # moves amount + commission out and a BUY receives amount -
+        # commission in. Booking the order size left 0.48 USDT of
+        # commission unrecorded across eight sells. Older payloads carry no
+        # takerAmount, and there the order size is the only figure.
+        moved = self.takerAmount if self.takerAmount is not None else self.amount
         if self.tradeType == "SELL":
             kind = TransactionKind.EXPENSE
-            amount = -self.amount
+            amount = -moved
         else:
             kind = TransactionKind.INCOME
-            amount = self.amount
+            amount = moved
         description = (
             f"P2P {self.tradeType} {self.asset.upper()} @ "
             f"{format(self.unitPrice, 'f')} {self.fiat.upper()} "
@@ -231,13 +249,12 @@ class RawBinanceConvertRow(_RawBase):
         # An unrecognised wallet raises rather than defaulting to Spot:
         # filing the unknown as Spot is precisely the defect corrected here,
         # and the ingest loop turns this into an import_runs error.
-        if self.walletType not in _CONVERT_SOURCE_WALLETS:
+        if self.walletType not in _CONVERT_WALLETS:
             raise ValueError(f"unknown convert walletType: {self.walletType}")
-        from_account_id = (
-            funding_account_id
-            if _CONVERT_SOURCE_WALLETS[self.walletType] == "funding"
-            else spot_account_id
-        )
+        kind_to_id = {"spot": spot_account_id, "funding": funding_account_id}
+        from_kind, to_kind = _CONVERT_WALLETS[self.walletType]
+        from_account_id = kind_to_id[from_kind]
+        to_account_id = kind_to_id[to_kind]
         occurred_at = _from_ms(self.createTime)
         description = (
             f"Convert {format(self.fromAmount, 'f')} {self.fromAsset.upper()} → "
@@ -262,7 +279,7 @@ class RawBinanceConvertRow(_RawBase):
             source_ref=f"convert:{self.orderId}:from",
         )
         to_leg = Transaction(
-            account_id=spot_account_id,
+            account_id=to_account_id,
             occurred_at=occurred_at,
             kind=TransactionKind.TRANSFER,
             amount=self.toAmount,
@@ -275,12 +292,16 @@ class RawBinanceConvertRow(_RawBase):
         return [from_leg, to_leg]
 
 
-# Which wallet a conversion drew from. ``SPOT_FUNDING`` is Binance's
-# combined-wallet mode; the ledger books the outgoing leg where the money
-# actually was. Anything absent from this map is refused, not assumed.
-_CONVERT_SOURCE_WALLETS = {
-    "SPOT": "spot",
-    "SPOT_FUNDING": "funding",
+# Which wallets a conversion moved between, as ``(from_kind, to_kind)``.
+# ``SPOT_FUNDING`` is Binance's combined-wallet mode; the ledger books the
+# outgoing leg where the money actually was and the proceeds where Binance
+# credits them. ``FUNDING`` is a conversion inside the Funding wallet, both
+# legs its own (ADR-027). Anything absent from this map is refused, not
+# assumed.
+_CONVERT_WALLETS = {
+    "SPOT": ("spot", "spot"),
+    "SPOT_FUNDING": ("funding", "spot"),
+    "FUNDING": ("funding", "funding"),
 }
 
 _TRANSFER_DIRECTIONS = {
@@ -395,10 +416,23 @@ class RawBinanceEarnRewardRow(_RawBase):
         )
 
     def to_transaction(
-        self, *, earn_account_id: int, interest_category_id: int | None
+        self,
+        *,
+        spot_account_id: int,
+        earn_account_id: int,
+        interest_category_id: int | None,
     ) -> Transaction:
+        # BONUS rewards are paid into the Spot wallet, not Earn (ADR-027):
+        # they surface in ``assetDividend`` as "Flexible" dividends and the
+        # Spot balance grows by exactly the reward. REALTIME and REWARDS
+        # accrue on the Earn position and stay there. The source_ref scheme
+        # is untouched — it is the dedup key (ADR-010), and rewriting it
+        # would re-import every reward as new.
+        account_id = (
+            spot_account_id if self.type.upper() == "BONUS" else earn_account_id
+        )
         return Transaction(
-            account_id=earn_account_id,
+            account_id=account_id,
             occurred_at=_from_ms(self.time),
             kind=TransactionKind.INCOME,
             amount=self.rewards,
@@ -889,6 +923,7 @@ def _ingest_earn_rewards(
     *,
     start_ms: int,
     end_ms: int,
+    spot_id: int,
     earn_id: int,
     interest_id: int | None,
     stats: dict[str, int],
@@ -917,7 +952,9 @@ def _ingest_earn_rewards(
         result = transactions_repo.upsert_by_source_ref(
             conn,
             row.to_transaction(
-                earn_account_id=earn_id, interest_category_id=interest_id
+                spot_account_id=spot_id,
+                earn_account_id=earn_id,
+                interest_category_id=interest_id,
             ),
         )
         _tally(stats, result)
@@ -1157,8 +1194,8 @@ def sync_binance(
                 )
                 _ingest_earn_rewards(
                     conn, client, start_ms=chunk_start, end_ms=chunk_end,
-                    earn_id=earn_id, interest_id=interest_id, stats=stats,
-                    errors=errors,
+                    spot_id=spot_id, earn_id=earn_id, interest_id=interest_id,
+                    stats=stats, errors=errors,
                 )
                 _ingest_earn_principal(
                     conn, client, start_ms=chunk_start, end_ms=chunk_end,

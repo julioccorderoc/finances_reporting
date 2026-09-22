@@ -74,9 +74,11 @@ _EXPECTED_BALANCES: dict[str, Decimal] = {
     "Provincial Bolivares": Decimal("513000.00"),  # VES: 500k salary - 1.2k - 2k - 5.5k - 0.8k + 15k + 7.5k
     # ADR-024 moved P2P off Spot: the two fixture SELLs (-50, -100) now
     # settle in Funding, which is where Binance funds a C2C trade from.
-    "Binance Spot": Decimal("170.00"),             # USDT
+    # ADR-027 moved the BONUS reward to Spot, where Binance pays it, so
+    # Earn's balance is zero and Spot carries the 0.25.
+    "Binance Spot": Decimal("170.25"),             # USDT
     "Binance Funding": Decimal("-120.00"),         # USDT
-    "Binance Earn": Decimal("0.25"),               # USDT (rewards only; principal tracked on earn_positions)
+    "Binance Earn": Decimal("0.00"),               # USDT (rewards only; principal tracked on earn_positions)
     "Cash USD": Decimal("0.00"),                   # USD — no cash fixture
 }
 
