@@ -599,7 +599,7 @@ def test_sync_binance_earn_rewards_land_where_binance_pays_them(
                     {
                         "asset": "USDT",
                         "rewards": "0.004",
-                        "time": 1_699_300_000_000,
+                        "time": 1_699_200_000_000,
                         "type": "REALTIME",
                         "projectId": "PROJ-A",
                     },
