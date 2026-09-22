@@ -17,6 +17,12 @@ every leg against Spot.
 Binance has been naming the wallet on the record the whole time. Across
 the ledger's history: seven conversions ``SPOT``, one ``SPOT_FUNDING`` —
 2026-08-22, this one.
+
+ADR-027 adds the third wallet Binance names. On 2026-09-15 a conversion
+of 14.561618 USDC carried ``walletType: "FUNDING"``; the map knew only
+``SPOT`` and ``SPOT_FUNDING``, so the ingest refused it by design and the
+sync never advanced its watermark. A FUNDING conversion never leaves the
+Funding wallet — both legs are Funding's.
 """
 
 from __future__ import annotations
@@ -66,6 +72,18 @@ class TestConvertReadsItsWallet:
 
         assert out_leg.account_id == SPOT_ID
         assert in_leg.account_id == SPOT_ID
+
+    def test_a_funding_conversion_books_both_legs_to_funding(self):
+        """ADR-027: the 2026-09-15 convert of 14.561618 USDC carries
+        ``walletType: "FUNDING"``. Binance moved the money inside the
+        Funding wallet, so both legs are Funding's — the old map refused
+        the wallet outright and the sync recorded an ingest error."""
+        out_leg, in_leg = _legs("FUNDING")
+
+        assert out_leg.account_id == FUNDING_ID
+        assert in_leg.account_id == FUNDING_ID
+        assert out_leg.amount == Decimal("-400.191772")
+        assert in_leg.amount == Decimal("400.05103465")
 
     def test_a_combined_wallet_conversion_draws_from_funding(self):
         """The live 2026-08-22 case: 400.19 USDC left, and Funding was
