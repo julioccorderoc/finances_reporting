@@ -63,7 +63,6 @@ Neither assumption is verifiable from the payload. Both are **judged by `positio
 
 - The 2026-09-15 conversion is ingested as an ordinary Funding-internal transfer pair under rule-002 — two legs, one `transfer_id`, sum zero.
 - The watermark can advance again. The frozen `last_synced_at` is the symptom that made all three defects visible at once; the repair is an explicit `finances ingest binance --since 2026-09-07` over the window the failed runs covered.
-- Funding USDC goes to 0.00, Spot USDT to 0.613648 and Funding USDT to 96.74111327 — each matching the exchange snapshot to the last digit; Spot USDC lands within 0.06 (65.324792 against 65.287658, a 0.037134 dust residual carried by this ledger's opening positions). `finances doctor --strict` exits 0.
-- The `earn_positions` snapshot and the Earn account balance no longer disagree by construction: Earn's ledger balance is 0.00 while its open principal stays on `earn_positions` (rule-003).
-- BONUS income still counts as `Interest` income in every report — only the account it sits on changes, and with it per-account balances.
+- Funding USDC goes to 0.00, Spot USDT to 0.613648 and Funding USDT to 96.74111327 — each matching the exchange snapshot to the last digit. Spot USDC lands at 65.324792 against 65.287658: a 0.037134 residual, inside the 0.06 the owner accepted as dust. `finances doctor --strict` exits 0.
+- BONUS income still counts as `Interest` income in every report — only the account it sits on changes, and with it per-account balances. Earn's ledger balance now carries the principal movements and the REALTIME/REWARDS accrual, and no longer the BONUS rows; `earn_positions` remains the principal's source of truth (rule-003).
 - Pre-2026-09-08 BONUS rows remain on Earn. They are history the owner will restate deliberately in a later wave; this ADR does not reach back past the frozen window.
