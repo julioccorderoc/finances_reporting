@@ -164,8 +164,78 @@ def _plain(value: Decimal) -> str:
     return format(value, "f")
 
 
+class ReversalResult(BaseModel):
+    """What one plug reversal removed."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    transaction_id: int
+    account_id: int
+    currency: str
+    amount: Decimal
+    reason: str | None
+
+
+def reverse_adjustment(
+    conn: sqlite3.Connection,
+    *,
+    transaction_id: int,
+    reason: str | None = None,
+) -> ReversalResult:
+    """Remove one reconciliation plug the ledger no longer carries.
+
+    A plug is written by :func:`record_adjustment` when a difference cannot
+    be explained. A later repair can explain it — ADR-028's BONUS rewards sat
+    on Earn while Binance paid them into Spot, and the 2026-08-08 plugs had
+    closed exactly that — and then the plug is no longer a residual. It is a
+    second correction layered on a corrected ledger, and every report before
+    its date stays wrong because of it.
+
+    This is the narrow door ADR-018's amendment names and ADR-022 §2.3
+    guards. Only a ``reconciliation`` plug may come through it: an opening
+    position is *restated* through
+    :func:`finances.domain.opening_positions.record_opening` — never deleted,
+    because deleting one re-opens what it closed — and every other row
+    belongs to a reporter, not to this module.
+
+    The write is delegated to ``transactions_repo.delete`` so the tombstone
+    (ADR-022 §2.1) is written by the one implementation that knows how.
+    """
+    row = txn_repo.get_by_id(conn, transaction_id)
+    if row is None:
+        raise LookupError(f"transaction id={transaction_id} not found")
+    if row.source != SOURCE or row.kind is not TransactionKind.ADJUSTMENT:
+        if row.source == "opening_balance":
+            raise ValueError(
+                f"transaction id={transaction_id} is an opening position. "
+                "It is restated through `finances reconcile opening`, never "
+                "reversed (ADR-020 §2.4)."
+            )
+        raise ValueError(
+            f"transaction id={transaction_id} is a '{row.kind.value}' row "
+            f"from '{row.source}', not a reconciliation plug. Only a plug "
+            "written by record_adjustment can be reversed here."
+        )
+
+    tomb = txn_repo.delete(
+        conn,
+        transaction_id,
+        reason=reason,
+        allow_ledger_corrections=True,
+    )
+    return ReversalResult(
+        transaction_id=transaction_id,
+        account_id=row.account_id,
+        currency=row.currency,
+        amount=row.amount,
+        reason=tomb.reason,
+    )
+
+
 __all__ = [
     "AdjustmentResult",
+    "ReversalResult",
     "position_balance",
     "record_adjustment",
+    "reverse_adjustment",
 ]
