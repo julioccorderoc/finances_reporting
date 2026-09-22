@@ -510,6 +510,57 @@ CHECKS: tuple[IntegrityCheck, ...] = (
         """,
     ),
     IntegrityCheck(
+        name="earn_position_disagrees_with_principal",
+        severity=Severity.ERROR,
+        description=(
+            "Earn's ledger balance disagrees with the principal the exchange "
+            "reports for the same asset (ADR-028 §4). `earn_positions` has "
+            "held Binance's own figure since ADR-003 and nothing compared "
+            "the ledger's Earn account to it — so 410 misplaced BONUS "
+            "rewards left Earn exactly that much high while every check "
+            "reasoned about the ledger's own rows and stayed quiet. Compared "
+            "as of the position's snapshot, so a stale claim is not a "
+            "defect, and per asset, so a healthy USDT balance cannot mask a "
+            "broken USDC one. An asset the exchange reports and the ledger "
+            "has no row for is skipped: it has no id to name, and `finances "
+            "report balances` is where an absent position shows."
+        ),
+        # The same conventions as position_disagrees_with_exchange above:
+        # julianday() because the ledger mixes ISO offsets, and MIN(id) as
+        # the finding's address, since a position is not a transaction.
+        sql=f"""
+            WITH active AS (
+                SELECT account_id, asset AS currency,
+                       SUM(CAST(principal AS REAL)) AS principal,
+                       MAX(snapshot_at) AS snapshot_at
+                  FROM earn_positions
+                 WHERE ended_at IS NULL
+                 GROUP BY account_id, asset
+            )
+            SELECT (
+                       SELECT MIN(t.id) FROM transactions AS t
+                        WHERE t.account_id = a.account_id
+                          AND t.currency = a.currency
+                   ) AS id
+              FROM active AS a
+             WHERE id IS NOT NULL
+               AND ABS(
+                       COALESCE((
+                           SELECT SUM(CAST(t.amount AS REAL))
+                             FROM transactions AS t
+                            WHERE t.account_id = a.account_id
+                              AND t.currency = a.currency
+                              AND (
+                                  a.snapshot_at IS NULL
+                                  OR julianday(t.occurred_at)
+                                      <= julianday(a.snapshot_at)
+                              )
+                       ), 0) - a.principal
+                   ) > {EXCHANGE_BALANCE_TOLERANCE}
+             ORDER BY id
+        """,
+    ),
+    IntegrityCheck(
         name="transfer_usd_imbalance",
         severity=Severity.ERROR,
         description=(

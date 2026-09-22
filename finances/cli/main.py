@@ -652,6 +652,68 @@ def reconcile_balances(
     )
 
 
+@reconcile_app.command("reverse-adjustment")
+def reconcile_reverse_adjustment(
+    transaction_id: int = typer.Option(
+        ...,
+        "--id",
+        help="The plug's transaction id, as `finances doctor` prints it.",
+    ),
+    reason: str = typer.Option(
+        ...,
+        "--reason",
+        help="Why the plug is no longer believed — it lands in the tombstone.",
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Report what would be removed, then roll back."
+    ),
+) -> None:
+    """Remove a reconciliation plug a later repair has explained (ADR-028 §2).
+
+    A plug closes a difference the ledger could not explain when it was
+    written. Once a repair explains that difference, the plug stops being a
+    residual and becomes a second correction on a corrected ledger — and
+    every report before its date stays wrong because of it.
+
+    The row is removed through the ADR-022 delete path, so its
+    ``(source, source_ref)`` is tombstoned with the reason and nothing can
+    bring it back. Only a ``reconciliation`` plug is eligible: an opening
+    position is restated with `finances reconcile opening`, and an ordinary
+    row is deleted through the surface that owns it.
+    """
+    from finances.domain.reconciliation_adjustments import reverse_adjustment
+
+    conn = get_connection(DB_PATH)
+    apply_migrations(conn)
+    try:
+        conn.execute("BEGIN")
+        try:
+            result = reverse_adjustment(
+                conn, transaction_id=transaction_id, reason=reason
+            )
+            if dry_run:
+                conn.execute("ROLLBACK")
+            else:
+                conn.execute("COMMIT")
+        except (LookupError, ValueError) as exc:
+            # A refusal is a user-correctable mistake, not a crash: the
+            # message names what the row actually is.
+            conn.execute("ROLLBACK")
+            typer.echo(f"reverse-adjustment: {exc}", err=True)
+            raise typer.Exit(code=2) from None
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+    finally:
+        conn.close()
+
+    suffix = " (dry run — rolled back)" if dry_run else ""
+    typer.echo(
+        f"reverse-adjustment: plug {result.transaction_id} reversed "
+        f"({result.currency} {result.amount:+f}) — tombstone written{suffix}"
+    )
+
+
 @ingest_app.command("binance")
 def ingest_binance(
     since: datetime | None = typer.Option(

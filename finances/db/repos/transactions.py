@@ -262,7 +262,11 @@ def upsert_by_source_ref(conn: sqlite3.Connection, txn: Transaction) -> dict[str
 
 
 def delete(
-    conn: sqlite3.Connection, transaction_id: int, *, reason: str | None = None
+    conn: sqlite3.Connection,
+    transaction_id: int,
+    *,
+    reason: str | None = None,
+    allow_ledger_corrections: bool = False,
 ) -> Tombstone:
     """Remove a row and retire its ``(source, source_ref)`` (ADR-022).
 
@@ -282,6 +286,12 @@ def delete(
       removing one by hand re-opens what it closed. Restate them through
       their own module instead (ADR-018, ADR-020).
 
+    ``allow_ledger_corrections`` is the one narrow door past that second
+    refusal, and it exists for exactly one caller:
+    :func:`finances.domain.reconciliation_adjustments.reverse_adjustment`,
+    the module that wrote a plug (ADR-028 §2). Every other caller leaves it
+    ``False`` — the guard is the default and stays that way.
+
     ``cash_cli`` rows are deleted **without** a tombstone (§2.2): nothing
     re-ingests them, and two legitimately identical cash entries hash to
     the same ref, so a tombstone would block the second one.
@@ -300,7 +310,7 @@ def delete(
             "This row is one half of a transfer — the pair has to be broken "
             "first"
         )
-    if txn.source in _UNDELETABLE_SOURCES:
+    if txn.source in _UNDELETABLE_SOURCES and not allow_ledger_corrections:
         raise ValueError(
             f"a '{txn.source}' row is the ledger's own correction, not an "
             "import: restate it through the module that wrote it "
